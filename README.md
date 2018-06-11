@@ -15,7 +15,7 @@ Webpages are generated using HTML and markdown *templates* with embedded Lua cod
 
 The rant: After using *Hugo* for a short time I got fed up with how annoying it was to add custom functionality (everything has to be a template), how "content" and "static" files were treated differently, how CSS files were excluded from the templating system, how you couldn't display data from the data folder easily on pages, how confusing index files were, and other silly things.
 
-Being a programmer, I though treating all files equally and enabling the use of an actual programming language would solve most of these problems.
+Being a programmer, I thought treating all files equally and enabling the use of an actual programming language would solve most of these problems.
 
 
 
@@ -99,10 +99,10 @@ and the *data* folder to store globally accessible data.
 ### Global Functions
 
 `date( ... )`<br>
-Alias for os.date(). (See the [C docs for date format](http://www.cplusplus.com/reference/ctime/strftime/).)
+Alias for [`os.date()`](http://www.lua.org/manual/5.1/manual.html#pdf-os.date). (See the [C docs for date format](http://www.cplusplus.com/reference/ctime/strftime/).)
 
 `F( ... )`<br>
-Alias for string.format().
+Alias for [`string.format()`](http://www.lua.org/manual/5.1/manual.html#pdf-string.format).
 
 `generatorMeta( )`<br>
 Generate HTML generator meta tag (e.g. `<meta name="generator" content="LuaWebGen 1.0.0">`). This tag makes it possible to track how many websites use this generator, which is cool.
