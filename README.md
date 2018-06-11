@@ -13,9 +13,15 @@ Webpages are generated using HTML and markdown *templates* with embedded Lua cod
 
 ## Why?
 
-The rant: After using *Hugo* for a short time I got fed up with how annoying it was to add custom functionality (everything has to be a template), how "content" and "static" files were treated differently, how CSS files were excluded from the templating system, how you couldn't display data from the data folder easily on pages, how confusing index files were, and other silly things.
+The rant: After using *Hugo* for a short time I got fed up with
+how annoying it was to add custom functionality (everything has to be a template),
+how "content" and "static" files were treated differently,
+how CSS files were excluded from the templating system,
+how you couldn't display data from the data folder easily on pages,
+how confusing index files were, and other silly things.
 
-Being a programmer, I thought treating all files equally and enabling the use of an actual programming language would solve most of these problems.
+Being a programmer, I thought treating all files equally and enabling the use of an actual programming
+language would solve most of these problems.
 
 
 
@@ -57,12 +63,14 @@ Page template (page.html):
 
 ## Installation/Usage
 
-LuaWebGen currently runs on Windows by installing [Lua for Windows](https://github.com/rjpcomputing/luaforwindows), or installing these modules:
+LuaWebGen currently runs on Windows by installing [Lua for Windows](https://github.com/rjpcomputing/luaforwindows),
+or by installing these modules:
 
 - LuaFileSystem
-- Socket
+- LuaSocket
 
-(The only Windows-specific feature currently used is *ROBOCOPY* for cleaning up generated output folders. This dependency will be removed at some point...)
+(The only Windows-specific feature currently used is *ROBOCOPY* for cleaning up generated output folders.
+This dependency will be removed at some point...)
 
 To generate a website, run this from the command line:
 
@@ -83,12 +91,17 @@ site-root/
         page.html      -- Default page template.
 ```
 
+Everything in the *content* folder will be processed and end up in the *output* folder.
+
+> **Note:** The *output* folder is automatically cleaned from files and folders that do not exist in the *content* folder,
+> so it's not a good idea to save files in the *output* folder.
+
 
 
 ## Reference
 
-**Note:** You cannot add you own globals directly - use the *scripts* folder to define global functions,
-and the *data* folder to store globally accessible data.
+> **Note:** You cannot add you own globals directly - use the *scripts* folder to define global functions,
+> and the *data* folder to store globally accessible data.
 
 - [Global Functions](#global-functions)
 - [The `site` Object](#the-site-object)
@@ -99,19 +112,23 @@ and the *data* folder to store globally accessible data.
 ### Global Functions
 
 `date( ... )`<br>
-Alias for [`os.date()`](http://www.lua.org/manual/5.1/manual.html#pdf-os.date). (See the [C docs for date format](http://www.cplusplus.com/reference/ctime/strftime/).)
+Alias for [`os.date()`](http://www.lua.org/manual/5.1/manual.html#pdf-os.date).
+(See the [C docs for date format](http://www.cplusplus.com/reference/ctime/strftime/).)
 
 `F( ... )`<br>
 Alias for [`string.format()`](http://www.lua.org/manual/5.1/manual.html#pdf-string.format).
 
 `generatorMeta( )`<br>
-Generate HTML generator meta tag (e.g. `<meta name="generator" content="LuaWebGen 1.0.0">`). This tag makes it possible to track how many websites use this generator, which is cool. This should be placed in the `<head>` element.
+Generate HTML generator meta tag (e.g. `<meta name="generator" content="LuaWebGen 1.0.0">`).
+This tag makes it possible to track how many websites use this generator, which is cool.
+This should be placed in the `<head>` element.
 
 `include( filename )`<br>
 Insert a HTML template from the *templates* folder. Exclude the extension from the filename (e.g. `include"footer"`).
 
 `sortNatural( array [, attribute ] )`<br>
-[Naturally sort](https://en.wikipedia.org/wiki/Natural_sort_order) an array of strings. If the array contains tables you can sort by a specific *attribute* instead.
+[Naturally sort](https://en.wikipedia.org/wiki/Natural_sort_order) an array of strings.
+If the array contains tables you can sort by a specific *attribute* instead.
 
 `trim( string )`<br>
 Remove surrounding whitespace from a string.
