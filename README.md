@@ -105,7 +105,7 @@ Alias for [`os.date()`](http://www.lua.org/manual/5.1/manual.html#pdf-os.date). 
 Alias for [`string.format()`](http://www.lua.org/manual/5.1/manual.html#pdf-string.format).
 
 `generatorMeta( )`<br>
-Generate HTML generator meta tag (e.g. `<meta name="generator" content="LuaWebGen 1.0.0">`). This tag makes it possible to track how many websites use this generator, which is cool.
+Generate HTML generator meta tag (e.g. `<meta name="generator" content="LuaWebGen 1.0.0">`). This tag makes it possible to track how many websites use this generator, which is cool. This should be placed in the `<head>` element.
 
 `include( filename )`<br>
 Insert a HTML template from the *templates* folder. Exclude the extension from the filename (e.g. `include"footer"`).
@@ -128,13 +128,13 @@ Make a string look like a URL. Useful when converting page titles to URL slugs.
 
 ### The `site` Object
 
-These can be configured in *config.lua* .
+These values can be configured in *config.lua* .
 
 `site.baseUrl`<br>
 The base part of the website's URL, e.g. `http://www.example.com/`.
 
 `site.languageCode`<br>
-The code for language of the website, e.g. `dk`. (This doesn't do much yet, but will be used for i18n in the future.)
+The code for the language of the website, e.g. `dk`. (This doesn't do much yet, but will be used for i18n in the future.)
 
 `site.title`<br>
 The title of the website.
@@ -158,13 +158,13 @@ If the current page is in fact a page. This value is false for CSS files.
 The URL to the current page.
 
 `page.title`<br>
-The title of the current page.
+The title of the current page. Each page should update this value.
 
 
 ### Other Globals
 
 `data`<br>
-Access data from the *data* folder. E.g. type `data.cats` to retrieve `data/cats.lua`.
+Access data from the *data* folder. E.g. type `data.cats` to retrieve the contents of `data/cats.lua`.
 
 `params` or `P`<br>
 Table for storing any custom data you want.
