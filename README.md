@@ -6,7 +6,7 @@ Webpages are generated using HTML and markdown *templates* with embedded Lua cod
 
 - [Why?](#why)
 - [Example](#example)
-- [Installation/Usage](#installation-usage)
+- [Installation/Usage](#installationusage)
 - [Reference](#reference)
 
 
@@ -29,7 +29,8 @@ A blog post (my-first-post.md):
 page.title = "My First Blog Post!"
 }}
 
-Lorem ipsum dolor sit amet, consectetur adipiscing elit. Duis nec justo mollis, varius nulla sed, commodo nibh.
+Lorem ipsum dolor sit amet, consectetur adipiscing elit.
+Duis nec justo mollis, varius nulla sed, commodo nibh.
 
 # List of Cats
 
