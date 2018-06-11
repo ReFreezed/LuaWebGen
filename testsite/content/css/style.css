@@ -1,0 +1,5 @@
+{{
+local textColor = "#99DDFF"
+}}
+
+body { color: {{textColor}}; }
