@@ -37,7 +37,7 @@ local OUTPUT_CATEGORY_SET = {["page"]=true, ["otherTemplate"]=true, ["otherRaw"]
 
 
 
-package.path = debug.getinfo(1, "S").source:match[[^@?(.*[\/])[^\/]-$]] .. "?.lua;" .. package.path
+package.path = debug.getinfo(1, "S").source:gsub("^@", ""):gsub("[^/\\]*$", "?.lua;")..package.path
 
 local lfs           = require"lfs"
 local socket        = require"socket"
@@ -53,17 +53,6 @@ local site = {
 	title        = "",
 	baseUrl      = "/",
 	languageCode = "",
-}
-
-local page = {
-	title     = "",
-	content   = "",
-	permalink = "",
-	rssLink   = "", -- @Incomplete
-
-	isPage    = false,
-	isIndex   = false,
-	isHome    = false,
 }
 
 local scriptFunctions = {}
@@ -932,12 +921,14 @@ scriptEnvironmentGlobals = {
 	url            = toUrl,
 	urlize         = urlize,
 
-	-- Generator objects.
-	site           = newGeneratorObjectProxy(site, "site"),
-	page           = newGeneratorObjectProxy(page, "page"),
-	data           = newDataFolderReader(PATH_DATA),
-	params         = nil, -- Set for each individual page.
+	-- Generator page objects. (Create for each individual page.)
+	page           = nil,
+	params         = nil,
 	P              = nil,
+
+	-- Other generator objects.
+	site           = newGeneratorObjectProxy(site, "site"),
+	data           = newDataFolderReader(PATH_DATA),
 }
 
 
@@ -982,20 +973,21 @@ traverseFiles(PATH_CONTENT, ignoreFolders, function(path, pathRel, filename, ext
 			preserveExistingOutputFile(category, pathRelOut)
 
 		else
-			page.isPage  = isPage
-			page.isIndex = isIndex
-			page.isHome  = isHome
+			local page = {
+				title     = "",
+				content   = "",
+				permalink = site.baseUrl..(removeTrailingSlashFromPermalinks and permalinkRel:gsub("/$", "") or permalinkRel),
+				rssLink   = "", -- @Incomplete
 
-			page.permalink = site.baseUrl..(
-				removeTrailingSlashFromPermalinks
-				and permalinkRel:gsub("/$", "")
-				or  permalinkRel
-			)
+				isPage    = isPage,
+				isIndex   = isIndex,
+				isHome    = isHome,
+			}
 			-- print(pathRel, (not isPage and " " or isHome and "H" or isIndex and "I" or "P"), page.permalink) -- DEBUG
 
-			page.content = ""
-
 			local scriptParams = {}
+
+			scriptEnvironmentGlobals.page   = newGeneratorObjectProxy(page, "page")
 			scriptEnvironmentGlobals.params = scriptParams
 			scriptEnvironmentGlobals.P      = scriptParams
 
