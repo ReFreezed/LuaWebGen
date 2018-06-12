@@ -1,2 +1,2 @@
 @ECHO OFF
-lua main.lua testsite
+lua main.lua testsite %*

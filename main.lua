@@ -6,7 +6,7 @@
 --=
 --============================================================]]
 
-local WEB_GEN_VERSION = "0.1.0"
+local WEB_GEN_VERSION = "0.2.0"
 
 
 
@@ -70,16 +70,22 @@ local outputFileByteCount = 0
 
 local proxySources = {}
 
+local pageLayoutTemplatePath = nil
+local pageLayoutTemplate = nil
+
 
 
 --==============================================================
 --= Functions ==================================================
 --==============================================================
 
-local createDirectory
+local createDirectory, isDirectoryEmpty, removeEmptyDirectories
+local createEnvironment
 local errorf, fileerror, errorInGeneratedCodeFromTemplate
 local F
+local generateFromTemplate
 local generatorMeta
+local getExtension
 local getFileContents
 local getLineNumber
 local include
@@ -111,8 +117,8 @@ function traverseFiles(dirPath, ignoreFolders, cb, _pathRelStart)
 
 			if mode == "file" then
 				local pathRel = path:sub(_pathRelStart)
-				local ext = name:match"%.([^.]+)$" or ""
-				local abort = cb(path, pathRel, name, ext)
+				local ext     = getExtension(name)
+				local abort   = cb(path, pathRel, name, ext)
 				if abort then  return true  end
 
 			elseif mode == "directory" and not (ignoreFolders and isStringMatchingAnyPattern(name, ignoreFolders)) then
@@ -343,6 +349,10 @@ do
 
 				codePosEnd = innerEndCodePosEnd
 
+			-- URL short form.
+			elseif code:find"^/" then
+				table.insert(lua, F("echo(url%q)\n", code))
+
 			-- Other kind of code block that doesn't return any value.
 			elseif code:find"^local " or code:find"^[%w_.]+ *=[^=]" then
 				table.insert(lua, code)
@@ -401,35 +411,7 @@ do
 			errorInGeneratedCodeFromTemplate(path, luaCode, err)
 		end
 
-		local env = setmetatable({}, {
-			__index = function(env, k)
-				local v = funcs[k] or scriptEnvironmentGlobals[k]
-				if v ~= nil then  return v  end
-
-				v = scriptFunctions[k]
-				if v then
-					setfenv(v, env)
-					return v
-				end
-
-				if isFile(F("%s/%s.lua", PATH_SCRIPTS, k)) then
-					local chunk = assert(loadfile(F("%s/%s.lua", PATH_SCRIPTS, k)))
-					v = chunk()
-					assert(type(v) == "function")
-
-					setfenv(v, env)
-					scriptFunctions[k] = v
-					return v
-				end
-
-				errorf(2, "Tried to get non-existent global or script '%s'.", tostring(k))
-			end,
-
-			__newindex = function(env, k, v)
-				errorf(2, "Tried to set global '%s'. (Globals are disabled.)", tostring(k))
-			end,
-		})
-		scriptEnvironmentGlobals._G = env
+		local env = createEnvironment(scriptEnvironmentGlobals, funcs, true)
 		setfenv(chunk, env)
 
 		local ok, err = pcall(chunk)
@@ -597,6 +579,28 @@ function createDirectory(path)
 		if not (isDirectory(pathConstructed) or lfs.mkdir(pathConstructed)) then
 			errorf("Could not create directory '%s'.", pathConstructed)
 		end
+	end
+end
+
+function isDirectoryEmpty(dirPath)
+	for name in lfs.dir(dirPath) do
+		if name ~= "." and name ~= ".." then  return false  end
+	end
+	return true
+end
+
+function removeEmptyDirectories(dirPath)
+	for name in lfs.dir(dirPath) do
+		local path = dirPath.."/"..name
+
+		if name ~= "." and name ~= ".." and isDirectory(path) then
+			removeEmptyDirectories(path)
+			if isDirectoryEmpty(path) then
+				log("Removing empty folder: %s", path)
+				assert(lfs.rmdir(path))
+			end
+		end
+
 	end
 end
 
@@ -813,6 +817,135 @@ end
 
 
 
+-- environment = createEnvironment( globals [, functions, enableScriptFunctions=false ] )
+function createEnvironment(G, funcs, enableScriptFunctions)
+	local env = {}
+
+	setmetatable(env, {
+		__index = function(env, k)
+			local v = funcs and funcs[k] or G[k]
+			if v ~= nil then  return v  end
+
+			if not enableScriptFunctions then
+				errorf(2, "Tried to get non-existent global '%s'.", tostring(k))
+			end
+
+			v = scriptFunctions[k]
+			if v then
+				setfenv(v, env) -- The script environment must update for each page.
+				return v
+			end
+
+			if isFile(F("%s/%s.lua", PATH_SCRIPTS, k)) then
+				local chunk = assert(loadfile(F("%s/%s.lua", PATH_SCRIPTS, k)))
+				v = chunk()
+				assert(type(v) == "function")
+
+				setfenv(v, env)
+				scriptFunctions[k] = v
+				return v
+			end
+
+			errorf(2, "Tried to get non-existent global or script '%s'.", tostring(k))
+		end,
+
+		__newindex = function(env, k, v)
+			errorf(2, "Tried to set global '%s'. (Globals are disabled.)", tostring(k))
+		end,
+	})
+
+	G._G = env
+	return env
+end
+
+
+
+function getExtension(filename)
+	return filename:match"%.([^.]+)$" or ""
+end
+
+
+
+-- generateFromTemplate( pathRelative, template [, modificationTime ] )
+function generateFromTemplate(pathRel, template, modTime)
+	assert(type(pathRel) == "string")
+	assert(type(template) == "string")
+
+	local filename = pathRel:match"[^/]+$"
+	local ext      = getExtension(filename)
+
+	assert(TEMPLATE_EXTENSION_SET[ext])
+
+	local isPage  = PAGE_EXTENSION_SET[ext] or false
+	local isIndex = isPage  and filename:sub(1, #filename-#ext-1) == "index"
+	local isHome  = isIndex and pathRel == filename
+
+	local category = isPage and "page" or "otherTemplate"
+
+	local permalinkRel = (
+		not isPage and pathRel
+		or isHome and ""
+		or isIndex and pathRel:sub(1, -#filename-1)
+		or pathRel:sub(1, -#ext-2).."/"
+	)
+
+	local pathRelOut
+		=  (not isPage and permalinkRel)
+		or (permalinkRel == "" and "" or permalinkRel).."index.html"
+
+	-- UPDATE:
+	-- Templates should always regenerate, unless we know all includes are unmodified.
+	-- Just checking oldModTime isn't enough!
+
+	-- local oldModTime
+	-- 	=   not ignoreModificationTimes
+	-- 	and lfs.attributes(PATH_OUTPUT.."/"..pathRelOut, "modification")
+	-- 	or  nil
+
+	-- if not isPage and modTime and modTime == oldModTime then
+	-- 	preserveExistingOutputFile(category, pathRelOut)
+
+	-- else
+		local page = {
+			title     = "",
+			content   = "",
+			permalink = site.baseUrl..(removeTrailingSlashFromPermalinks and permalinkRel:gsub("/$", "") or permalinkRel),
+			rssLink   = "", -- @Incomplete
+
+			isPage    = isPage,
+			isIndex   = isIndex,
+			isHome    = isHome,
+		}
+		-- print(pathRel, (not isPage and " " or isHome and "H" or isIndex and "I" or "P"), page.permalink) -- DEBUG
+
+		local scriptParams = {}
+
+		scriptEnvironmentGlobals.page   = newGeneratorObjectProxy(page, "page")
+		scriptEnvironmentGlobals.params = scriptParams
+		scriptEnvironmentGlobals.P      = scriptParams
+
+		local out
+
+		if ext == "md" then
+			page.content = parseMarkdownTemplate(pathRel, template)
+			out = parseHtmlTemplate(pageLayoutTemplatePath, pageLayoutTemplate)
+
+		elseif ext == "html" then
+			page.content = parseHtmlTemplate(pathRel, template)
+			out = parseHtmlTemplate(pageLayoutTemplatePath, pageLayoutTemplate)
+
+		else
+			assert(not isPage)
+			out = parseOtherTemplate(pathRel, template)
+		end
+
+		assert(out)
+		writeOutputFile(category, pathRelOut, out, modTime)
+	-- end
+end
+
+
+
 --==============================================================
 --==============================================================
 --==============================================================
@@ -821,9 +954,31 @@ end
 
 log("Generating website...")
 
-local pathToSiteOnDisc = ...
+local pathToSiteOnDisc = nil
+local ignoreModificationTimes = false
+
+local args = {...}
+local i = 1
+
+while args[i] do
+	local arg = args[i]
+	if arg == "-f" or arg == "--force" then
+		ignoreModificationTimes = true
+	elseif arg:find"^%-" then
+		errorf("[arg] Unknown option '%s'.", arg)
+	elseif not pathToSiteOnDisc then
+		pathToSiteOnDisc = arg
+	else
+		errorf("[arg] Unknown argument '%s'.", arg)
+	end
+	i = i+1
+end
+
 if not pathToSiteOnDisc then
 	error("Missing required pathToSiteOnDisc argument.")
+end
+if ignoreModificationTimes then
+	log("Option --force: Ignoring modification times.")
 end
 
 assert(lfs.chdir(pathToSiteOnDisc))
@@ -940,8 +1095,20 @@ for category in pairs(OUTPUT_CATEGORY_SET) do
 	outputFileCounts[category] = 0
 end
 
-local pageLayoutTemplatePath = PATH_LAYOUTS.."/page.html"
-local pageLayoutTemplate = assert(getFileContents(pageLayoutTemplatePath))
+pageLayoutTemplatePath = PATH_LAYOUTS.."/page.html"
+pageLayoutTemplate = assert(getFileContents(pageLayoutTemplatePath))
+
+local beforeAndAfterFuncs = {
+	generateFromTemplate = function(pathRel, template)
+		generateFromTemplate(pathRel, template, nil)
+	end,
+}
+
+if config.before then
+	local env = createEnvironment(scriptEnvironmentGlobals, beforeAndAfterFuncs)
+	setfenv(config.before, env)
+	config.before()
+end
 
 -- Generate output.
 traverseFiles(PATH_CONTENT, ignoreFolders, function(path, pathRel, filename, ext)
@@ -951,91 +1118,43 @@ traverseFiles(PATH_CONTENT, ignoreFolders, function(path, pathRel, filename, ext
 		-- Ignore.
 
 	elseif TEMPLATE_EXTENSION_SET[ext] then
-		local isPage  = PAGE_EXTENSION_SET[ext] or false
-		local isIndex = isPage  and filename:sub(1, #filename-#ext-1) == "index"
-		local isHome  = isIndex and pathRel == filename
-
-		local permalinkRel = (
-			not isPage and pathRel
-			or isHome and ""
-			or isIndex and pathRel:sub(1, -#filename-1)
-			or pathRel:sub(1, -#ext-2).."/"
-		)
-
-		local pathRelOut
-			=  (not isPage and permalinkRel)
-			or (permalinkRel == "" and "" or permalinkRel).."index.html"
-
-		local category = isPage and "page" or "otherTemplate"
-		local oldModTime = lfs.attributes(PATH_OUTPUT.."/"..pathRelOut, "modification")
-
-		if modTime and modTime == oldModTime then
-			preserveExistingOutputFile(category, pathRelOut)
-
-		else
-			local page = {
-				title     = "",
-				content   = "",
-				permalink = site.baseUrl..(removeTrailingSlashFromPermalinks and permalinkRel:gsub("/$", "") or permalinkRel),
-				rssLink   = "", -- @Incomplete
-
-				isPage    = isPage,
-				isIndex   = isIndex,
-				isHome    = isHome,
-			}
-			-- print(pathRel, (not isPage and " " or isHome and "H" or isIndex and "I" or "P"), page.permalink) -- DEBUG
-
-			local scriptParams = {}
-
-			scriptEnvironmentGlobals.page   = newGeneratorObjectProxy(page, "page")
-			scriptEnvironmentGlobals.params = scriptParams
-			scriptEnvironmentGlobals.P      = scriptParams
-
-			local contents = assert(getFileContents(path))
-			local out
-
-			if ext == "md" then
-				page.content = parseMarkdownTemplate(pathRel, contents)
-				out = parseHtmlTemplate(pageLayoutTemplatePath, pageLayoutTemplate)
-
-			elseif ext == "html" then
-				page.content = parseHtmlTemplate(pathRel, contents)
-				out = parseHtmlTemplate(pageLayoutTemplatePath, pageLayoutTemplate)
-
-			else
-				assert(not isPage)
-				out = parseOtherTemplate(pathRel, contents)
-			end
-
-			assert(out)
-			writeOutputFile(category, pathRelOut, out, modTime)
-		end
+		local template = assert(getFileContents(path))
+		generateFromTemplate(pathRel, template, modTime)
 
 	else
-		local contents = assert(getFileContents(path))
-		writeOutputFile("otherRaw", pathRel, contents, modTime)
+		local category = "otherRaw"
+
+		-- Non-templates should be OK to preserve.
+		local oldModTime
+			=   not ignoreModificationTimes
+			and lfs.attributes(PATH_OUTPUT.."/"..pathRel, "modification")
+			or  nil
+
+		if modTime and modTime == oldModTime then
+			preserveExistingOutputFile(category, pathRel)
+		else
+			local contents = assert(getFileContents(path))
+			writeOutputFile(category, pathRel, contents, modTime)
+		end
 	end
 end)
 
 -- assert(false, "DEBUG")
 
--- Cleanup old generated files.
+if config.after then
+	local env = createEnvironment(scriptEnvironmentGlobals, beforeAndAfterFuncs)
+	setfenv(config.after, env)
+	config.after()
+end
+
+-- Cleanup old generated stuff.
 traverseFiles(PATH_OUTPUT, nil, function(path, pathRel, filename, ext)
 	if not writtenOutputFiles[pathRel] then
 		log("Removing: %s", path)
-		os.remove(path)
+		assert(os.remove(path))
 	end
 end)
-
--- Cleanup empty folders.
--- https://superuser.com/a/972366
-log("Removing empty folders...")
-local winPath = toWindowsPath(PATH_OUTPUT)
-local code = os.execute(F([[ROBOCOPY "%s" "%s" /S /MOVE > NUL]], winPath, winPath))
-if code ~= 0 then
-	error("[ROBOCOPY] Could not remove empty folders.")
-end
-log("Removing empty folders... done!")
+removeEmptyDirectories(PATH_OUTPUT)
 
 
 

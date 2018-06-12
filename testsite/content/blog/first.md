@@ -7,11 +7,13 @@ P.foo = "bar"
 
 This is the first post. The title is "{{page.title}}" and foo is "{{P.foo}}".
 
-Here's a paragraph with [a link]({{url"/some-page"}}) and an image: ![the alt](/images/icon.png)
+Here's a paragraph with [a link](http://foo.example.com/), [another link]({{url"/relative-link"}}) and [a third link]({{/other-relative-link}}).
 
-An HTML image > <img src="/images/icon.png"> < inside text.
+Here's an image: ![the alt]({{/images/head.png}})
 
-A composed HTML image > {{'<img src="'..url'/images/icon.png'..'">'}} < inside text.
+An HTML image > <img src="{{/images/head.png}}"> < inside markdown.
+
+A constructed HTML image > {{'<img src="'..url'/images/head.png'..'">'}} < inside markdown.
 
 {{-- Comment 1}}
 {{--[[ Comment 2 {{"asdf"}} ]]}}
@@ -118,7 +120,7 @@ Cats:
 
 {{ipsum()}}
 
-{{fullscreenImage("/images/icon.png")}}
+{{fullscreenImage("/images/head.png")}}
 
 
 
