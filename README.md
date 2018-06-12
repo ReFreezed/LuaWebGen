@@ -85,10 +85,10 @@ site-root/
     content/           -- All website content, including pages, images, CSS and JavaScript files.
         index.html|md  -- Homepage/root index page (good to have one).
     data/              -- Optional data folder. Can contain .lua and .toml files.
+    layouts/           -- All HTML layout templates.
+        page.html      -- Default page template.
     output/            -- Automatically created output folder.
     scripts/           -- Optional Lua script folder. The scripts must return a function.
-    templates/         -- All HTML templates.
-        page.html      -- Default page template.
 ```
 
 Everything in the *content* folder will be processed and end up in the *output* folder.
@@ -124,7 +124,7 @@ This tag makes it possible to track how many websites use this generator, which 
 This should be placed in the `<head>` element.
 
 `include( filename )`<br>
-Insert a HTML template from the *templates* folder. Exclude the extension from the filename (e.g. `include"footer"`).
+Insert a HTML template from the *layouts* folder. Exclude the extension from the filename (e.g. `include"footer"`).
 
 `sortNatural( array [, attribute ] )`<br>
 [Naturally sort](https://en.wikipedia.org/wiki/Natural_sort_order) an array of strings.
@@ -160,7 +160,7 @@ The title of the website.
 ### The `page` Object
 
 `page.content`<br>
-The contents of the current page. Available to templates.
+The contents of the current page. Available to layout templates.
 
 `page.isHome`<br>
 If the current page is the root index page, aka the home page.

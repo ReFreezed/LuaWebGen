@@ -10,13 +10,13 @@ local WEB_GEN_VERSION = "0.1.0"
 
 
 
-local PATH_CONTENT   = "content"
-local PATH_DATA      = "data"
-local PATH_OUTPUT    = "output"
-local PATH_SCRIPTS   = "scripts"
-local PATH_TEMPLATES = "templates"
+local PATH_CONTENT = "content"
+local PATH_DATA    = "data"
+local PATH_LAYOUTS = "layouts"
+local PATH_OUTPUT  = "output"
+local PATH_SCRIPTS = "scripts"
 
-local HTML_ENTITY_PATTERN = '[&<>"]'
+local HTML_ENTITY_PATTERN = '[&<]'--'[&<>"]'
 local HTML_ENTITIES = {
 	['&'] = "&amp;",
 	['<'] = "&lt;",
@@ -633,7 +633,7 @@ F = string.format
 
 
 function include(htmlFileBasename)
-	local path     = F("%s/%s.html", PATH_TEMPLATES, htmlFileBasename)
+	local path     = F("%s/%s.html", PATH_LAYOUTS, htmlFileBasename)
 	local template = assert(getFileContents(path))
 	local html     = parseHtmlTemplate(path, template)
 	return html
@@ -940,8 +940,8 @@ for category in pairs(OUTPUT_CATEGORY_SET) do
 	outputFileCounts[category] = 0
 end
 
-local pageTemplatePath = PATH_TEMPLATES.."/page.html"
-local pageTemplate = assert(getFileContents(pageTemplatePath))
+local pageLayoutTemplatePath = PATH_LAYOUTS.."/page.html"
+local pageLayoutTemplate = assert(getFileContents(pageLayoutTemplatePath))
 
 -- Generate output.
 traverseFiles(PATH_CONTENT, ignoreFolders, function(path, pathRel, filename, ext)
@@ -952,7 +952,7 @@ traverseFiles(PATH_CONTENT, ignoreFolders, function(path, pathRel, filename, ext
 
 	elseif TEMPLATE_EXTENSION_SET[ext] then
 		local isPage  = PAGE_EXTENSION_SET[ext] or false
-		local isIndex = isPage and filename:sub(1, #filename-#ext-1) == "index"
+		local isIndex = isPage  and filename:sub(1, #filename-#ext-1) == "index"
 		local isHome  = isIndex and pathRel == filename
 
 		local permalinkRel = (
@@ -996,11 +996,11 @@ traverseFiles(PATH_CONTENT, ignoreFolders, function(path, pathRel, filename, ext
 
 			if ext == "md" then
 				page.content = parseMarkdownTemplate(pathRel, contents)
-				out = parseHtmlTemplate(pageTemplatePath, pageTemplate)
+				out = parseHtmlTemplate(pageLayoutTemplatePath, pageLayoutTemplate)
 
 			elseif ext == "html" then
 				page.content = parseHtmlTemplate(pathRel, contents)
-				out = parseHtmlTemplate(pageTemplatePath, pageTemplate)
+				out = parseHtmlTemplate(pageLayoutTemplatePath, pageLayoutTemplate)
 
 			else
 				assert(not isPage)
