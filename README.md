@@ -6,7 +6,7 @@ Webpages are generated using HTML and markdown *templates* with embedded Lua cod
 
 - [Why?](#why)
 - [Example](#example)
-- [Installation / Usage](#installation-usage)
+- [Installation / Usage](#installation--usage)
 - [Reference](Reference.md)
 
 

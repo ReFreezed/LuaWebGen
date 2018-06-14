@@ -35,6 +35,8 @@ languageCode  -- See site.languageCode
 ignoreFiles   -- Array of filename patterns to exclude from site generation.
 ignoreFolders -- Array of folder name patterns to exclude from site generation.
 
+processors    -- Table with file content processors.
+
 before        -- Function that is called before site generation.
 after         -- Function that is called after site generation.
 ```
@@ -72,11 +74,11 @@ Two versions of a simplified `for` statement.
 - [`date()`](#date)
 - [`F()`](#f)
 - [`generatorMeta()`](#generatormeta)
-- [`include()`](#include)
 - [`sortNatural()`](#sortnatural)
 - [`trim()`](#trim)
 - [`trimNewlines()`](#trimnewlines)
 - [`url()`](#url)
+- [`urlAbs()`](#urlAbs)
 - [`urlize()`](#urlize)
 
 #### date()
@@ -91,16 +93,11 @@ Alias for [`os.date()`](http://www.lua.org/manual/5.1/manual.html#pdf-os.date).
 Alias for [`string.format()`](http://www.lua.org/manual/5.1/manual.html#pdf-string.format).
 
 #### generatorMeta()
-`string = generatorMeta( )`
+`string = generatorMeta( [ hideVersion=false ] )`
 
 Generate HTML generator meta tag (e.g. `<meta name="generator" content="LuaWebGen 1.0.0">`).
 This tag makes it possible to track how many websites use this generator, which is cool.
 This should be placed in the `<head>` element.
-
-#### include()
-`string = include( filename )`
-
-Insert a HTML template from the *layouts* folder. Exclude the extension from the filename (e.g. `include"footer"`).
 
 #### sortNatural()
 `array = sortNatural( array [, attribute ] )`
@@ -123,6 +120,11 @@ Remove surrounding newlines from a string.
 
 Percent-encode a URL (spaces become `%20` etc.).
 
+#### urlAbs()
+`encodedString = urlAbs( urlString )`
+
+Same as [url()](#url) but also prepends `site.baseUrl` to relative URLs, making them absolute.
+
 #### urlize()
 `urlSegment = urlize( string )`
 
@@ -135,6 +137,7 @@ Make a string look like a URL. Useful when converting page titles to URL slugs.
 - [`echo()`](#echo)
 - [`echoRaw()`](#echoraw)
 - [`generateFromTemplate()`](#generatefromtemplate)
+- [`include()`](#include)
 
 There are currently two contexts where code can run:
 
@@ -170,6 +173,11 @@ Generate a page from a template. Available in `config.before()` and `config.afte
 ```lua
 generateFromTemplate("dogs/fido.md", "# Fido\n\nFido is fluffy!")
 ```
+
+#### include()
+`string = include( filename )`
+
+Insert a HTML template from the *layouts* folder. Available in templates. **Note:** Exclude the extension in the filename (e.g. `include"footer"`).
 
 
 

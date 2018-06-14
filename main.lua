@@ -6,7 +6,7 @@
 --=
 --============================================================]]
 
-local WEB_GEN_VERSION = "0.2.0"
+local _WEBGEN_VERSION = "0.2.0"
 
 
 
@@ -16,12 +16,12 @@ local PATH_LAYOUTS = "layouts"
 local PATH_OUTPUT  = "output"
 local PATH_SCRIPTS = "scripts"
 
-local HTML_ENTITY_PATTERN = '[&<]'--'[&<>"]'
+local HTML_ENTITY_PATTERN = '[&<>"]'
 local HTML_ENTITIES = {
 	['&'] = "&amp;",
 	['<'] = "&lt;",
-	-- ['>'] = "&gt;",
-	-- ['"'] = "&quot;",
+	['>'] = "&gt;",
+	['"'] = "&quot;",
 }
 
 local URI_PERCENT_CODES_TO_NOT_ENCODE = {
@@ -58,8 +58,10 @@ local site = {
 local scriptFunctions = {}
 local scriptEnvironmentGlobals = nil
 
-local ignoreFiles   = {}
-local ignoreFolders = {}
+local ignoreFiles    = nil
+local ignoreFolders  = nil
+
+local fileProcessors = nil
 
 local removeTrailingSlashFromPermalinks = false
 
@@ -79,14 +81,15 @@ local pageLayoutTemplate = nil
 --= Functions ==================================================
 --==============================================================
 
+local assertf, assertType, assertTable
 local createDirectory, isDirectoryEmpty, removeEmptyDirectories
 local createEnvironment
 local errorf, fileerror, errorInGeneratedCodeFromTemplate
 local F
 local generateFromTemplate
 local generatorMeta
-local getExtension
 local getFileContents
+local getFilename, getExtension
 local getLineNumber
 local include
 local insertLineNumberCode
@@ -97,9 +100,9 @@ local newDataFolderReader
 local newGeneratorObjectProxy
 local parseMarkdownTemplate, parseHtmlTemplate, parseOtherTemplate
 local sortNatural
+local toNormalPath, toWindowsPath
 local tostringForTemplate
-local toUrl, urlize
-local toWindowsPath
+local toUrl, toUrlAbsolute, urlize
 local traverseFiles
 local trim, trimNewlines
 local writeOutputFile, preserveExistingOutputFile
@@ -395,6 +398,7 @@ do
 		local out = {}
 
 		local funcs = {
+			include = include,
 			echoRaw = function(s)
 				table.insert(out, s)
 			end,
@@ -512,6 +516,13 @@ end
 function writeOutputFile(category, pathRel, data, modTime)
 	if writtenOutputFiles[pathRel] then
 		errorf("Duplicate output file '%s'.", pathRel)
+	end
+
+	local filename = getFilename(pathRel)
+	local ext      = getExtension(filename)
+	if fileProcessors[ext] then
+		data = fileProcessors[ext](data, pathRel)
+		assertType(data, "string", "File processor didn't return a string. (%s)", ext)
 	end
 
 	local path = PATH_OUTPUT.."/"..pathRel
@@ -646,13 +657,17 @@ end
 
 
 function toUrl(urlStr)
-	urlStr = urlStr:gsub("^/", site.baseUrl)
 	urlStr = escapeUri(urlStr)
 	urlStr = urlStr:gsub("%%[0-9a-f][0-9a-f]", URI_PERCENT_CODES_TO_NOT_ENCODE)
 
 	return urlStr
 end
 -- print(toUrl("http://www.example.com/some-path/File~With (Stuff_åäö).jpg?key=value&foo=bar#hash")) -- TEST
+
+function toUrlAbsolute(urlStr)
+	urlStr = urlStr:gsub("^/%f[^/]", site.baseUrl)
+	return toUrl(urlStr)
+end
 
 function urlize(text)
 	text = text
@@ -666,8 +681,11 @@ end
 
 
 
-function generatorMeta()
-	return '<meta name="generator" content="LuaWebGen '..WEB_GEN_VERSION..'">'
+function generatorMeta(hideVersion)
+	return
+		hideVersion
+		and '<meta name="generator" content="LuaWebGen">'
+		or  '<meta name="generator" content="LuaWebGen '.._WEBGEN_VERSION..'">'
 end
 
 
@@ -810,6 +828,11 @@ end
 
 
 
+function toNormalPath(osPath)
+	local path = osPath:gsub("\\", "/")
+	return path
+end
+
 function toWindowsPath(path)
 	local winPath = path:gsub("/", "\\")
 	return winPath
@@ -854,11 +877,14 @@ function createEnvironment(G, funcs, enableScriptFunctions)
 		end,
 	})
 
-	G._G = env
 	return env
 end
 
 
+
+function getFilename(path)
+	return path:match"[^/]+$"
+end
 
 function getExtension(filename)
 	return filename:match"%.([^.]+)$" or ""
@@ -871,7 +897,7 @@ function generateFromTemplate(pathRel, template, modTime)
 	assert(type(pathRel) == "string")
 	assert(type(template) == "string")
 
-	local filename = pathRel:match"[^/]+$"
+	local filename = getFilename(pathRel)
 	local ext      = getExtension(filename)
 
 	assert(TEMPLATE_EXTENSION_SET[ext])
@@ -946,6 +972,31 @@ end
 
 
 
+function assertf(v, err, ...)
+	if not v then
+		if select("#", ...) > 0 then  err = err:format(...)  end
+		assert(false, err)
+	end
+	return v
+end
+
+function assertType(v, vType, err, ...)
+	assertf(type(v) == vType, err, ...)
+	return v
+end
+
+-- value = assertTable( value [, fieldKeyType, fieldValueType, errorMessage, ... ] )
+function assertTable(t, kType, vType, err, ...)
+	assertType(t, "table", err, ...)
+	for k, v in pairs(t) do
+		if kType then  assertType(k, kType, err, ...)  end
+		if vType then  assertType(v, vType, err, ...)  end
+	end
+	return t
+end
+
+
+
 --==============================================================
 --==============================================================
 --==============================================================
@@ -982,37 +1033,7 @@ if ignoreModificationTimes then
 end
 
 assert(lfs.chdir(pathToSiteOnDisc))
-
-
-
--- Read config.
-----------------------------------------------------------------
-
-local chunk = loadfile"config.lua"
-local config
-
-if chunk then
-	config = chunk()
-	assert(type(config) == "table", "config.lua must return a table.")
-else
-	config = {}
-end
-
-site.title        = config.title        or ""
-site.baseUrl      = config.baseUrl      or ""
-site.languageCode = config.languageCode or ""
-
-ignoreFiles   = config.ignoreFiles   or ignoreFiles
-ignoreFolders = config.ignoreFolders or ignoreFolders
-
-removeTrailingSlashFromPermalinks = config.removeTrailingSlashFromPermalinks or false
-
-
--- Fix details.
-
-if not site.baseUrl:find"/$" then
-	site.baseUrl = site.baseUrl.."/" -- Note: Could result in simply "/".
-end
+log("Site folder: %s", toNormalPath(lfs.currentdir()))
 
 
 
@@ -1020,8 +1041,10 @@ end
 ----------------------------------------------------------------
 
 scriptEnvironmentGlobals = {
+	_WEBGEN_VERSION = _WEBGEN_VERSION,
+
 	-- Lua gloals.
-	_G             = nil, -- Set where scriptEnvironmentGlobals is used.
+	_G             = nil,
 	_VERSION       = _VERSION,
 	assert         = assert,
 	collectgarbage = collectgarbage,
@@ -1069,11 +1092,11 @@ scriptEnvironmentGlobals = {
 	date           = os.date,
 	F              = F,
 	generatorMeta  = generatorMeta,
-	include        = include,
 	sortNatural    = sortNatural,
 	trim           = trim,
 	trimNewlines   = trimNewlines,
 	url            = toUrl,
+	urlAbs         = toUrlAbsolute,
 	urlize         = urlize,
 
 	-- Generator page objects. (Create for each individual page.)
@@ -1085,6 +1108,43 @@ scriptEnvironmentGlobals = {
 	site           = newGeneratorObjectProxy(site, "site"),
 	data           = newDataFolderReader(PATH_DATA),
 }
+
+
+
+-- Read config.
+----------------------------------------------------------------
+
+local config
+
+if not isFile"config.lua" then
+	config = {}
+else
+	config = assert(loadfile"config.lua")()
+	assertTable(config, nil, nil, "config.lua must return a table.")
+end
+
+site.title        = assertType(config.title        or "", "string", "config.title must be a string.")
+site.baseUrl      = assertType(config.baseUrl      or "", "string", "config.baseUrl must be a string.")
+site.languageCode = assertType(config.languageCode or "", "string", "config.languageCode must be a string.")
+
+ignoreFiles   = assertTable(config.ignoreFiles   or {}, "number", "string",   "config.ignoreFiles must be an array of strings.")
+ignoreFolders = assertTable(config.ignoreFolders or {}, "number", "string",   "config.ignoreFolders must be an array of strings.")
+
+fileProcessors = assertTable(config.processors or {}, "string", "function", "config.processors must be a table of functions.")
+
+local env = createEnvironment(scriptEnvironmentGlobals)
+for ext, f in pairs(fileProcessors) do
+	setfenv(f, env)
+end
+
+removeTrailingSlashFromPermalinks = assertType(config.removeTrailingSlashFromPermalinks or false, "boolean", "config.removeTrailingSlashFromPermalinks must be a boolean.")
+
+
+-- Fix details.
+
+if not site.baseUrl:find"/$" then
+	site.baseUrl = site.baseUrl.."/" -- Note: Could result in simply "/".
+end
 
 
 
@@ -1124,9 +1184,10 @@ traverseFiles(PATH_CONTENT, ignoreFolders, function(path, pathRel, filename, ext
 	else
 		local category = "otherRaw"
 
-		-- Non-templates should be OK to preserve.
+		-- Non-templates should be OK to preserve (if there's no file processor).
 		local oldModTime
 			=   not ignoreModificationTimes
+			and not fileProcessors[ext]
 			and lfs.attributes(PATH_OUTPUT.."/"..pathRel, "modification")
 			or  nil
 

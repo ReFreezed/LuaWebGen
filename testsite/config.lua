@@ -5,7 +5,19 @@ local config = {
 
 	ignoreFiles   = {"%.tmp$", "%.psd$"},
 	ignoreFolders = {"^%."},
+
+	processors    = {},
 }
+
+
+
+-- File processors.
+config.processors["css"] = function(css)
+	-- We could edit the CSS data string here, before the file is written to the output folder.
+	return css
+end
+
+
 
 -- Before generation.
 local dogPageFormat = [[
@@ -25,9 +37,13 @@ config.before = function()
 
 end
 
+
+
 -- After generation.
 config.after = function()
 	print("We did it!")
 end
+
+
 
 return config
