@@ -5,7 +5,7 @@
 
 **Author:** Niklas Frykholm, <niklas@frykholm.se>
 **Date:** 31 May 2008
-**Edited by:** Marcus Thunström (2018-06-05)
+**Edited by:** Marcus Thunström (2018-06-14)
 
 This is an implementation of the popular text markup language Markdown in pure Lua.
 Markdown can convert documents written in a simple and easy to read text format
@@ -168,13 +168,18 @@ end
 
 -- Converts tabs to spaces
 function detab(text)
+
+	--[[ @Edit: What in the world is going on here?
 	local tab_width = 4
 	local function rep(match)
-		local spaces = -match:len()
+		local spaces = -#match
 		while spaces<1 do spaces = spaces + tab_width end
 		return match .. string.rep(" ", spaces)
 	end
 	text = text:gsub("([^\n]-)\t", rep)
+	]]
+	text = text:gsub("\t", "    ") -- Is more than this @New line needed?
+
 	return text
 end
 
@@ -458,7 +463,7 @@ function classify(line)
 	if line:match("^(#+)[ \t]*(.-)[ \t]*#*[ \t]*$") then
 		local m1, m2 = line:match("^(#+)[ \t]*(.-)[ \t]*#*[ \t]*$")
 		info.type = "header"
-		info.level = m1:len()
+		info.level = #m1
 		info.text = m2
 		return info
 	end
@@ -738,7 +743,7 @@ function blocks_to_html(lines, no_paragraphs)
 	while i <= #lines do
 		local line = lines[i]
 		if line.type == "ruler" then
-			table.insert(out, "<hr/>")
+			table.insert(out, "<hr>") -- @Edit
 		elseif line.type == "raw" then
 			table.insert(out, line.html)
 		elseif line.type == "normal" then
@@ -838,7 +843,7 @@ end
 
 -- Encode backspace-escaped characters in the markdown source.
 function encode_backslash_escapes(t)
-	for i=1,escape_chars:len() do
+	for i=1,#escape_chars do
 		local c = escape_chars:sub(i,i)
 		t = t:gsub("\\%" .. c, escape_table[c])
 	end
@@ -891,7 +896,7 @@ function code_spans(s)
 			code = "<code>" .. encode_code(code) .. "</code>"
 			code = add_escape(code)
 			s = s:sub(1, start-1) .. code .. s:sub(estop+1)
-			pos = start + code:len()
+			pos = start + #code
 		else
 			pos = stop + 1
 		end
@@ -920,7 +925,7 @@ function images(text)
 		url = encode_alt(url)
 		local title = encode_alt(link_database[id].title)
 		if title then title = " title=\"" .. title .. "\"" else title = "" end
-		return add_escape ('<img src="' .. url .. '" alt="' .. alt .. '"' .. title .. "/>")
+		return add_escape ('<img src="' .. url .. '" alt="' .. alt .. '"' .. title .. ">") -- @Edit
 	end
 
 	local function inline_link(alt, link)
@@ -930,9 +935,9 @@ function images(text)
 		url = encode_alt(url)
 		title = encode_alt(title)
 		if title then
-			return add_escape('<img src="' .. url .. '" alt="' .. alt .. '" title="' .. title .. '"/>')
+			return add_escape('<img src="' .. url .. '" alt="' .. alt .. '" title="' .. title .. '">') -- @Edit
 		else
-			return add_escape('<img src="' .. url .. '" alt="' .. alt .. '"/>')
+			return add_escape('<img src="' .. url .. '" alt="' .. alt .. '">') -- @Edit
 		end
 	end
 
@@ -991,7 +996,7 @@ function auto_links(text)
 		local function swap(t,k1,k2) local temp = t[k2] t[k2] = t[k1] t[k1] = temp end
 
 		local out = ""
-		for i = 1,s:len() do
+		for i = 1,#s do
 			for _,code in ipairs(codes) do code.count = code.count + code.rate end
 			if codes[1].count < codes[2].count then swap(codes,1,2) end
 			if codes[2].count < codes[3].count then swap(codes,2,3) end
@@ -1065,7 +1070,7 @@ end
 
 -- Handles line break markers in the text.
 function line_breaks(text)
-	return text:gsub("  +\n", " <br/>\n")
+	return text:gsub("  +\n", " <br>\n") -- @Edit
 end
 
 -- Perform all span level transforms.

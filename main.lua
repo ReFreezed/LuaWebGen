@@ -35,17 +35,19 @@ local PAGE_EXTENSION_SET     = {["html"]=true, ["md"]=true}
 
 local OUTPUT_CATEGORY_SET = {["page"]=true, ["otherTemplate"]=true, ["otherRaw"]=true}
 
+local IMAGE_EXTENSIONS = {"png","jpg","jpeg","gif"}
+
 
 
 package.path = debug.getinfo(1, "S").source:gsub("^@", ""):gsub("[^/\\]*$", "?.lua;")..package.path
 
-local lfs           = require"lfs"
-local socket        = require"socket"
+local lfs         = require"lfs"
+local socket      = require"socket"
 
-local escapeUri     = require"socket.url".escape
+local escapeUri   = require"socket.url".escape
 
-local parseMarkdown = require"lib.markdown"
-local parseToml     = require"lib.toml".parse
+local markdownLib = require"lib.markdown"
+local parseToml   = require"lib.toml".parse
 
 
 
@@ -69,6 +71,7 @@ local writtenOutputFiles = {}
 local outputFileCount = 0
 local outputFileCounts = {}
 local outputFileByteCount = 0
+local outputFilePreservedCount = 0
 
 local proxySources = {}
 
@@ -84,8 +87,9 @@ local pageLayoutTemplate = nil
 local assertf, assertType, assertTable
 local createDirectory, isDirectoryEmpty, removeEmptyDirectories
 local createEnvironment
+local encodeHtmlEntities
 local errorf, fileerror, errorInGeneratedCodeFromTemplate
-local F
+local F, formatBytes
 local generateFromTemplate
 local generatorMeta
 local getFileContents
@@ -95,10 +99,12 @@ local include
 local insertLineNumberCode
 local isFile, isDirectory
 local isStringMatchingAnyPattern
-local log
+local itemWith, itemWithAll
+local markdownToHtml
 local newDataFolderReader
 local newGeneratorObjectProxy
 local parseMarkdownTemplate, parseHtmlTemplate, parseOtherTemplate
+local printf, log
 local sortNatural
 local toNormalPath, toWindowsPath
 local tostringForTemplate
@@ -172,7 +178,7 @@ do
 
 			if codePosStart > pos then
 				local plainSegment = template:sub(pos, codePosStart-1)
-				local luaStatement = F("echoRaw(%q)\n", plainSegment) :gsub("\\\n", "\\n")
+				local luaStatement = F("echoRaw(%q)\n", plainSegment) --:gsub("\\\n", "\\n")
 				table.insert(lua, luaStatement)
 			end
 
@@ -384,7 +390,7 @@ do
 
 		if pos <= #template then
 			local plainSegment = template:sub(pos)
-			local luaStatement = F("echoRaw(%q)\n", plainSegment) :gsub("\\\n", "\\n")
+			local luaStatement = F("echoRaw(%q)\n", plainSegment) --:gsub("\\\n", "\\n")
 			table.insert(lua, luaStatement)
 		end
 
@@ -404,7 +410,7 @@ do
 			end,
 			echo = function(s)
 				if enableHtmlEncoding then
-					s = s:gsub(HTML_ENTITY_PATTERN, HTML_ENTITIES)
+					s = encodeHtmlEntities(s)
 				end
 				table.insert(out, s)
 			end,
@@ -424,8 +430,8 @@ do
 		end
 
 		out = table.concat(out)
-			:gsub("[ \t]+\n", "\n")
-			:gsub("\n\n\n+", "\n\n")
+			:gsub("[ \t]+\n", "\n") -- :Beautify
+			:gsub("\n\n\n+", "\n\n") -- :Beautify
 
 		--==============================================================
 
@@ -435,8 +441,8 @@ do
 	function parseMarkdownTemplate(path, template)
 		local md = parseTemplate(path, template, 1, 1, true)
 
-		local html = parseMarkdown(md):gsub("/>", ">")
-		html = trimNewlines(html).."\n"
+		local html = markdownToHtml(md)
+		html = trimNewlines(html).."\n" -- :Beautify
 
 		-- print("-- HTML --") print(html) print("-- /HTML --")
 
@@ -445,7 +451,7 @@ do
 
 	function parseHtmlTemplate(path, template)
 		local html = parseTemplate(path, template, 1, 1, true)
-		html = trimNewlines(html).."\n"
+		html = trimNewlines(html).."\n" -- :Beautify
 
 		-- print("-- HTML --") print(html) print("-- /HTML --")
 
@@ -454,7 +460,7 @@ do
 
 	function parseOtherTemplate(path, template)
 		local contents = parseTemplate(path, template, 1, 1, false)
-		contents = trimNewlines(contents).."\n"
+		contents = trimNewlines(contents).."\n" -- :Beautify
 
 		-- print("-- CONTENTS --") print(contents) print("-- /CONTENTS --")
 
@@ -559,7 +565,7 @@ function preserveExistingOutputFile(category, pathRel)
 	end
 
 	local path = PATH_OUTPUT.."/"..pathRel
-	log("Preserving: %s", path)
+	-- log("Preserving: %s", path)
 
 	local dataLen, err = lfs.attributes(path, "size")
 	if not dataLen then
@@ -573,6 +579,7 @@ function preserveExistingOutputFile(category, pathRel)
 	assert(OUTPUT_CATEGORY_SET[category], category)
 	outputFileCount = outputFileCount+1
 	outputFileCounts[category] = outputFileCounts[category]+1
+	outputFilePreservedCount = outputFilePreservedCount+1
 
 	outputFileByteCount = outputFileByteCount+dataLen
 end
@@ -617,10 +624,14 @@ end
 
 
 
+function printf(s, ...)
+	print(s:format(...))
+end
+
 function log(s, ...)
 	if select("#", ...) > 0 then  s = s:format(...)  end
 
-	print(F("[%s] %s", os.date"%Y-%m-%d %H:%M:%S", s))
+	printf("[%s] %s", os.date"%Y-%m-%d %H:%M:%S", s)
 end
 
 
@@ -645,12 +656,26 @@ end
 
 F = string.format
 
+function formatBytes(n)
+	if n > (1024*1024*1024)/100 then
+		return F("%.2f GB", n/(1024*1024*1024))
+	elseif n > (1024*1024)/100 then
+		return F("%.2f MB", n/(1024*1024))
+	elseif n > (1024)/100 then
+		return F("%.2f KB", n/(1024))
+	end
+	return F("%d bytes", n)
+end
+
 
 
 function include(htmlFileBasename)
-	local path     = F("%s/%s.html", PATH_LAYOUTS, htmlFileBasename)
-	local template = assert(getFileContents(path))
-	local html     = parseHtmlTemplate(path, template)
+	local path = F("%s/%s.html", PATH_LAYOUTS, htmlFileBasename)
+	local template, err = getFileContents(path)
+	if not template then
+		errorf(2, "Could not read file '%s': %s", path, err)
+	end
+	local html = parseHtmlTemplate(path, template)
 	return html
 end
 
@@ -860,9 +885,17 @@ function createEnvironment(G, funcs, enableScriptFunctions)
 			end
 
 			if isFile(F("%s/%s.lua", PATH_SCRIPTS, k)) then
-				local chunk = assert(loadfile(F("%s/%s.lua", PATH_SCRIPTS, k)))
+				local path = F("%s/%s.lua", PATH_SCRIPTS, k)
+
+				local chunk, err = loadfile(path)
+				if not chunk then
+					error(err, 2)
+				end
+
 				v = chunk()
-				assert(type(v) == "function")
+				if type(v) ~= "function" then
+					errorf(2, "%s did not return a function.", path)
+				end
 
 				setfenv(v, env)
 				scriptFunctions[k] = v
@@ -997,6 +1030,36 @@ end
 
 
 
+function itemWith(t, k, v)
+	for i, item in ipairs(t) do
+		if item[k] == v then  return item, i  end
+	end
+	return nil
+end
+
+function itemWithAll(t, k, v)
+	local items = {}
+	for _, item in ipairs(t) do
+		if item[k] == v then  table.insert(items, item)  end
+	end
+	return items
+end
+
+
+
+function encodeHtmlEntities(s)
+	s = s:gsub(HTML_ENTITY_PATTERN, HTML_ENTITIES)
+	return s
+end
+
+
+
+function markdownToHtml(md)
+	return markdownLib(md)
+end
+
+
+
 --==============================================================
 --==============================================================
 --==============================================================
@@ -1041,7 +1104,8 @@ log("Site folder: %s", toNormalPath(lfs.currentdir()))
 ----------------------------------------------------------------
 
 scriptEnvironmentGlobals = {
-	_WEBGEN_VERSION = _WEBGEN_VERSION,
+	_WEBGEN_VERSION  = _WEBGEN_VERSION,
+	IMAGE_EXTENSIONS = IMAGE_EXTENSIONS,
 
 	-- Lua gloals.
 	_G             = nil,
@@ -1088,17 +1152,6 @@ scriptEnvironmentGlobals = {
 	lfs            = lfs,
 	socket         = socket,
 
-	-- Generator functions.
-	date           = os.date,
-	F              = F,
-	generatorMeta  = generatorMeta,
-	sortNatural    = sortNatural,
-	trim           = trim,
-	trimNewlines   = trimNewlines,
-	url            = toUrl,
-	urlAbs         = toUrlAbsolute,
-	urlize         = urlize,
-
 	-- Generator page objects. (Create for each individual page.)
 	page           = nil,
 	params         = nil,
@@ -1107,6 +1160,61 @@ scriptEnvironmentGlobals = {
 	-- Other generator objects.
 	site           = newGeneratorObjectProxy(site, "site"),
 	data           = newDataFolderReader(PATH_DATA),
+
+	-- Generator functions.
+	date           = os.date,
+	entities       = encodeHtmlEntities,
+	F              = F,
+	find           = itemWith,
+	findAll        = itemWithAll,
+	generatorMeta  = generatorMeta,
+	getFilename    = getFilename,
+	markdown       = markdownToHtml,
+	printf         = printf,
+	sortNatural    = sortNatural,
+	trim           = trim,
+	trimNewlines   = trimNewlines,
+	url            = toUrl,
+	urlAbs         = toUrlAbsolute,
+	urlize         = urlize,
+
+	chooseExistingFile = function(pathWithoutExt, exts)
+		for _, ext in ipairs(exts) do
+			local path = pathWithoutExt.."."..ext
+			if isFile(PATH_CONTENT.."/"..path) then  return path  end
+		end
+		return nil
+	end,
+
+	chooseExistingImage = function(pathWithoutExt)
+		return scriptEnvironmentGlobals.chooseExistingFile(pathWithoutExt, IMAGE_EXTENSIONS)
+	end,
+
+	fileExists = function(path)
+		return isFile(PATH_CONTENT.."/"..path)
+	end,
+
+	getExtension = function(path)
+		return getExtension(getFilename(path))
+	end,
+
+	isAny = function(v1, values)
+		for _, v2 in ipairs(values) do
+			if v1 == v2 then  return true  end
+		end
+		return false
+	end,
+
+	newBuffer = function()
+		local buffer = {}
+
+		return function(...)
+			if select("#", ...) == 0 then  return table.concat(buffer)  end
+
+			local s = select("#", ...) == 1 and assertType(..., "string") or F(...)
+			table.insert(buffer, s)
+		end
+	end,
 }
 
 
@@ -1223,13 +1331,13 @@ removeEmptyDirectories(PATH_OUTPUT)
 
 log("Generating website... done!")
 
-print(("-"):rep(64))
-print(F("Files: %d", outputFileCount))
-print(F("    Pages           %d", outputFileCounts["page"]))
-print(F("    OtherTemplates  %d", outputFileCounts["otherTemplate"]))
-print(F("    OtherFiles      %d", outputFileCounts["otherRaw"]))
-print(F("TotalSize: %.2f kb", outputFileByteCount/1024))
-print(("-"):rep(64))
+printf(("-"):rep(64))
+printf("Files: %d", outputFileCount)
+printf("    Pages:           %d", outputFileCounts["page"])
+printf("    OtherTemplates:  %d", outputFileCounts["otherTemplate"])
+printf("    OtherFiles:      %d  (Preserved: %d, %.1f%%)", outputFileCounts["otherRaw"], outputFilePreservedCount, outputFilePreservedCount/outputFileCounts["otherRaw"]*100)
+printf("TotalSize: %s", formatBytes(outputFileByteCount))
+printf(("-"):rep(64))
 
 --==============================================================
 --=
