@@ -13,6 +13,7 @@ local _WEBGEN_VERSION = "0.2.0"
 local PATH_CONTENT = "content"
 local PATH_DATA    = "data"
 local PATH_LAYOUTS = "layouts"
+local PATH_LOGS    = "logs"
 local PATH_OUTPUT  = "output"
 local PATH_SCRIPTS = "scripts"
 
@@ -49,6 +50,11 @@ local escapeUri   = require"socket.url".escape
 local markdownLib = require"lib.markdown"
 local parseToml   = require"lib.toml".parse
 
+local _assert     = assert
+local _error      = error
+local _pcall      = pcall
+local _print      = print
+
 
 
 local site = {
@@ -78,17 +84,21 @@ local proxySources = {}
 local pageLayoutTemplatePath = nil
 local pageLayoutTemplate = nil
 
+local logFile = nil
+local logPath = ""
+local logBuffer = {}
+
 
 
 --==============================================================
 --= Functions ==================================================
 --==============================================================
 
-local assertf, assertType, assertTable
+local assert, assertf, assertType, assertTable
 local createDirectory, isDirectoryEmpty, removeEmptyDirectories
 local createEnvironment
 local encodeHtmlEntities
-local errorf, fileerror, errorInGeneratedCodeFromTemplate
+local error, errorf, fileerror, errorInGeneratedCodeFromTemplate
 local F, formatBytes
 local generateFromTemplate
 local generatorMeta
@@ -104,10 +114,12 @@ local markdownToHtml
 local newDataFolderReader
 local newGeneratorObjectProxy
 local parseMarkdownTemplate, parseHtmlTemplate, parseOtherTemplate
-local printf, log
+local pcall
+local print, printf, log, logprint
 local sortNatural
+local storeArgs
 local toNormalPath, toWindowsPath
-local tostringForTemplate
+local tostringForTemplates
 local toUrl, toUrlAbsolute, urlize
 local traverseFiles
 local trim, trimNewlines
@@ -471,6 +483,12 @@ end
 
 
 
+-- error( errorMessage [, level=1 ] )
+function error(err, level)
+	log(debug.traceback("Error: "..tostring(err)))
+	_error(err, (level or 1)+1)
+end
+
 -- errorf( [ level, ] formatString, ...)
 function errorf(level, s, ...)
 	if type(level) == "number" then
@@ -484,14 +502,25 @@ end
 -- fileerror( path, nil,      lineNumber, formatString, ... )
 function fileerror(path, contents, pos, s, ...)
 	local ln = contents and getLineNumber(contents, pos) or pos
-	error(("%s:%d: "..s):format(path, ln, ...), 2)
+	if type(s) ~= "string" then
+		s = ("%s:%d: %s"):format(path, ln, tostring(s))
+	else
+		s = ("%s:%d: "..s):format(path, ln, ...)
+	end
+	error(s, 2)
 end
 
 function errorInGeneratedCodeFromTemplate(path, genCode, errInGenCode)
-	local lnInGenCode, err = errInGenCode:match'^%[string ".-"%]:(%d+): (.+)'
+	local lnInGenCode, err
+	if type(errInGenCode) == "string" then
+		lnInGenCode, err = errInGenCode:match'^%[string ".-"%]:(%d+): (.+)'
+	end
+
 	local lnInTemplate = 0
+
 	if not lnInGenCode then
-		err = errInGenCode
+		err = tostring(errInGenCode)
+
 	else
 		for line in genCode:gmatch"([^\n]*)\n?" do
 			lnInGenCode = lnInGenCode-1
@@ -499,7 +528,8 @@ function errorInGeneratedCodeFromTemplate(path, genCode, errInGenCode)
 			if lnInGenCode <= 1 then  break  end
 		end
 	end
-	fileerror(path, nil, lnInTemplate, err)
+
+	fileerror(path, nil, lnInTemplate, "%s", err)
 end
 
 
@@ -544,7 +574,7 @@ function writeOutputFile(category, pathRel, data, modTime)
 	if modTime then
 		local ok, err = lfs.touch(path, modTime)
 		if not ok then
-			log("Error: Could not update modification time for '%s': %s", path, err)
+			logprint("Error: Could not update modification time for '%s': %s", path, err)
 		end
 	end
 
@@ -569,7 +599,7 @@ function preserveExistingOutputFile(category, pathRel)
 
 	local dataLen, err = lfs.attributes(path, "size")
 	if not dataLen then
-		log("Error: Could not retrieve size of file '%s': %s", path, err)
+		logprint("Error: Could not retrieve size of file '%s': %s", path, err)
 		dataLen = 0
 	end
 
@@ -624,14 +654,51 @@ end
 
 
 
+do
+	local values = {}
+
+	function print(...)
+		_print(...)
+
+		local argCount = select("#", ...)
+		for i = 1, argCount do
+			values[i] = tostring(select(i, ...))
+		end
+
+		log(table.concat(values, "\t", 1, argCount))
+	end
+end
+
 function printf(s, ...)
 	print(s:format(...))
 end
 
+-- log( string )
+-- log( formatString, ... )
 function log(s, ...)
-	if select("#", ...) > 0 then  s = s:format(...)  end
+	if select("#", ...) > 0 then
+		s = s:format(...)
+	end
 
-	printf("[%s] %s", os.date"%Y-%m-%d %H:%M:%S", s)
+	if not logFile then
+		table.insert(logBuffer, s)
+		return
+	end
+
+	for i, s in ipairs(logBuffer) do
+		logFile:write(s, "\n")
+		logBuffer[i] = nil
+	end
+
+	logFile:write(s, "\n")
+end
+
+function logprint(s, ...)
+	if select("#", ...) > 0 then
+		s = s:format(...)
+	end
+
+	printf("[%s]  %s", os.date"%Y-%m-%d %H:%M:%S", s)
 end
 
 
@@ -761,7 +828,7 @@ do
 		table.insert(out, "}")
 	end
 
-	function tostringForTemplate(v)
+	function tostringForTemplates(v)
 		local out = {}
 		formatValue(v, out, false)
 		return table.concat(out)
@@ -776,7 +843,7 @@ do
 		return ("%03d%s"):format(#numStr, numStr)
 	end
 	local function compare(a, b)
-		return (tostringForTemplate(a):gsub("%d+", pad) < tostringForTemplate(b):gsub("%d+", pad))
+		return (tostringForTemplates(a):gsub("%d+", pad) < tostringForTemplates(b):gsub("%d+", pad))
 	end
 
 	function sortNatural(t, k)
@@ -1005,6 +1072,13 @@ end
 
 
 
+function assert(...)
+	if not select(1, ...) then
+		error(select(2, ...) or "assertion failed!", 2)
+	end
+	return ...
+end
+
 function assertf(v, err, ...)
 	if not v then
 		if select("#", ...) > 0 then  err = err:format(...)  end
@@ -1060,13 +1134,41 @@ end
 
 
 
+function pcall(...)
+	local savedAssert = assert
+	local savedError  = error
+	local savedPcall  = pcall
+
+	assert = _assert
+	error  = _error
+	pcall  = _pcall
+
+	local args = storeArgs(_pcall(...))
+
+	assert = savedAssert
+	error  = savedError
+	pcall  = savedPcall
+
+	if not args[1] then
+		return false, args[2]
+	else
+		return unpack(args, 1, args.n)
+	end
+end
+
+
+
+function storeArgs(...)
+	return {n=select("#", ...), ...}
+end
+
+
+
 --==============================================================
 --==============================================================
 --==============================================================
 
 
-
-log("Generating website...")
 
 local pathToSiteOnDisc = nil
 local ignoreModificationTimes = false
@@ -1092,11 +1194,31 @@ if not pathToSiteOnDisc then
 	error("Missing required pathToSiteOnDisc argument.")
 end
 if ignoreModificationTimes then
-	log("Option --force: Ignoring modification times.")
+	logprint("Option --force: Ignoring modification times.")
 end
 
 assert(lfs.chdir(pathToSiteOnDisc))
-log("Site folder: %s", toNormalPath(lfs.currentdir()))
+logprint("Site folder: %s", toNormalPath(lfs.currentdir()))
+
+
+
+-- Prepare log file.
+----------------------------------------------------------------
+
+if not isDirectory(PATH_LOGS) then
+	assert(lfs.mkdir(PATH_LOGS))
+end
+
+local basePath = PATH_LOGS..os.date"/%Y%m%d_%H%M%S"
+
+logPath = basePath..".log"
+local i = 1
+while isFile(logPath) do
+	i = i+1
+	logPath = basePath.."_"..i..".log"
+end
+
+logFile = io.open(logPath, "w")
 
 
 
@@ -1110,10 +1232,10 @@ scriptEnvironmentGlobals = {
 	-- Lua gloals.
 	_G             = nil,
 	_VERSION       = _VERSION,
-	assert         = assert,
+	assert         = _assert,
 	collectgarbage = collectgarbage,
 	dofile         = dofile,
-	error          = error,
+	error          = _error,
 	getfenv        = getfenv,
 	getmetatable   = getmetatable,
 	ipairs         = ipairs,
@@ -1123,7 +1245,7 @@ scriptEnvironmentGlobals = {
 	module         = module,
 	next           = next,
 	pairs          = pairs,
-	pcall          = pcall,
+	pcall          = _pcall,
 	print          = print,
 	rawequal       = rawequal,
 	rawget         = rawget,
@@ -1133,7 +1255,7 @@ scriptEnvironmentGlobals = {
 	setfenv        = setfenv,
 	setmetatable   = setmetatable,
 	tonumber       = tonumber,
-	tostring       = tostringForTemplate,
+	tostring       = tostringForTemplates,
 	type           = type,
 	unpack         = unpack,
 	xpcall         = xpcall,
@@ -1259,6 +1381,8 @@ end
 -- Generate website from content folder.
 ----------------------------------------------------------------
 
+logprint("Generating website...")
+
 for category in pairs(OUTPUT_CATEGORY_SET) do
 	outputFileCounts[category] = 0
 end
@@ -1325,11 +1449,11 @@ traverseFiles(PATH_OUTPUT, nil, function(path, pathRel, filename, ext)
 end)
 removeEmptyDirectories(PATH_OUTPUT)
 
+logprint("Generating website... done!")
+
 
 
 ----------------------------------------------------------------
-
-log("Generating website... done!")
 
 printf(("-"):rep(64))
 printf("Files: %d", outputFileCount)
@@ -1338,6 +1462,9 @@ printf("    OtherTemplates:  %d", outputFileCounts["otherTemplate"])
 printf("    OtherFiles:      %d  (Preserved: %d, %.1f%%)", outputFileCounts["otherRaw"], outputFilePreservedCount, outputFilePreservedCount/outputFileCounts["otherRaw"]*100)
 printf("TotalSize: %s", formatBytes(outputFileByteCount))
 printf(("-"):rep(64))
+_print(F("Check log for details: %s", logPath))
+
+logFile:close()
 
 --==============================================================
 --=
