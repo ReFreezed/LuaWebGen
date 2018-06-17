@@ -6,16 +6,20 @@
 --=
 --============================================================]]
 
-local _WEBGEN_VERSION = "0.2.0"
+local _WEBGEN_VERSION = "0.3.0"
 
 
 
-local PATH_CONTENT = "content"
-local PATH_DATA    = "data"
-local PATH_LAYOUTS = "layouts"
-local PATH_LOGS    = "logs"
-local PATH_OUTPUT  = "output"
-local PATH_SCRIPTS = "scripts"
+local DIR_CONTENT = "content"
+local DIR_DATA    = "data"
+local DIR_LAYOUTS = "layouts"
+local DIR_LOGS    = "logs"
+local DIR_OUTPUT  = "output"
+local DIR_SCRIPTS = "scripts"
+
+local AUTOBUILD_MIN_INTERVAL = 1.00
+
+
 
 local HTML_ENTITY_PATTERN = '[&<>"]'
 local HTML_ENTITIES = {
@@ -57,36 +61,34 @@ local _print      = print
 
 
 
-local site = {
-	title        = "",
-	baseUrl      = "/",
-	languageCode = "",
-}
+local logFile   = nil
+local logPath   = ""
+local logBuffer = {}
 
-local scriptFunctions = {}
-local scriptEnvironmentGlobals = nil
 
-local ignoreFiles    = nil
-local ignoreFolders  = nil
 
-local fileProcessors = nil
+local site                              = nil
+
+local scriptFunctions                   = nil
+local scriptEnvironmentGlobals          = nil
+
+local ignoreFiles                       = nil
+local ignoreFolders                     = nil
+
+local fileProcessors                    = nil
 
 local removeTrailingSlashFromPermalinks = false
 
-local writtenOutputFiles = {}
-local outputFileCount = 0
-local outputFileCounts = {}
-local outputFileByteCount = 0
-local outputFilePreservedCount = 0
+local writtenOutputFiles                = nil
+local outputFileCount                   = 0
+local outputFileCounts                  = nil
+local outputFileByteCount               = 0
+local outputFilePreservedCount          = 0
 
-local proxySources = {}
+local proxySources                      = nil
 
-local pageLayoutTemplatePath = nil
-local pageLayoutTemplate = nil
-
-local logFile = nil
-local logPath = ""
-local logBuffer = {}
+local pageLayoutTemplatePath            = nil
+local pageLayoutTemplate                = nil
 
 
 
@@ -102,8 +104,8 @@ local error, errorf, fileerror, errorInGeneratedCodeFromTemplate
 local F, formatBytes
 local generateFromTemplate
 local generatorMeta
+local getDirectory, getFilename, getExtension
 local getFileContents
-local getFilename, getExtension
 local getLineNumber
 local include
 local insertLineNumberCode
@@ -121,11 +123,39 @@ local storeArgs
 local toNormalPath, toWindowsPath
 local tostringForTemplates
 local toUrl, toUrlAbsolute, urlize
-local traverseFiles
+local traverseDirectory, traverseFiles
 local trim, trimNewlines
 local writeOutputFile, preserveExistingOutputFile
 
 
+
+function traverseDirectory(dirPath, ignoreFolders, cb, _pathRelStart)
+	_pathRelStart = _pathRelStart or #dirPath+2
+
+	for name in lfs.dir(dirPath) do
+		local path = dirPath.."/"..name
+
+		if name ~= "." and name ~= ".." then
+			local mode = lfs.attributes(path, "mode")
+
+			if mode == "file" then
+				local pathRel = path:sub(_pathRelStart)
+				local abort   = cb(path, pathRel, name, "file")
+				if abort then  return true  end
+
+			elseif mode == "directory" and not (ignoreFolders and isStringMatchingAnyPattern(name, ignoreFolders)) then
+				local pathRel = path:sub(_pathRelStart)
+				local abort   = cb(path, pathRel, name, "directory")
+				if abort then  return true  end
+
+				local abort = traverseDirectory(path, ignoreFolders, cb, _pathRelStart)
+				if abort then  return true  end
+			end
+
+		end
+	end
+
+end
 
 function traverseFiles(dirPath, ignoreFolders, cb, _pathRelStart)
 	_pathRelStart = _pathRelStart or #dirPath+2
@@ -486,6 +516,9 @@ end
 -- error( errorMessage [, level=1 ] )
 function error(err, level)
 	log(debug.traceback("Error: "..tostring(err)))
+
+	if logFile then  logFile:flush()  end
+
 	_error(err, (level or 1)+1)
 end
 
@@ -561,7 +594,7 @@ function writeOutputFile(category, pathRel, data, modTime)
 		assertType(data, "string", "File processor didn't return a string. (%s)", ext)
 	end
 
-	local path = PATH_OUTPUT.."/"..pathRel
+	local path = DIR_OUTPUT.."/"..pathRel
 	log("Writing: %s", path)
 
 	local dirPath = path:gsub("/[^/]+$", "")
@@ -594,7 +627,7 @@ function preserveExistingOutputFile(category, pathRel)
 		errorf("Duplicate output file '%s'.", pathRel)
 	end
 
-	local path = PATH_OUTPUT.."/"..pathRel
+	local path = DIR_OUTPUT.."/"..pathRel
 	-- log("Preserving: %s", path)
 
 	local dataLen, err = lfs.attributes(path, "size")
@@ -737,7 +770,7 @@ end
 
 
 function include(htmlFileBasename)
-	local path = F("%s/%s.html", PATH_LAYOUTS, htmlFileBasename)
+	local path = F("%s/%s.html", DIR_LAYOUTS, htmlFileBasename)
 	local template, err = getFileContents(path)
 	if not template then
 		errorf(2, "Could not read file '%s': %s", path, err)
@@ -951,8 +984,8 @@ function createEnvironment(G, funcs, enableScriptFunctions)
 				return v
 			end
 
-			if isFile(F("%s/%s.lua", PATH_SCRIPTS, k)) then
-				local path = F("%s/%s.lua", PATH_SCRIPTS, k)
+			if isFile(F("%s/%s.lua", DIR_SCRIPTS, k)) then
+				local path = F("%s/%s.lua", DIR_SCRIPTS, k)
 
 				local chunk, err = loadfile(path)
 				if not chunk then
@@ -981,6 +1014,10 @@ function createEnvironment(G, funcs, enableScriptFunctions)
 end
 
 
+
+function getDirectory(path)
+	return (path:gsub("/[^/]+$", ""))
+end
 
 function getFilename(path)
 	return path:match"[^/]+$"
@@ -1025,7 +1062,7 @@ function generateFromTemplate(pathRel, template, modTime)
 
 	-- local oldModTime
 	-- 	=   not ignoreModificationTimes
-	-- 	and lfs.attributes(PATH_OUTPUT.."/"..pathRelOut, "modification")
+	-- 	and lfs.attributes(DIR_OUTPUT.."/"..pathRelOut, "modification")
 	-- 	or  nil
 
 	-- if not isPage and modTime and modTime == oldModTime then
@@ -1170,23 +1207,33 @@ end
 
 
 
-local pathToSiteOnDisc = nil
 local ignoreModificationTimes = false
+local autobuild = false
+
+local pathToSiteOnDisc = nil
 
 local args = {...}
 local i = 1
 
 while args[i] do
 	local arg = args[i]
+
 	if arg == "-f" or arg == "--force" then
 		ignoreModificationTimes = true
+
+	elseif arg == "-a" or arg == "--autobuild" then
+		autobuild = true
+
 	elseif arg:find"^%-" then
 		errorf("[arg] Unknown option '%s'.", arg)
+
 	elseif not pathToSiteOnDisc then
 		pathToSiteOnDisc = arg
+
 	else
 		errorf("[arg] Unknown argument '%s'.", arg)
 	end
+
 	i = i+1
 end
 
@@ -1195,6 +1242,9 @@ if not pathToSiteOnDisc then
 end
 if ignoreModificationTimes then
 	logprint("Option --force: Ignoring modification times.")
+end
+if autobuild then
+	logprint("Option --autobuild: Auto-building website. Press Ctrl+C to stop.")
 end
 
 assert(lfs.chdir(pathToSiteOnDisc))
@@ -1205,11 +1255,11 @@ logprint("Site folder: %s", toNormalPath(lfs.currentdir()))
 -- Prepare log file.
 ----------------------------------------------------------------
 
-if not isDirectory(PATH_LOGS) then
-	assert(lfs.mkdir(PATH_LOGS))
+if not isDirectory(DIR_LOGS) then
+	assert(lfs.mkdir(DIR_LOGS))
 end
 
-local basePath = PATH_LOGS..os.date"/%Y%m%d_%H%M%S"
+local basePath = DIR_LOGS..os.date"/%Y%m%d_%H%M%S"
 
 logPath = basePath..".log"
 local i = 1
@@ -1222,248 +1272,361 @@ logFile = io.open(logPath, "w")
 
 
 
--- Prepare script environment.
 ----------------------------------------------------------------
 
-scriptEnvironmentGlobals = {
-	_WEBGEN_VERSION  = _WEBGEN_VERSION,
-	IMAGE_EXTENSIONS = IMAGE_EXTENSIONS,
+local function resetSiteVariables()
+	site = {
+		title        = "",
+		baseUrl      = "/",
+		languageCode = "",
+	}
 
-	-- Lua gloals.
-	_G             = nil,
-	_VERSION       = _VERSION,
-	assert         = _assert,
-	collectgarbage = collectgarbage,
-	dofile         = dofile,
-	error          = _error,
-	getfenv        = getfenv,
-	getmetatable   = getmetatable,
-	ipairs         = ipairs,
-	load           = load,
-	loadfile       = loadfile,
-	loadstring     = loadstring,
-	module         = module,
-	next           = next,
-	pairs          = pairs,
-	pcall          = _pcall,
-	print          = print,
-	rawequal       = rawequal,
-	rawget         = rawget,
-	rawset         = rawset,
-	require        = require,
-	select         = select,
-	setfenv        = setfenv,
-	setmetatable   = setmetatable,
-	tonumber       = tonumber,
-	tostring       = tostringForTemplates,
-	type           = type,
-	unpack         = unpack,
-	xpcall         = xpcall,
+	scriptFunctions = {}
+	scriptEnvironmentGlobals = nil
 
-	-- Lua modules.
-	coroutine      = coroutine,
-	debug          = debug,
-	io             = io,
-	math           = math,
-	os             = os,
-	package        = package,
-	string         = string,
-	table          = table,
+	ignoreFiles    = nil
+	ignoreFolders  = nil
 
-	-- Lua libraries.
-	lfs            = lfs,
-	socket         = socket,
+	fileProcessors = nil
 
-	-- Generator page objects. (Create for each individual page.)
-	page           = nil,
-	params         = nil,
-	P              = nil,
+	removeTrailingSlashFromPermalinks = false
 
-	-- Other generator objects.
-	site           = newGeneratorObjectProxy(site, "site"),
-	data           = newDataFolderReader(PATH_DATA),
+	writtenOutputFiles = {}
+	outputFileCount = 0
+	outputFileCounts = {}
+	outputFileByteCount = 0
+	outputFilePreservedCount = 0
 
-	-- Generator functions.
-	date           = os.date,
-	entities       = encodeHtmlEntities,
-	F              = F,
-	find           = itemWith,
-	findAll        = itemWithAll,
-	generatorMeta  = generatorMeta,
-	getFilename    = getFilename,
-	markdown       = markdownToHtml,
-	printf         = printf,
-	sortNatural    = sortNatural,
-	trim           = trim,
-	trimNewlines   = trimNewlines,
-	url            = toUrl,
-	urlAbs         = toUrlAbsolute,
-	urlize         = urlize,
+	proxySources = {}
 
-	chooseExistingFile = function(pathWithoutExt, exts)
-		for _, ext in ipairs(exts) do
-			local path = pathWithoutExt.."."..ext
-			if isFile(PATH_CONTENT.."/"..path) then  return path  end
-		end
-		return nil
-	end,
+	pageLayoutTemplatePath = nil
+	pageLayoutTemplate = nil
 
-	chooseExistingImage = function(pathWithoutExt)
-		return scriptEnvironmentGlobals.chooseExistingFile(pathWithoutExt, IMAGE_EXTENSIONS)
-	end,
+	scriptEnvironmentGlobals = {
+		_WEBGEN_VERSION  = _WEBGEN_VERSION,
+		IMAGE_EXTENSIONS = IMAGE_EXTENSIONS,
 
-	fileExists = function(path)
-		return isFile(PATH_CONTENT.."/"..path)
-	end,
+		-- Lua gloals.
+		_G             = nil,
+		_VERSION       = _VERSION,
+		assert         = _assert,
+		collectgarbage = collectgarbage,
+		dofile         = dofile,
+		error          = _error,
+		getfenv        = getfenv,
+		getmetatable   = getmetatable,
+		ipairs         = ipairs,
+		load           = load,
+		loadfile       = loadfile,
+		loadstring     = loadstring,
+		module         = module,
+		next           = next,
+		pairs          = pairs,
+		pcall          = _pcall,
+		print          = print,
+		rawequal       = rawequal,
+		rawget         = rawget,
+		rawset         = rawset,
+		require        = require,
+		select         = select,
+		setfenv        = setfenv,
+		setmetatable   = setmetatable,
+		tonumber       = tonumber,
+		tostring       = tostringForTemplates,
+		type           = type,
+		unpack         = unpack,
+		xpcall         = xpcall,
 
-	getExtension = function(path)
-		return getExtension(getFilename(path))
-	end,
+		-- Lua modules.
+		coroutine      = coroutine,
+		debug          = debug,
+		io             = io,
+		math           = math,
+		os             = os,
+		package        = package,
+		string         = string,
+		table          = table,
 
-	isAny = function(v1, values)
-		for _, v2 in ipairs(values) do
-			if v1 == v2 then  return true  end
-		end
-		return false
-	end,
+		-- Lua libraries.
+		lfs            = lfs,
+		socket         = socket,
 
-	newBuffer = function()
-		local buffer = {}
+		-- Generator page objects. (Create for each individual page.)
+		page           = nil,
+		params         = nil,
+		P              = nil,
 
-		return function(...)
-			if select("#", ...) == 0 then  return table.concat(buffer)  end
+		-- Other generator objects.
+		site           = newGeneratorObjectProxy(site, "site"),
+		data           = newDataFolderReader(DIR_DATA),
 
-			local s = select("#", ...) == 1 and assertType(..., "string") or F(...)
-			table.insert(buffer, s)
-		end
-	end,
-}
+		-- Generator functions.
+		date           = os.date,
+		entities       = encodeHtmlEntities,
+		F              = F,
+		find           = itemWith,
+		findAll        = itemWithAll,
+		generatorMeta  = generatorMeta,
+		getFilename    = getFilename,
+		markdown       = markdownToHtml,
+		printf         = printf,
+		sortNatural    = sortNatural,
+		trim           = trim,
+		trimNewlines   = trimNewlines,
+		url            = toUrl,
+		urlAbs         = toUrlAbsolute,
+		urlize         = urlize,
 
+		chooseExistingFile = function(pathWithoutExt, exts)
+			for _, ext in ipairs(exts) do
+				local path = pathWithoutExt.."."..ext
+				if isFile(DIR_CONTENT.."/"..path) then  return path  end
+			end
+			return nil
+		end,
 
+		chooseExistingImage = function(pathWithoutExt)
+			return scriptEnvironmentGlobals.chooseExistingFile(pathWithoutExt, IMAGE_EXTENSIONS)
+		end,
 
--- Read config.
-----------------------------------------------------------------
+		fileExists = function(path)
+			return isFile(DIR_CONTENT.."/"..path)
+		end,
 
-local config
+		getExtension = function(path)
+			return getExtension(getFilename(path))
+		end,
 
-if not isFile"config.lua" then
-	config = {}
-else
-	config = assert(loadfile"config.lua")()
-	assertTable(config, nil, nil, "config.lua must return a table.")
+		isAny = function(v1, values)
+			for _, v2 in ipairs(values) do
+				if v1 == v2 then  return true  end
+			end
+			return false
+		end,
+
+		newBuffer = function()
+			local buffer = {}
+
+			return function(...)
+				if select("#", ...) == 0 then  return table.concat(buffer)  end
+
+				local s = select("#", ...) == 1 and assertType(..., "string") or F(...)
+				table.insert(buffer, s)
+			end
+		end,
+	}
 end
 
-site.title        = assertType(config.title        or "", "string", "config.title must be a string.")
-site.baseUrl      = assertType(config.baseUrl      or "", "string", "config.baseUrl must be a string.")
-site.languageCode = assertType(config.languageCode or "", "string", "config.languageCode must be a string.")
-
-ignoreFiles   = assertTable(config.ignoreFiles   or {}, "number", "string",   "config.ignoreFiles must be an array of strings.")
-ignoreFolders = assertTable(config.ignoreFolders or {}, "number", "string",   "config.ignoreFolders must be an array of strings.")
-
-fileProcessors = assertTable(config.processors or {}, "string", "function", "config.processors must be a table of functions.")
-
-local env = createEnvironment(scriptEnvironmentGlobals)
-for ext, f in pairs(fileProcessors) do
-	setfenv(f, env)
-end
-
-removeTrailingSlashFromPermalinks = assertType(config.removeTrailingSlashFromPermalinks or false, "boolean", "config.removeTrailingSlashFromPermalinks must be a boolean.")
-
-
--- Fix details.
-
-if not site.baseUrl:find"/$" then
-	site.baseUrl = site.baseUrl.."/" -- Note: Could result in simply "/".
-end
+local function buildWebsite()
+	resetSiteVariables()
 
 
 
--- Generate website from content folder.
-----------------------------------------------------------------
+	-- Read config.
+	----------------------------------------------------------------
 
-logprint("Generating website...")
+	local config
 
-for category in pairs(OUTPUT_CATEGORY_SET) do
-	outputFileCounts[category] = 0
-end
-
-pageLayoutTemplatePath = PATH_LAYOUTS.."/page.html"
-pageLayoutTemplate = assert(getFileContents(pageLayoutTemplatePath))
-
-local beforeAndAfterFuncs = {
-	generateFromTemplate = function(pathRel, template)
-		generateFromTemplate(pathRel, template, nil)
-	end,
-}
-
-if config.before then
-	local env = createEnvironment(scriptEnvironmentGlobals, beforeAndAfterFuncs)
-	setfenv(config.before, env)
-	config.before()
-end
-
--- Generate output.
-traverseFiles(PATH_CONTENT, ignoreFolders, function(path, pathRel, filename, ext)
-	local modTime = lfs.attributes(path, "modification")
-
-	if isStringMatchingAnyPattern(filename, ignoreFiles) then
-		-- Ignore.
-
-	elseif TEMPLATE_EXTENSION_SET[ext] then
-		local template = assert(getFileContents(path))
-		generateFromTemplate(pathRel, template, modTime)
-
+	if not isFile"config.lua" then
+		config = {}
 	else
-		local category = "otherRaw"
-
-		-- Non-templates should be OK to preserve (if there's no file processor).
-		local oldModTime
-			=   not ignoreModificationTimes
-			and not fileProcessors[ext]
-			and lfs.attributes(PATH_OUTPUT.."/"..pathRel, "modification")
-			or  nil
-
-		if modTime and modTime == oldModTime then
-			preserveExistingOutputFile(category, pathRel)
-		else
-			local contents = assert(getFileContents(path))
-			writeOutputFile(category, pathRel, contents, modTime)
-		end
+		config = assert(loadfile"config.lua")()
+		assertTable(config, nil, nil, "config.lua must return a table.")
 	end
-end)
 
--- assert(false, "DEBUG")
+	site.title        = assertType(config.title        or "", "string", "config.title must be a string.")
+	site.baseUrl      = assertType(config.baseUrl      or "", "string", "config.baseUrl must be a string.")
+	site.languageCode = assertType(config.languageCode or "", "string", "config.languageCode must be a string.")
 
-if config.after then
-	local env = createEnvironment(scriptEnvironmentGlobals, beforeAndAfterFuncs)
-	setfenv(config.after, env)
-	config.after()
+	ignoreFiles   = assertTable(config.ignoreFiles   or {}, "number", "string",   "config.ignoreFiles must be an array of strings.")
+	ignoreFolders = assertTable(config.ignoreFolders or {}, "number", "string",   "config.ignoreFolders must be an array of strings.")
+
+	fileProcessors = assertTable(config.processors or {}, "string", "function", "config.processors must be a table of functions.")
+
+	local env = createEnvironment(scriptEnvironmentGlobals)
+	for ext, f in pairs(fileProcessors) do
+		setfenv(f, env)
+	end
+
+	removeTrailingSlashFromPermalinks = assertType(config.removeTrailingSlashFromPermalinks or false, "boolean", "config.removeTrailingSlashFromPermalinks must be a boolean.")
+
+
+	-- Fix details.
+
+	if not site.baseUrl:find"/$" then
+		site.baseUrl = site.baseUrl.."/" -- Note: Could result in simply "/".
+	end
+
+
+
+	-- Generate website from content folder.
+	----------------------------------------------------------------
+
+	logprint("Generating website...")
+
+	for category in pairs(OUTPUT_CATEGORY_SET) do
+		outputFileCounts[category] = 0
+	end
+
+	pageLayoutTemplatePath = DIR_LAYOUTS.."/page.html"
+	pageLayoutTemplate = assert(getFileContents(pageLayoutTemplatePath))
+
+	local beforeAndAfterFuncs = {
+		generateFromTemplate = function(pathRel, template)
+			generateFromTemplate(pathRel, template, nil)
+		end,
+	}
+
+	if config.before then
+		local env = createEnvironment(scriptEnvironmentGlobals, beforeAndAfterFuncs)
+		setfenv(config.before, env)
+		config.before()
+	end
+
+	-- Generate output.
+	traverseFiles(DIR_CONTENT, ignoreFolders, function(path, pathRel, filename, ext)
+		local modTime = lfs.attributes(path, "modification")
+
+		if isStringMatchingAnyPattern(filename, ignoreFiles) then
+			-- Ignore.
+
+		elseif TEMPLATE_EXTENSION_SET[ext] then
+			local template = assert(getFileContents(path))
+			generateFromTemplate(pathRel, template, modTime)
+
+		else
+			local category = "otherRaw"
+
+			-- Non-templates should be OK to preserve (if there's no file processor).
+			local oldModTime
+				=   not ignoreModificationTimes
+				and not fileProcessors[ext]
+				and lfs.attributes(DIR_OUTPUT.."/"..pathRel, "modification")
+				or  nil
+
+			if modTime and modTime == oldModTime then
+				preserveExistingOutputFile(category, pathRel)
+			else
+				local contents = assert(getFileContents(path))
+				writeOutputFile(category, pathRel, contents, modTime)
+			end
+		end
+	end)
+
+	-- assert(false, "DEBUG")
+
+	if config.after then
+		local env = createEnvironment(scriptEnvironmentGlobals, beforeAndAfterFuncs)
+		setfenv(config.after, env)
+		config.after()
+	end
+
+	-- Cleanup old generated stuff.
+	traverseFiles(DIR_OUTPUT, nil, function(path, pathRel, filename, ext)
+		if not writtenOutputFiles[pathRel] then
+			log("Removing: %s", path)
+			assert(os.remove(path))
+		end
+	end)
+	removeEmptyDirectories(DIR_OUTPUT)
+
+	logprint("Generating website... done!")
+
+
+
+	----------------------------------------------------------------
+
+	printf(("-"):rep(64))
+	printf("Files: %d", outputFileCount)
+	printf("    Pages:           %d", outputFileCounts["page"])
+	printf("    OtherTemplates:  %d", outputFileCounts["otherTemplate"])
+	printf("    OtherFiles:      %d  (Preserved: %d, %.1f%%)", outputFileCounts["otherRaw"], outputFilePreservedCount, outputFilePreservedCount/outputFileCounts["otherRaw"]*100)
+	printf("TotalSize: %s", formatBytes(outputFileByteCount))
+	printf(("-"):rep(64))
+
+	logFile:flush()
 end
 
--- Cleanup old generated stuff.
-traverseFiles(PATH_OUTPUT, nil, function(path, pathRel, filename, ext)
-	if not writtenOutputFiles[pathRel] then
-		log("Removing: %s", path)
-		assert(os.remove(path))
+buildWebsite()
+
+
+
+if autobuild then
+	local lastDirTree = nil
+
+	while true do
+		socket.sleep(AUTOBUILD_MIN_INTERVAL)
+
+		local dirTree = {}
+		local somethingChanged = false
+
+		local function checkFile(path, silent)
+			dirTree[path] = assert(lfs.attributes(path, "modification"))
+
+			if lastDirTree and lastDirTree[path] and dirTree[path] > lastDirTree[path] then
+				if not silent then
+					printf("Detected file change: %s", path)
+				end
+				somethingChanged = true
+			end
+		end
+
+		local function checkDirectory(dir, silent)
+			traverseDirectory(dir, ignoreFolders, function(path, pathRel, name, itemType)
+				if itemType == "directory" then
+					dirTree[path] = -1
+
+				elseif itemType == "file" then
+					if isStringMatchingAnyPattern(name, ignoreFiles) then  return  end
+					checkFile(path, silent)
+				end
+
+				if lastDirTree and not lastDirTree[path] then
+					somethingChanged = true
+					if not silent then
+						printf("Detected addition: %s", path)
+					end
+				end
+			end)
+		end
+
+		-- Check for additions and modifications.
+		checkFile("config.lua")
+		local configChanged = somethingChanged
+		checkDirectory(DIR_CONTENT)
+		checkDirectory(DIR_DATA)
+		checkDirectory(DIR_LAYOUTS)
+		checkDirectory(DIR_SCRIPTS)
+
+		-- Check for removals.
+		if lastDirTree and not somethingChanged then
+			for path in pairs(lastDirTree) do
+				if not dirTree[path] then
+					somethingChanged = true
+					printf("Detected removal: %s", path)
+					break
+				end
+			end
+		end
+
+		if somethingChanged then buildWebsite() end
+
+		if configChanged then
+			-- Recheck everything in case config.ignore* changed.
+			dirTree = {["config.lua"]=dirTree["config.lua"]}
+			checkDirectory(DIR_CONTENT, true)
+			checkDirectory(DIR_DATA,    true)
+			checkDirectory(DIR_LAYOUTS, true)
+			checkDirectory(DIR_SCRIPTS, true)
+		end
+
+		lastDirTree = dirTree
 	end
-end)
-removeEmptyDirectories(PATH_OUTPUT)
-
-logprint("Generating website... done!")
+end
 
 
 
-----------------------------------------------------------------
-
-printf(("-"):rep(64))
-printf("Files: %d", outputFileCount)
-printf("    Pages:           %d", outputFileCounts["page"])
-printf("    OtherTemplates:  %d", outputFileCounts["otherTemplate"])
-printf("    OtherFiles:      %d  (Preserved: %d, %.1f%%)", outputFileCounts["otherRaw"], outputFilePreservedCount, outputFilePreservedCount/outputFileCounts["otherRaw"]*100)
-printf("TotalSize: %s", formatBytes(outputFileByteCount))
-printf(("-"):rep(64))
 _print(F("Check log for details: %s", logPath))
-
 logFile:close()
 
 --==============================================================

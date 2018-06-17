@@ -1,7 +1,8 @@
 # LuaWebGen Reference
 
 - [Notes](#notes)
-- [Configuration](#config)
+- [Command Line](#command-line)
+- [Site Configuration](#site-configuration)
 - [Control Structures](#control-structures)
 - [Constants](#constants)
 - [Functions](#functions)
@@ -16,7 +17,7 @@
 
 ## Notes
 
-You can use any standard Lua library normally, like `io` and `math` (including <abbr title="LuaFileSystem">`lfs`</abbr> and `socket`).
+You can use any standard Lua library normally in your code, like `io` and `math` (including <abbr title="LuaFileSystem">`lfs`</abbr> and `socket`).
 
 You cannot add you own globals directly - use the *scripts* folder to define global functions,
 and the *data* folder to store globally accessible data.
@@ -24,7 +25,27 @@ The idea is that this restriction should prevent accidental global access.
 
 
 
-## Configuration
+## Command Line
+
+To generate your website, run this from the command line:
+
+```
+lua "path/to/LuaWebGen/main.lua" "path/to/site/root" [options]
+```
+
+### Options
+
+#### `--autobuild` or `-a`
+Auto-build website when changes are detected. This makes LuaWebGen run until you press `Ctrl`+`C` in the command prompt.
+
+#### `--force` or `-f`
+Force-update all.
+This makes LuaWebGen treat all previously outputted files as if they were modified.
+This has the same effect as deleting the `output` folder.
+
+
+
+## Site Configuration
 
 Site-specific configurations are stored in `config.lua` in the site root. The file is expected to return a table with any of these fields:
 

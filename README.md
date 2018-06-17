@@ -27,7 +27,7 @@ language would solve most of these problems.
 
 ## Example
 
-A blog post (my-first-post.md):
+A blog post, `my-first-post.md`:
 
 ```markdown
 {{
@@ -45,7 +45,7 @@ Duis nec justo mollis, varius nulla sed, commodo nibh.
 {{end}}
 ```
 
-Page template (page.html):
+Page template, `page.html`:
 
 ```html
 {{include"header"}}
@@ -87,6 +87,7 @@ site-root/
     data/              -- Optional data folder. Can contain .lua and .toml files.
     layouts/           -- All HTML layout templates.
         page.html      -- Default page template.
+    logs/              -- Automatically created log file folder.
     output/            -- Automatically created output folder.
     scripts/           -- Optional Lua script folder. The scripts must return a function.
     config.lua         -- Site-wide configurations.
