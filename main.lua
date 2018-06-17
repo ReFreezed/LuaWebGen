@@ -106,6 +106,7 @@ local generateFromTemplate
 local generatorMeta
 local getDirectory, getFilename, getExtension
 local getFileContents
+local getLayoutTemplate
 local getLineNumber
 local include
 local insertLineNumberCode
@@ -1070,6 +1071,7 @@ function generateFromTemplate(pathRel, template, modTime)
 
 	-- else
 		local page = {
+			layout    = "page",
 			title     = "",
 			content   = "",
 			permalink = site.baseUrl..(removeTrailingSlashFromPermalinks and permalinkRel:gsub("/$", "") or permalinkRel),
@@ -1091,15 +1093,16 @@ function generateFromTemplate(pathRel, template, modTime)
 
 		if ext == "md" then
 			page.content = parseMarkdownTemplate(pathRel, template)
-			out = parseHtmlTemplate(pageLayoutTemplatePath, pageLayoutTemplate)
-
 		elseif ext == "html" then
 			page.content = parseHtmlTemplate(pathRel, template)
-			out = parseHtmlTemplate(pageLayoutTemplatePath, pageLayoutTemplate)
-
 		else
 			assert(not isPage)
 			out = parseOtherTemplate(pathRel, template)
+		end
+
+		if isPage then
+			local layoutTemplate, layoutPath = getLayoutTemplate(page.layout, pathRel)
+			out = parseHtmlTemplate(layoutPath, layoutTemplate)
 		end
 
 		assert(out)
@@ -1201,6 +1204,28 @@ end
 
 
 
+-- template, path = getLayoutTemplate( layoutName [, context ] )
+function getLayoutTemplate(layoutName, context)
+	if layoutName == "page" then
+		return pageLayoutTemplate, pageLayoutTemplatePath
+	end
+
+	local path = F("%s/%s.html", DIR_LAYOUTS, layoutName)
+	local template, err = getFileContents(path)
+
+	if not template then
+		if context then
+			errorf("%s: Could not load layout '%s'. (%s)", context, layoutName, err)
+		else
+			errorf("Could not load layout '%s'. (%s)", layoutName, err)
+		end
+	end
+
+	return template, path
+end
+
+
+
 --==============================================================
 --==============================================================
 --==============================================================
@@ -1281,26 +1306,26 @@ local function resetSiteVariables()
 		languageCode = "",
 	}
 
-	scriptFunctions = {}
-	scriptEnvironmentGlobals = nil
+	scriptFunctions                   = {}
+	scriptEnvironmentGlobals          = nil
 
-	ignoreFiles    = nil
-	ignoreFolders  = nil
+	ignoreFiles                       = nil
+	ignoreFolders                     = nil
 
-	fileProcessors = nil
+	fileProcessors                    = nil
 
 	removeTrailingSlashFromPermalinks = false
 
-	writtenOutputFiles = {}
-	outputFileCount = 0
-	outputFileCounts = {}
-	outputFileByteCount = 0
-	outputFilePreservedCount = 0
+	writtenOutputFiles                = {}
+	outputFileCount                   = 0
+	outputFileCounts                  = {}
+	outputFileByteCount               = 0
+	outputFilePreservedCount          = 0
 
-	proxySources = {}
+	proxySources                      = {}
 
-	pageLayoutTemplatePath = nil
-	pageLayoutTemplate = nil
+	pageLayoutTemplatePath            = nil
+	pageLayoutTemplate                = nil
 
 	scriptEnvironmentGlobals = {
 		_WEBGEN_VERSION  = _WEBGEN_VERSION,

@@ -338,6 +338,10 @@ If the current page is an index page.
 #### page.isPage
 If the current page is in fact a page. This value is false for CSS files.
 
+#### page.layout
+What layout template the page should use.
+The default is `"page"` (which corresponds to the file `layouts/page.html`).
+
 #### page.permalink
 The URL to the current page.
 
