@@ -7,7 +7,7 @@
 - [Control Structures](#control-structures)
 - [Constants](#constants)
 - [Functions](#functions)
-	- [Global Functions](#global-functions)
+	- [Utility Functions](#utility-functions)
 	- [Context-Specific Functions](#context-specific-functions)
 - [Objects](#objects)
 	- [`site`](#site)
@@ -105,7 +105,7 @@ An array of common image file extensions.
 
 
 
-### Global Functions
+### Utility Functions
 
 - [`chooseExistingFile()`](#chooseexistingfile)
 - [`chooseExistingImage()`](#chooseexistingimage)
@@ -358,6 +358,10 @@ The title of the website.
 #### page.content
 The contents of the current page. Available to layout templates.
 
+#### page.isDraft
+If the current page is a draft.
+Drafts are excluded from the building process (unless the `--drafts` option is used).
+
 #### page.isHome
 If the current page is the root index page, aka the home page.
 
@@ -374,6 +378,11 @@ The default is `"page"` (which corresponds to the file `layouts/page.html`).
 #### page.permalink
 The URL to the current page.
 
+#### page.publishDate
+What date the page is published (in *local* time).
+If the date is in the future then the page is excluded from the build process.
+Must have the format `"YYYY-MM-DD hh:mm:ss"`.
+
 #### page.title
 The title of the current page. Each page should update this value.
 
@@ -385,6 +394,7 @@ The title of the current page. Each page should update this value.
 Access data from the *data* folder.
 Type e.g. `data.cats` to retrieve the contents of `data/cats.lua`.
 Data files can be `.lua`, `.toml` or `.xml` files.
+(LuaWebGen uses [Penlight](https://stevedonovan.github.io/Penlight/api/topics/06-data.md.html#XML) for XML files.)
 
 #### params
 `params` or `P`
