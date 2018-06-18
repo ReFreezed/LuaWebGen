@@ -39,6 +39,9 @@ lua "path/to/LuaWebGen/main.lua" "path/to/site/root" [options]
 #### `--autobuild` or `-a`
 Auto-build website when changes are detected. This makes LuaWebGen run until you press `Ctrl`+`C` in the command prompt.
 
+#### `--drafts` or `-d`
+Include page drafts when building. Meant for debugging.
+
 #### `--force` or `-f`
 Force-update all.
 This makes LuaWebGen treat all previously outputted files as if they were modified.
@@ -115,11 +118,13 @@ An array of common image file extensions.
 - [`generatorMeta()`](#generatormeta)
 - [`getExtension()`](#getextension)
 - [`getFilename()`](#getfilename)
+- [`indexOf()`](#indexof)
 - [`isAny()`](#isany)
 - [`markdown()`](#markdown)
 - [`newBuffer()`](#newbuffer)
 - [`printf()`](#printf)
 - [`sortNatural()`](#sortnatural)
+- [`split()`](#split)
 - [`trim()`](#trim)
 - [`trimNewlines()`](#trimnewlines)
 - [`url()`](#url)
@@ -129,12 +134,12 @@ An array of common image file extensions.
 #### chooseExistingFile()
 `path = chooseExistingFile( pathWithoutExtension, extensions )`
 
-Return the path of an existing file with any of the specified extensions. Returns nil if no file exists.
+Return the path of an existing file with any of the specified extensions. Returns `nil` if no file exists.
 
 #### chooseExistingImage()
 `path = chooseExistingImage( pathWithoutExtension )`
 
-Return the path of an existing image file with any of the specified extensions. Returns nil if no image file exists.
+Return the path of an existing image file with any of the specified extensions. Returns `nil` if no image file exists.
 
 Short form for `chooseExistingFile(pathWithoutExtension, IMAGE_EXTENSIONS)`.
 
@@ -186,6 +191,11 @@ Get the extension part of a path or filename.
 
 Get the filename part of a path.
 
+#### indexOf()
+`index = indexOf( array, value )`
+
+Get the index of a value in an array. Returns `nil` if the value was not found.
+
 #### isAny()
 `bool = isAny( value, values )`
 
@@ -222,6 +232,15 @@ Short form for `print(F(format, ...))`.
 
 [Naturally sort](https://en.wikipedia.org/wiki/Natural_sort_order) an array of strings.
 If the array contains tables you can sort by a specific *attribute* instead.
+
+#### split()
+`parts = split( string, separatorPattern [, startIndex=1, plain=false ] )`
+
+Split a string by a pattern. Example:
+
+```lua
+local dogs = split("Fido,Grumpy,The Destroyer", ",")
+```
 
 #### trim()
 `string = trim( string )`
@@ -267,6 +286,7 @@ urlize("Hello, big world!") -- "hello-big-world"
 - [`echoRaw()`](#echoraw)
 - [`generateFromTemplate()`](#generatefromtemplate)
 - [`include()`](#include)
+- [`outputRaw()`](#outputraw)
 
 There are currently two contexts where code can run:
 
@@ -307,6 +327,14 @@ generateFromTemplate("dogs/fido.md", "# Fido\n\nFido is fluffy!")
 `html = include( filename )`
 
 Get a HTML template from the *layouts* folder. Available in templates. **Note:** Exclude the extension in the filename (e.g. `include"footer"`).
+
+#### outputRaw()
+`outputRaw( path, contents )`
+
+Output any data to a file. Available in `config.before()` and `config.after()`. Example:
+```lua
+outputRaw("docs/versions.txt", "Version 1\nReleased: 2002-10-16\n")
+```
 
 
 
@@ -356,7 +384,7 @@ The title of the current page. Each page should update this value.
 #### data
 Access data from the *data* folder.
 Type e.g. `data.cats` to retrieve the contents of `data/cats.lua`.
-Data files can be `.lua` or `.toml` files.
+Data files can be `.lua`, `.toml` or `.xml` files.
 
 #### params
 `params` or `P`

@@ -10,6 +10,8 @@ local _WEBGEN_VERSION = "0.3.0"
 
 
 
+-- Settings.
+
 local DIR_CONTENT = "content"
 local DIR_DATA    = "data"
 local DIR_LAYOUTS = "layouts"
@@ -20,6 +22,8 @@ local DIR_SCRIPTS = "scripts"
 local AUTOBUILD_MIN_INTERVAL = 1.00
 
 
+
+-- Constants.
 
 local HTML_ENTITY_PATTERN = '[&<>"]'
 local HTML_ENTITIES = {
@@ -44,15 +48,17 @@ local IMAGE_EXTENSIONS = {"png","jpg","jpeg","gif"}
 
 
 
-package.path = debug.getinfo(1, "S").source:gsub("^@", ""):gsub("[^/\\]*$", "?.lua;")..package.path
+-- Modules.
+package.path = debug.getinfo(1, "S").source:gsub("^@", ""):gsub("[^/\\]*$", "lib/?.lua;")..package.path
 
 local lfs         = require"lfs"
 local socket      = require"socket"
 
 local escapeUri   = require"socket.url".escape
 
-local markdownLib = require"lib.markdown"
-local parseToml   = require"lib.toml".parse
+local markdownLib = require"markdown"
+local parseToml   = require"toml".parse
+local xmlLib      = require"pl.xml"
 
 local _assert     = assert
 local _error      = error
@@ -61,12 +67,17 @@ local _print      = print
 
 
 
-local logFile   = nil
-local logPath   = ""
-local logBuffer = {}
+-- Misc variables.
+
+local logFile       = nil
+local logPath       = ""
+local logBuffer     = {}
+
+local includeDrafts = false
 
 
 
+-- Site variables.
 local site                              = nil
 
 local scriptFunctions                   = nil
@@ -84,11 +95,14 @@ local outputFileCount                   = 0
 local outputFileCounts                  = nil
 local outputFileByteCount               = 0
 local outputFilePreservedCount          = 0
+local outputFileSkippedPageCount        = 0
 
 local proxySources                      = nil
 
 local pageLayoutTemplatePath            = nil
 local pageLayoutTemplate                = nil
+
+local scriptsCanOutput                  = false
 
 
 
@@ -97,8 +111,10 @@ local pageLayoutTemplate                = nil
 --==============================================================
 
 local assert, assertf, assertType, assertTable
+local clearPageVariables
 local createDirectory, isDirectoryEmpty, removeEmptyDirectories
 local createEnvironment
+local dateStringToTime
 local encodeHtmlEntities
 local error, errorf, fileerror, errorInGeneratedCodeFromTemplate
 local F, formatBytes
@@ -109,10 +125,10 @@ local getFileContents
 local getLayoutTemplate
 local getLineNumber
 local include
+local indexOf, itemWith, itemWithAll
 local insertLineNumberCode
 local isFile, isDirectory
 local isStringMatchingAnyPattern
-local itemWith, itemWithAll
 local markdownToHtml
 local newDataFolderReader
 local newGeneratorObjectProxy
@@ -120,6 +136,7 @@ local parseMarkdownTemplate, parseHtmlTemplate, parseOtherTemplate
 local pcall
 local print, printf, log, logprint
 local sortNatural
+local splitString
 local storeArgs
 local toNormalPath, toWindowsPath
 local tostringForTemplates
@@ -899,26 +916,27 @@ function newDataFolderReader(path)
 
 	setmetatable(dataFolderReader, {
 		__index = function(dataFolderReader, k)
-			local mode = lfs.attributes(path.."/"..k, "mode")
+			local dataObj
 
 			if isFile(F("%s/%s.lua", path, k)) then
-				local dataObj = assert(loadfile(F("%s/%s.lua", path, k)))()
-				assert(dataObj ~= nil)
-				rawset(dataFolderReader, k, dataObj)
-				return dataObj
+				dataObj = assert(loadfile(F("%s/%s.lua", path, k)))()
 
 			elseif isFile(F("%s/%s.toml", path, k)) then
-				local dataObj = parseToml(assert(getFileContents(F("%s/%s.toml", path, k))))
-				assert(dataObj ~= nil)
-				rawset(dataFolderReader, k, dataObj)
-				return dataObj
+				dataObj = parseToml(assert(getFileContents(F("%s/%s.toml", path, k))))
 
-			elseif lfs.attributes(F("%s/%s", path, k), "mode") == "folder" then
+			elseif isFile(F("%s/%s.xml", path, k)) then
+				dataObj = assert(xmlLib.parse(assert(getFileContents(F("%s/%s.xml", path, k))), false))
+
+			elseif isDirectory(F("%s/%s", path, k)) then
 				return newDataFolderReader(F("%s/%s", path, k))
 
 			else
 				errorf("Bad data path '%s/%s'.", path, k)
 			end
+
+			assert(dataObj ~= nil)
+			rawset(dataFolderReader, k, dataObj)
+			return dataObj
 		end,
 	})
 
@@ -1071,15 +1089,19 @@ function generateFromTemplate(pathRel, template, modTime)
 
 	-- else
 		local page = {
-			layout    = "page",
-			title     = "",
-			content   = "",
-			permalink = site.baseUrl..(removeTrailingSlashFromPermalinks and permalinkRel:gsub("/$", "") or permalinkRel),
-			rssLink   = "", -- @Incomplete
+			layout      = "page",
+			title       = "",
+			content     = "",
 
-			isPage    = isPage,
-			isIndex   = isIndex,
-			isHome    = isHome,
+			publishDate = os.date("%Y-%m-%d %H:%M:%S", 0),
+			isDraft     = false,
+
+			permalink   = site.baseUrl..(removeTrailingSlashFromPermalinks and permalinkRel:gsub("/$", "") or permalinkRel),
+			rssLink     = "", -- @Incomplete @Doc
+
+			isPage      = isPage,
+			isIndex     = isIndex,
+			isHome      = isHome,
 		}
 		-- print(pathRel, (not isPage and " " or isHome and "H" or isIndex and "I" or "P"), page.permalink) -- DEBUG
 
@@ -1101,9 +1123,20 @@ function generateFromTemplate(pathRel, template, modTime)
 		end
 
 		if isPage then
+			if
+				(page.isDraft and not includeDrafts) or -- Is draft?
+				(dateStringToTime(page.publishDate) > os.time()) -- Is in future?
+			then
+				outputFileSkippedPageCount = outputFileSkippedPageCount+1
+				clearPageVariables()
+				return
+			end
+
 			local layoutTemplate, layoutPath = getLayoutTemplate(page.layout, pathRel)
 			out = parseHtmlTemplate(layoutPath, layoutTemplate)
 		end
+
+		clearPageVariables()
 
 		assert(out)
 		writeOutputFile(category, pathRelOut, out, modTime)
@@ -1143,6 +1176,13 @@ function assertTable(t, kType, vType, err, ...)
 end
 
 
+
+function indexOf(t, v)
+	for i, item in ipairs(t) do
+		if item == v then  return i  end
+	end
+	return nil
+end
 
 function itemWith(t, k, v)
 	for i, item in ipairs(t) do
@@ -1206,7 +1246,7 @@ end
 
 -- template, path = getLayoutTemplate( layoutName [, context ] )
 function getLayoutTemplate(layoutName, context)
-	if layoutName == "page" then
+	if layoutName == "page" and pageLayoutTemplate then
 		return pageLayoutTemplate, pageLayoutTemplatePath
 	end
 
@@ -1222,6 +1262,52 @@ function getLayoutTemplate(layoutName, context)
 	end
 
 	return template, path
+end
+
+
+
+-- parts = splitString( string, separatorPattern [, startIndex=1, plain=false ] )
+function splitString(s, sep, i, plain)
+	i = i or 1
+	local parts = {}
+
+	while true do
+		local i1, i2 = s:find(sep, i, plain)
+		if not i1 then  break  end
+
+		table.insert(parts, s:sub(i, i1-1))
+		i = i2+1
+	end
+
+	table.insert(parts, s:sub(i))
+	return parts
+end
+
+
+
+function clearPageVariables()
+	scriptEnvironmentGlobals.page   = nil
+	scriptEnvironmentGlobals.params = nil
+	scriptEnvironmentGlobals.P      = nil
+end
+
+
+
+function dateStringToTime(dateStr)
+	local year, month, day, hour, minute, second = dateStr:match"^(%d%d%d%d)%-(%d%d)%-(%d%d) (%d%d):(%d%d):(%d%d)$"
+	if not year then
+		errorf("Invalid date string '%s'. (Format must be 'YYYY-MM-DD hh:mm:ss')", dateStr)
+	end
+
+	local time = os.time{
+		year  = tonumber(year),
+		month = tonumber(month),
+		day   = tonumber(day),
+		hour  = tonumber(hour),
+		min   = tonumber(minute),
+		sec   = tonumber(second),
+	}
+	return time
 end
 
 
@@ -1249,6 +1335,9 @@ while args[i] do
 	elseif arg == "-a" or arg == "--autobuild" then
 		autobuild = true
 
+	elseif arg == "-d" or arg == "--drafts" then
+		includeDrafts = true
+
 	elseif arg:find"^%-" then
 		errorf("[arg] Unknown option '%s'.", arg)
 
@@ -1262,15 +1351,11 @@ while args[i] do
 	i = i+1
 end
 
-if not pathToSiteOnDisc then
-	error("Missing required pathToSiteOnDisc argument.")
-end
-if ignoreModificationTimes then
-	logprint("Option --force: Ignoring modification times.")
-end
-if autobuild then
-	logprint("Option --autobuild: Auto-building website. Press Ctrl+C to stop.")
-end
+if not pathToSiteOnDisc then  error("Missing required pathToSiteOnDisc argument.")  end
+
+if ignoreModificationTimes then  logprint("Option --force: Ignoring modification times.")  end
+if autobuild               then  logprint("Option --autobuild: Auto-building website. Press Ctrl+C to stop.")  end
+if includeDrafts           then  logprint("Option --drafts: Drafts are included.")  end
 
 assert(lfs.chdir(pathToSiteOnDisc))
 logprint("Site folder: %s", toNormalPath(lfs.currentdir()))
@@ -1321,11 +1406,15 @@ local function resetSiteVariables()
 	outputFileCounts                  = {}
 	outputFileByteCount               = 0
 	outputFilePreservedCount          = 0
+	outputFileSkippedPageCount        = 0
 
 	proxySources                      = {}
 
 	pageLayoutTemplatePath            = nil
 	pageLayoutTemplate                = nil
+
+	scriptsCanOutput                  = false
+
 
 	scriptEnvironmentGlobals = {
 		_WEBGEN_VERSION  = _WEBGEN_VERSION,
@@ -1393,9 +1482,11 @@ local function resetSiteVariables()
 		findAll        = itemWithAll,
 		generatorMeta  = generatorMeta,
 		getFilename    = getFilename,
+		indexOf        = indexOf,
 		markdown       = markdownToHtml,
 		printf         = printf,
 		sortNatural    = sortNatural,
+		split          = splitString,
 		trim           = trim,
 		trimNewlines   = trimNewlines,
 		url            = toUrl,
@@ -1439,6 +1530,83 @@ local function resetSiteVariables()
 				table.insert(buffer, s)
 			end
 		end,
+
+		X = function(node, tagName) -- @Doc
+			assertType(node, "table", "Invalid XML argument.")
+			return (itemWith(node, "tag", tagName))
+		end,
+
+		Xs = function(node, tagName) -- @Doc
+			assertType(node, "table", "Invalid XML argument.")
+			return (itemWithAll(node, "tag", tagName))
+		end,
+
+		forXml = function(node, tagName) -- @Doc
+			assertType(node, "table", "Invalid XML argument.")
+			return ipairs(itemWithAll(node, "tag", tagName))
+		end,
+
+		printXmlTree = function(node) -- @Doc
+			assertType(node, "table", "Invalid XML argument.")
+
+			local function printNode(node, indent)
+				print(("    "):rep(indent)..node.tag)
+
+				indent = indent+1
+				for _, childNode in ipairs(node) do
+					if type(childNode) == "table" then
+						printNode(childNode, indent)
+					end
+				end
+			end
+
+			if xmlLib.is_tag(node) then
+				printNode(node, 0)
+			else
+				print("(xml array)")
+				for _, childNode in ipairs(node) do
+					printNode(childNode, 1)
+				end
+			end
+		end,
+
+		-- xmlGetTexts = function(node, tags)
+		-- 	local texts = {}
+		-- 	for i, tagName in ipairs(tags) do
+		-- 		texts[tagName] = itemWith(node, "tag", tagName):get_text()
+		-- 	end
+		-- 	return texts
+		-- end
+
+		-- xmlGetTexts = function(node, ...) -- Messy to call!
+		-- 	local function getText(tagName, ...)
+		-- 		if select("#", ...) > 0 then
+		-- 			return itemWith("tag", tagName):get_text(), getText(...)
+		-- 		end
+		-- 	end
+		-- 	return getText(...)
+		-- end
+
+		-- xmlGetTexts = function(node) -- Different than above.
+		-- 	local texts = {}
+		-- 	for i, childNode in ipairs(node) do
+		-- 		texts[i] = childNode:get_text()
+		-- 	end
+		-- 	return texts
+		-- end
+
+		-- Context functions.
+
+		generateFromTemplate = function(pathRel, template)
+			assert(scriptsCanOutput)
+			generateFromTemplate(pathRel, template, nil)
+		end,
+
+		outputRaw = function(pathRel, contents)
+			assert(scriptsCanOutput)
+			assertType(contents, "string", "The contents must be a string.")
+			writeOutputFile("otherRaw", pathRel, contents)
+		end,
 	}
 end
 
@@ -1468,14 +1636,10 @@ local function buildWebsite()
 	site.baseUrl      = assertType(config.baseUrl      or "", "string", "config.baseUrl must be a string.")
 	site.languageCode = assertType(config.languageCode or "", "string", "config.languageCode must be a string.")
 
-	ignoreFiles   = assertTable(config.ignoreFiles   or {}, "number", "string",   "config.ignoreFiles must be an array of strings.")
-	ignoreFolders = assertTable(config.ignoreFolders or {}, "number", "string",   "config.ignoreFolders must be an array of strings.")
+	ignoreFiles   = assertTable(config.ignoreFiles   or {}, "number", "string", "config.ignoreFiles must be an array of strings.")
+	ignoreFolders = assertTable(config.ignoreFolders or {}, "number", "string", "config.ignoreFolders must be an array of strings.")
 
 	fileProcessors = assertTable(config.processors or {}, "string", "function", "config.processors must be a table of functions.")
-
-	for ext, f in pairs(fileProcessors) do
-		setfenv(f, env)
-	end
 
 	removeTrailingSlashFromPermalinks = assertType(config.removeTrailingSlashFromPermalinks or false, "boolean", "config.removeTrailingSlashFromPermalinks must be a boolean.")
 
@@ -1497,19 +1661,17 @@ local function buildWebsite()
 		outputFileCounts[category] = 0
 	end
 
+	local err
 	pageLayoutTemplatePath = DIR_LAYOUTS.."/page.html"
-	pageLayoutTemplate = assert(getFileContents(pageLayoutTemplatePath))
-
-	local beforeAndAfterFuncs = {
-		generateFromTemplate = function(pathRel, template)
-			generateFromTemplate(pathRel, template, nil)
-		end,
-	}
+	pageLayoutTemplate, err = getFileContents(pageLayoutTemplatePath)
+	if not pageLayoutTemplate then
+		logprint("Notice: Could not load default page layout. (%s)", err)
+	end
 
 	if config.before then
-		local env = createEnvironment(scriptEnvironmentGlobals, beforeAndAfterFuncs)
-		setfenv(config.before, env)
+		scriptsCanOutput = true
 		config.before()
+		scriptsCanOutput = false
 	end
 
 	-- Generate output.
@@ -1542,12 +1704,10 @@ local function buildWebsite()
 		end
 	end)
 
-	-- assert(false, "DEBUG")
-
 	if config.after then
-		local env = createEnvironment(scriptEnvironmentGlobals, beforeAndAfterFuncs)
-		setfenv(config.after, env)
+		scriptsCanOutput = true
 		config.after()
+		scriptsCanOutput = false
 	end
 
 	-- Cleanup old generated stuff.
@@ -1569,9 +1729,12 @@ local function buildWebsite()
 
 	printf(("-"):rep(64))
 	printf("Files: %d", outputFileCount)
-	printf("    Pages:           %d", outputFileCounts["page"])
+	printf("    Pages:           %d  (Skipped: %d)", outputFileCounts["page"], outputFileSkippedPageCount)
 	printf("    OtherTemplates:  %d", outputFileCounts["otherTemplate"])
-	printf("    OtherFiles:      %d  (Preserved: %d, %.1f%%)", outputFileCounts["otherRaw"], outputFilePreservedCount, outputFilePreservedCount/outputFileCounts["otherRaw"]*100)
+	printf("    OtherFiles:      %d  (Preserved: %d, %.1f%%)",
+		outputFileCounts["otherRaw"], outputFilePreservedCount,
+		outputFileCounts["otherRaw"] == 0 and 100 or outputFilePreservedCount/outputFileCounts["otherRaw"]*100
+	)
 	printf("TotalSize: %s", formatBytes(outputFileByteCount))
 	printf("Time: %.2f seconds", endTime-startTime)
 	printf(("-"):rep(64))
