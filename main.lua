@@ -1443,6 +1443,8 @@ local function resetSiteVariables()
 end
 
 local function buildWebsite()
+	local startTime = socket.gettime()
+
 	resetSiteVariables()
 
 
@@ -1451,11 +1453,14 @@ local function buildWebsite()
 	----------------------------------------------------------------
 
 	local config
+	local env = createEnvironment(scriptEnvironmentGlobals)
 
 	if not isFile"config.lua" then
 		config = {}
 	else
-		config = assert(loadfile"config.lua")()
+		local chunk = assert(loadfile"config.lua")
+		setfenv(chunk, env)
+		config = chunk()
 		assertTable(config, nil, nil, "config.lua must return a table.")
 	end
 
@@ -1468,7 +1473,6 @@ local function buildWebsite()
 
 	fileProcessors = assertTable(config.processors or {}, "string", "function", "config.processors must be a table of functions.")
 
-	local env = createEnvironment(scriptEnvironmentGlobals)
 	for ext, f in pairs(fileProcessors) do
 		setfenv(f, env)
 	end
@@ -1561,12 +1565,15 @@ local function buildWebsite()
 
 	----------------------------------------------------------------
 
+	local endTime = socket.gettime()
+
 	printf(("-"):rep(64))
 	printf("Files: %d", outputFileCount)
 	printf("    Pages:           %d", outputFileCounts["page"])
 	printf("    OtherTemplates:  %d", outputFileCounts["otherTemplate"])
 	printf("    OtherFiles:      %d  (Preserved: %d, %.1f%%)", outputFileCounts["otherRaw"], outputFilePreservedCount, outputFilePreservedCount/outputFileCounts["otherRaw"]*100)
 	printf("TotalSize: %s", formatBytes(outputFileByteCount))
+	printf("Time: %.2f seconds", endTime-startTime)
 	printf(("-"):rep(64))
 
 	logFile:flush()
