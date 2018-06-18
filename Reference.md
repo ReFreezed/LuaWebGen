@@ -2,6 +2,7 @@
 
 - [Notes](#notes)
 - [Command Line](#command-line)
+	- [Options](#options)
 - [Site Configuration](#site-configuration)
 - [Control Structures](#control-structures)
 - [Constants](#constants)
@@ -353,7 +354,9 @@ The title of the current page. Each page should update this value.
 ### Other Objects
 
 #### data
-Access data from the *data* folder. E.g. type `data.cats` to retrieve the contents of `data/cats.lua`.
+Access data from the *data* folder.
+Type e.g. `data.cats` to retrieve the contents of `data/cats.lua`.
+Data files can be `.lua` or `.toml` files.
 
 #### params
 `params` or `P`

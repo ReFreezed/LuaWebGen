@@ -350,9 +350,11 @@ local PD = {
 	blocks = {},
 
 	-- Block level tags that will be protected
-	tags = {"p", "div", "h1", "h2", "h3", "h4", "h5", "h6", "blockquote",
-	"pre", "table", "dl", "ol", "ul", "script", "noscript", "form", "fieldset",
-	"iframe", "math", "ins", "del"}
+	tags = {
+		"p","div","h1","h2","h3","h4","h5","h6","blockquote","pre","table","dl",
+		"ol","ul","script","noscript","form","fieldset","iframe","math","ins","del",
+		"article","aside","figure","footer","header","hgroup","object","section","video", -- @New
+	}
 }
 
 -- Pattern for matching a block tag that begins and ends in the leftmost
