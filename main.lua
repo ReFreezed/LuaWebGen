@@ -6,7 +6,7 @@
 --=
 --============================================================]]
 
-local _WEBGEN_VERSION = "0.5.0"
+local _WEBGEN_VERSION = "0.5.1"
 
 
 
@@ -69,19 +69,25 @@ local _print      = print
 
 -- Misc variables.
 
-local logFile       = nil
-local logPath       = ""
-local logBuffer     = {}
+local logFile                  = nil
+local logPath                  = ""
+local logBuffer                = {}
 
-local includeDrafts = false
+local includeDrafts            = false
+
+local scriptEnvironment        = nil
+local scriptEnvironmentGlobals = nil
 
 
 
 -- Site variables.
 local site                              = nil
 
+local contextStack                      = nil
+local proxies                           = nil
+local proxySources                      = nil
+local layoutTemplates                   = nil
 local scriptFunctions                   = nil
-local scriptEnvironmentGlobals          = nil
 
 local ignoreFiles                       = nil
 local ignoreFolders                     = nil
@@ -97,12 +103,11 @@ local outputFileByteCount               = 0
 local outputFilePreservedCount          = 0
 local outputFileSkippedPageCount        = 0
 
-local proxySources                      = nil
 
-local pageLayoutTemplatePath            = nil
-local pageLayoutTemplate                = nil
 
-local scriptsCanOutput                  = false
+-- Page variables.
+local page         = nil
+local scriptParams = nil
 
 
 
@@ -111,9 +116,7 @@ local scriptsCanOutput                  = false
 --==============================================================
 
 local assert, assertf, assertType, assertTable
-local clearPageVariables
 local createDirectory, isDirectoryEmpty, removeEmptyDirectories
-local createEnvironment
 local dateStringToTime
 local encodeHtmlEntities
 local error, errorf, fileerror, errorInGeneratedCodeFromTemplate
@@ -125,17 +128,17 @@ local getDirectory, getFilename, getExtension
 local getFileContents
 local getLayoutTemplate
 local getLineNumber
-local include
+local getProtectionWrapper
 local indexOf, itemWith, itemWithAll
 local insertLineNumberCode
 local isFile, isDirectory
 local isStringMatchingAnyPattern
 local markdownToHtml
 local newDataFolderReader
-local newGeneratorObjectProxy
 local parseMarkdownTemplate, parseHtmlTemplate, parseOtherTemplate
 local pcall
 local print, printf, log, logprint
+local pushContext, popContext, assertContext, getContext
 local sortNatural
 local splitString
 local storeArgs
@@ -465,28 +468,25 @@ do
 
 		local out = {}
 
-		local funcs = {
-			include = include,
-			echoRaw = function(s)
-				table.insert(out, s)
-			end,
-			echo = function(s)
-				if enableHtmlEncoding then
-					s = encodeHtmlEntities(s)
-				end
-				table.insert(out, s)
-			end,
-		}
-
 		local chunk, err = loadstring(luaCode)
 		if not chunk then
 			errorInGeneratedCodeFromTemplate(path, luaCode, err)
 		end
 
-		local env = createEnvironment(scriptEnvironmentGlobals, funcs, true)
-		setfenv(chunk, env)
+		setfenv(chunk, scriptEnvironment)
+
+		pushContext("template")
+
+		local ctx = getContext"template"
+		ctx._scriptEnvironmentGlobals.page   = getProtectionWrapper(page, "page")
+		ctx._scriptEnvironmentGlobals.params = scriptParams
+		ctx._scriptEnvironmentGlobals.P      = scriptParams
+		ctx.out = out
 
 		local ok, err = pcall(chunk)
+
+		popContext("template")
+
 		if not ok then
 			errorInGeneratedCodeFromTemplate(path, luaCode, err)
 		end
@@ -609,8 +609,12 @@ function writeOutputFile(category, pathRel, data, modTime)
 
 	local filename = getFilename(pathRel)
 	local ext      = getExtension(filename)
+
 	if fileProcessors[ext] then
+		pushContext("config")
 		data = fileProcessors[ext](data, pathRel)
+		popContext("config")
+
 		assertType(data, "string", "File processor didn't return a string. (%s)", ext)
 	end
 
@@ -789,18 +793,6 @@ end
 
 
 
-function include(htmlFileBasename)
-	local path = F("%s/%s.html", DIR_LAYOUTS, htmlFileBasename)
-	local template, err = getFileContents(path)
-	if not template then
-		errorf(2, "Could not read file '%s': %s", path, err)
-	end
-	local html = parseHtmlTemplate(path, template)
-	return html
-end
-
-
-
 function toUrl(urlStr)
 	urlStr = escapeUri(urlStr)
 	urlStr = urlStr:gsub("%%[0-9a-f][0-9a-f]", URI_PERCENT_CODES_TO_NOT_ENCODE)
@@ -947,9 +939,11 @@ end
 
 
 
-function newGeneratorObjectProxy(obj, name)
-	local proxy = setmetatable({}, {
+function getProtectionWrapper(obj, name)
+	local proxy = proxies[obj]
+	if proxy then  return proxy  end
 
+	proxy = setmetatable({}, {
 		__index = function(proxy, k)
 			local v = obj[k]
 			if v ~= nil then  return v  end
@@ -966,9 +960,11 @@ function newGeneratorObjectProxy(obj, name)
 				obj[k] = v
 			end
 		end,
-
 	})
+
+	proxies[obj]        = proxy
 	proxySources[proxy] = obj
+
 	return proxy
 end
 
@@ -982,56 +978,6 @@ end
 function toWindowsPath(path)
 	local winPath = path:gsub("/", "\\")
 	return winPath
-end
-
-
-
--- environment = createEnvironment( globals [, functions, enableScriptFunctions=false ] )
-function createEnvironment(G, funcs, enableScriptFunctions)
-	local env = {}
-
-	setmetatable(env, {
-		__index = function(env, k)
-			local v = funcs and funcs[k] or G[k]
-			if v ~= nil then  return v  end
-
-			if not enableScriptFunctions then
-				errorf(2, "Tried to get non-existent global '%s'.", tostring(k))
-			end
-
-			v = scriptFunctions[k]
-			if v then
-				setfenv(v, env) -- The script environment must update for each page.
-				return v
-			end
-
-			if isFile(F("%s/%s.lua", DIR_SCRIPTS, k)) then
-				local path = F("%s/%s.lua", DIR_SCRIPTS, k)
-
-				local chunk, err = loadfile(path)
-				if not chunk then
-					error(err, 2)
-				end
-
-				v = chunk()
-				if type(v) ~= "function" then
-					errorf(2, "%s did not return a function.", path)
-				end
-
-				setfenv(v, env)
-				scriptFunctions[k] = v
-				return v
-			end
-
-			errorf(2, "Tried to get non-existent global or script '%s'.", tostring(k))
-		end,
-
-		__newindex = function(env, k, v)
-			errorf(2, "Tried to set global '%s'. (Globals are disabled.)", tostring(k))
-		end,
-	})
-
-	return env
 end
 
 
@@ -1090,7 +1036,7 @@ function generateFromTemplate(pathRel, template, modTime)
 	-- 	preserveExistingOutputFile(category, pathRelOut)
 
 	-- else
-		local page = {
+		page = {
 			layout      = "page",
 			title       = "",
 			content     = "",
@@ -1107,13 +1053,9 @@ function generateFromTemplate(pathRel, template, modTime)
 		}
 		-- print(pathRel, (not isPage and " " or isHome and "H" or isIndex and "I" or "P"), page.permalink) -- DEBUG
 
-		local scriptParams = {}
+		scriptParams = {}
 
-		scriptEnvironmentGlobals.page   = newGeneratorObjectProxy(page, "page")
-		scriptEnvironmentGlobals.params = scriptParams
-		scriptEnvironmentGlobals.P      = scriptParams
-
-		local out
+		local outStr
 
 		if ext == "md" then
 			page.content = parseMarkdownTemplate(pathRel, template)
@@ -1121,7 +1063,7 @@ function generateFromTemplate(pathRel, template, modTime)
 			page.content = parseHtmlTemplate(pathRel, template)
 		else
 			assert(not isPage)
-			out = parseOtherTemplate(pathRel, template)
+			outStr = parseOtherTemplate(pathRel, template)
 		end
 
 		if isPage then
@@ -1130,18 +1072,15 @@ function generateFromTemplate(pathRel, template, modTime)
 				(dateStringToTime(page.publishDate) > os.time()) -- Is in future?
 			then
 				outputFileSkippedPageCount = outputFileSkippedPageCount+1
-				clearPageVariables()
 				return
 			end
 
 			local layoutTemplate, layoutPath = getLayoutTemplate(page.layout, pathRel)
-			out = parseHtmlTemplate(layoutPath, layoutTemplate)
+			outStr = parseHtmlTemplate(layoutPath, layoutTemplate)
 		end
 
-		clearPageVariables()
-
-		assert(out)
-		writeOutputFile(category, pathRelOut, out, modTime)
+		assert(outStr)
+		writeOutputFile(category, pathRelOut, outStr, modTime)
 	-- end
 end
 
@@ -1246,23 +1185,24 @@ end
 
 
 
--- template, path = getLayoutTemplate( layoutName [, context ] )
-function getLayoutTemplate(layoutName, context)
-	if layoutName == "page" and pageLayoutTemplate then
-		return pageLayoutTemplate, pageLayoutTemplatePath
-	end
-
+-- template, path = getLayoutTemplate( layoutName [, fileContext ] )
+function getLayoutTemplate(layoutName, fileContext)
 	local path = F("%s/%s.html", DIR_LAYOUTS, layoutName)
+
+	local template = layoutTemplates[path]
+	if template then  return template  end
+
 	local template, err = getFileContents(path)
 
 	if not template then
-		if context then
-			errorf("%s: Could not load layout '%s'. (%s)", context, layoutName, err)
+		if fileContext then
+			errorf("%s: Could not load layout '%s'. (%s)", fileContext, layoutName, err)
 		else
-			errorf("Could not load layout '%s'. (%s)", layoutName, err)
+			errorf(    "Could not load layout '%s'. (%s)",              layoutName, err)
 		end
 	end
 
+	layoutTemplates[path] = template
 	return template, path
 end
 
@@ -1283,14 +1223,6 @@ function splitString(s, sep, i, plain)
 
 	table.insert(parts, s:sub(i))
 	return parts
-end
-
-
-
-function clearPageVariables()
-	scriptEnvironmentGlobals.page   = nil
-	scriptEnvironmentGlobals.params = nil
-	scriptEnvironmentGlobals.P      = nil
 end
 
 
@@ -1338,15 +1270,44 @@ end
 
 
 
+function pushContext(ctxName)
+	local ctx = {_name=ctxName, _scriptEnvironmentGlobals={}}
+	table.insert(contextStack, ctx)
+end
+
+function popContext(ctxName)
+	assertContext(ctxName)
+	table.remove(contextStack)
+end
+
+-- assertContext( contextName [, functionContext ] )
+function assertContext(ctxName, funcContext)
+	local ctx = contextStack[#contextStack]
+	if not ctx or ctx._name ~= ctxName then
+		if funcContext then
+			errorf(2, "[%s] Context is wrong. (Expected '%s', but is '%s')", funcContext, ctxName, ctx and ctx._name or "none")
+		else
+			errorf(2,      "Context is wrong. (Expected '%s', but is '%s')",              ctxName, ctx and ctx._name or "none")
+		end
+	end
+end
+
+function getContext(ctxName)
+	if ctxName then  assertContext(ctxName)  end
+
+	return contextStack[#contextStack]
+end
+
+
+
 --==============================================================
 --==============================================================
 --==============================================================
 
+math.randomseed(os.time())
+math.random() -- Gotta kickstart the randomness.
 
 
--- webgen build [options]
--- webgen new site
--- webgen new page
 
 local args = {...}
 local i = 1
@@ -1543,7 +1504,7 @@ end
 
 
 -- Prepare log file.
-----------------------------------------------------------------
+--==============================================================
 
 if not isDirectory(DIR_LOGS) then
 	assert(lfs.mkdir(DIR_LOGS))
@@ -1562,17 +1523,283 @@ logFile = io.open(logPath, "w")
 
 
 
-----------------------------------------------------------------
+-- Prepare script environment.
+--==============================================================
 
-local function resetSiteVariables()
+scriptEnvironmentGlobals = {
+	_WEBGEN_VERSION  = _WEBGEN_VERSION,
+	IMAGE_EXTENSIONS = IMAGE_EXTENSIONS,
+
+	-- Lua globals.
+	_G             = nil, -- Deny direct access to the script environment.
+	_VERSION       = _VERSION,
+	assert         = _assert,
+	collectgarbage = collectgarbage,
+	dofile         = dofile,
+	error          = _error,
+	getfenv        = getfenv,
+	getmetatable   = getmetatable,
+	ipairs         = ipairs,
+	load           = load,
+	loadfile       = loadfile,
+	loadstring     = loadstring,
+	module         = module,
+	next           = next,
+	pairs          = pairs,
+	pcall          = _pcall,
+	print          = print,
+	rawequal       = rawequal,
+	rawget         = rawget,
+	rawset         = rawset,
+	require        = require,
+	select         = select,
+	setfenv        = setfenv,
+	setmetatable   = setmetatable,
+	tonumber       = tonumber,
+	tostring       = tostringForTemplates,
+	type           = type,
+	unpack         = unpack,
+	xpcall         = xpcall,
+
+	-- Lua modules.
+	coroutine      = coroutine,
+	debug          = debug,
+	io             = io,
+	math           = math,
+	os             = os,
+	package        = package,
+	string         = string,
+	table          = table,
+
+	-- Lua libraries.
+	lfs            = lfs,
+	socket         = socket,
+
+	-- Site objects. (Create at site generation.)
+	site           = nil,
+	data           = nil,
+
+	-- Page objects. (Create for each individual page. Store in context.)
+	page           = nil,
+	params         = nil,
+	P              = nil,
+
+	-- Utility functions.
+	date           = os.date,
+	entities       = encodeHtmlEntities,
+	F              = F,
+	find           = itemWith,
+	findAll        = itemWithAll,
+	generatorMeta  = generatorMeta,
+	getFilename    = getFilename,
+	indexOf        = indexOf,
+	markdown       = markdownToHtml,
+	printf         = printf,
+	sortNatural    = sortNatural,
+	split          = splitString,
+	trim           = trim,
+	trimNewlines   = trimNewlines,
+	url            = toUrl,
+	urlAbs         = toUrlAbsolute,
+	urlize         = urlize,
+
+	chooseExistingFile = function(pathWithoutExt, exts)
+		for _, ext in ipairs(exts) do
+			local path = pathWithoutExt.."."..ext
+			if isFile(DIR_CONTENT.."/"..path) then  return path  end
+		end
+		return nil
+	end,
+
+	chooseExistingImage = function(pathWithoutExt)
+		return scriptEnvironmentGlobals.chooseExistingFile(pathWithoutExt, IMAGE_EXTENSIONS)
+	end,
+
+	fileExists = function(path)
+		return isFile(DIR_CONTENT.."/"..path)
+	end,
+
+	getExtension = function(path)
+		return getExtension(getFilename(path))
+	end,
+
+	isAny = function(v1, values)
+		for _, v2 in ipairs(values) do
+			if v1 == v2 then  return true  end
+		end
+		return false
+	end,
+
+	newBuffer = function()
+		local buffer = {}
+
+		return function(...)
+			if select("#", ...) == 0 then  return table.concat(buffer)  end
+
+			local s = select("#", ...) == 1 and assertType(..., "string") or F(...)
+			table.insert(buffer, s)
+		end
+	end,
+
+	X = function(node, tagName) -- @Doc
+		assertType(node, "table", "Invalid XML argument.")
+		return (itemWith(node, "tag", tagName))
+	end,
+
+	Xs = function(node, tagName) -- @Doc
+		assertType(node, "table", "Invalid XML argument.")
+		return (itemWithAll(node, "tag", tagName))
+	end,
+
+	forXml = function(node, tagName) -- @Doc
+		assertType(node, "table", "Invalid XML argument.")
+		return ipairs(itemWithAll(node, "tag", tagName))
+	end,
+
+	printXmlTree = function(node) -- @Doc
+		assertType(node, "table", "Invalid XML argument.")
+
+		local function printNode(node, indent)
+			print(("    "):rep(indent)..node.tag)
+
+			indent = indent+1
+			for _, childNode in ipairs(node) do
+				if type(childNode) == "table" then
+					printNode(childNode, indent)
+				end
+			end
+		end
+
+		if xmlLib.is_tag(node) then
+			printNode(node, 0)
+		else
+			print("(xml array)")
+			for _, childNode in ipairs(node) do
+				printNode(childNode, 1)
+			end
+		end
+	end,
+
+	-- xmlGetTexts = function(node, tags)
+	-- 	local texts = {}
+	-- 	for i, tagName in ipairs(tags) do
+	-- 		texts[tagName] = itemWith(node, "tag", tagName):get_text()
+	-- 	end
+	-- 	return texts
+	-- end
+
+	-- xmlGetTexts = function(node, ...) -- Messy to call!
+	-- 	local function getText(tagName, ...)
+	-- 		if select("#", ...) > 0 then
+	-- 			return itemWith("tag", tagName):get_text(), getText(...)
+	-- 		end
+	-- 	end
+	-- 	return getText(...)
+	-- end
+
+	-- xmlGetTexts = function(node) -- Different than above.
+	-- 	local texts = {}
+	-- 	for i, childNode in ipairs(node) do
+	-- 		texts[i] = childNode:get_text()
+	-- 	end
+	-- 	return texts
+	-- end
+
+	-- Context functions.
+
+	echo = function(s)
+		assertContext("template", "echo")
+		if enableHtmlEncoding then
+			s = encodeHtmlEntities(s)
+		end
+		table.insert(getContext"template".out, s)
+	end,
+
+	echoRaw = function(s)
+		assertContext("template", "echoRaw")
+		table.insert(getContext"template".out, s)
+	end,
+
+	include = function(htmlFileBasename)
+		assertContext("template", "include")
+
+		local path = F("%s/%s.html", DIR_LAYOUTS, htmlFileBasename)
+		local template, err = getFileContents(path)
+		if not template then
+			errorf(2, "Could not read file '%s': %s", path, err)
+		end
+
+		local html = parseHtmlTemplate(path, template)
+		return html
+	end,
+
+	generateFromTemplate = function(pathRel, template)
+		assertContext("config", "generateFromTemplate")
+		generateFromTemplate(pathRel, template, nil)
+	end,
+
+	outputRaw = function(pathRel, contents)
+		assertContext("config", "outputRaw")
+		assertType(contents, "string", "The contents must be a string.")
+		writeOutputFile("otherRaw", pathRel, contents)
+	end,
+}
+
+
+
+scriptEnvironment = setmetatable({}, {
+	__index = function(env, k)
+		local v = getContext()._scriptEnvironmentGlobals[k] or scriptEnvironmentGlobals[k]
+		if v ~= nil then  return v  end
+
+		v = scriptFunctions[k]
+		if v then  return v  end
+
+		if isFile(F("%s/%s.lua", DIR_SCRIPTS, k)) then
+			local path = F("%s/%s.lua", DIR_SCRIPTS, k)
+
+			local chunk, err = loadfile(path)
+			if not chunk then
+				error(err, 2)
+			end
+
+			v = chunk()
+			if type(v) ~= "function" then
+				errorf(2, "%s did not return a function.", path)
+			end
+
+			setfenv(v, env)
+			scriptFunctions[k] = v
+			return v
+		end
+
+		errorf(2, "Tried to get non-existent global or script '%s'.", tostring(k))
+	end,
+
+	__newindex = function(env, k, v)
+		errorf(2, "Tried to set global '%s'. (Globals are disabled.)", tostring(k))
+	end,
+})
+
+
+
+-- Build website!
+--==============================================================
+
+local function buildWebsite()
+	local startTime = socket.gettime()
+
 	site = {
 		title        = "",
 		baseUrl      = "/",
 		languageCode = "",
 	}
 
+	contextStack                      = {}
+	proxies                           = {}
+	proxySources                      = {}
+	layoutTemplates                   = {}
 	scriptFunctions                   = {}
-	scriptEnvironmentGlobals          = nil
 
 	ignoreFiles                       = nil
 	ignoreFolders                     = nil
@@ -1588,212 +1815,8 @@ local function resetSiteVariables()
 	outputFilePreservedCount          = 0
 	outputFileSkippedPageCount        = 0
 
-	proxySources                      = {}
-
-	pageLayoutTemplatePath            = nil
-	pageLayoutTemplate                = nil
-
-	scriptsCanOutput                  = false
-
-
-	scriptEnvironmentGlobals = {
-		_WEBGEN_VERSION  = _WEBGEN_VERSION,
-		IMAGE_EXTENSIONS = IMAGE_EXTENSIONS,
-
-		-- Lua gloals.
-		_G             = nil,
-		_VERSION       = _VERSION,
-		assert         = _assert,
-		collectgarbage = collectgarbage,
-		dofile         = dofile,
-		error          = _error,
-		getfenv        = getfenv,
-		getmetatable   = getmetatable,
-		ipairs         = ipairs,
-		load           = load,
-		loadfile       = loadfile,
-		loadstring     = loadstring,
-		module         = module,
-		next           = next,
-		pairs          = pairs,
-		pcall          = _pcall,
-		print          = print,
-		rawequal       = rawequal,
-		rawget         = rawget,
-		rawset         = rawset,
-		require        = require,
-		select         = select,
-		setfenv        = setfenv,
-		setmetatable   = setmetatable,
-		tonumber       = tonumber,
-		tostring       = tostringForTemplates,
-		type           = type,
-		unpack         = unpack,
-		xpcall         = xpcall,
-
-		-- Lua modules.
-		coroutine      = coroutine,
-		debug          = debug,
-		io             = io,
-		math           = math,
-		os             = os,
-		package        = package,
-		string         = string,
-		table          = table,
-
-		-- Lua libraries.
-		lfs            = lfs,
-		socket         = socket,
-
-		-- Generator page objects. (Create for each individual page.)
-		page           = nil,
-		params         = nil,
-		P              = nil,
-
-		-- Other generator objects.
-		site           = newGeneratorObjectProxy(site, "site"),
-		data           = newDataFolderReader(DIR_DATA),
-
-		-- Generator functions.
-		date           = os.date,
-		entities       = encodeHtmlEntities,
-		F              = F,
-		find           = itemWith,
-		findAll        = itemWithAll,
-		generatorMeta  = generatorMeta,
-		getFilename    = getFilename,
-		indexOf        = indexOf,
-		markdown       = markdownToHtml,
-		printf         = printf,
-		sortNatural    = sortNatural,
-		split          = splitString,
-		trim           = trim,
-		trimNewlines   = trimNewlines,
-		url            = toUrl,
-		urlAbs         = toUrlAbsolute,
-		urlize         = urlize,
-
-		chooseExistingFile = function(pathWithoutExt, exts)
-			for _, ext in ipairs(exts) do
-				local path = pathWithoutExt.."."..ext
-				if isFile(DIR_CONTENT.."/"..path) then  return path  end
-			end
-			return nil
-		end,
-
-		chooseExistingImage = function(pathWithoutExt)
-			return scriptEnvironmentGlobals.chooseExistingFile(pathWithoutExt, IMAGE_EXTENSIONS)
-		end,
-
-		fileExists = function(path)
-			return isFile(DIR_CONTENT.."/"..path)
-		end,
-
-		getExtension = function(path)
-			return getExtension(getFilename(path))
-		end,
-
-		isAny = function(v1, values)
-			for _, v2 in ipairs(values) do
-				if v1 == v2 then  return true  end
-			end
-			return false
-		end,
-
-		newBuffer = function()
-			local buffer = {}
-
-			return function(...)
-				if select("#", ...) == 0 then  return table.concat(buffer)  end
-
-				local s = select("#", ...) == 1 and assertType(..., "string") or F(...)
-				table.insert(buffer, s)
-			end
-		end,
-
-		X = function(node, tagName) -- @Doc
-			assertType(node, "table", "Invalid XML argument.")
-			return (itemWith(node, "tag", tagName))
-		end,
-
-		Xs = function(node, tagName) -- @Doc
-			assertType(node, "table", "Invalid XML argument.")
-			return (itemWithAll(node, "tag", tagName))
-		end,
-
-		forXml = function(node, tagName) -- @Doc
-			assertType(node, "table", "Invalid XML argument.")
-			return ipairs(itemWithAll(node, "tag", tagName))
-		end,
-
-		printXmlTree = function(node) -- @Doc
-			assertType(node, "table", "Invalid XML argument.")
-
-			local function printNode(node, indent)
-				print(("    "):rep(indent)..node.tag)
-
-				indent = indent+1
-				for _, childNode in ipairs(node) do
-					if type(childNode) == "table" then
-						printNode(childNode, indent)
-					end
-				end
-			end
-
-			if xmlLib.is_tag(node) then
-				printNode(node, 0)
-			else
-				print("(xml array)")
-				for _, childNode in ipairs(node) do
-					printNode(childNode, 1)
-				end
-			end
-		end,
-
-		-- xmlGetTexts = function(node, tags)
-		-- 	local texts = {}
-		-- 	for i, tagName in ipairs(tags) do
-		-- 		texts[tagName] = itemWith(node, "tag", tagName):get_text()
-		-- 	end
-		-- 	return texts
-		-- end
-
-		-- xmlGetTexts = function(node, ...) -- Messy to call!
-		-- 	local function getText(tagName, ...)
-		-- 		if select("#", ...) > 0 then
-		-- 			return itemWith("tag", tagName):get_text(), getText(...)
-		-- 		end
-		-- 	end
-		-- 	return getText(...)
-		-- end
-
-		-- xmlGetTexts = function(node) -- Different than above.
-		-- 	local texts = {}
-		-- 	for i, childNode in ipairs(node) do
-		-- 		texts[i] = childNode:get_text()
-		-- 	end
-		-- 	return texts
-		-- end
-
-		-- Context functions.
-
-		generateFromTemplate = function(pathRel, template)
-			assert(scriptsCanOutput)
-			generateFromTemplate(pathRel, template, nil)
-		end,
-
-		outputRaw = function(pathRel, contents)
-			assert(scriptsCanOutput)
-			assertType(contents, "string", "The contents must be a string.")
-			writeOutputFile("otherRaw", pathRel, contents)
-		end,
-	}
-end
-
-local function buildWebsite()
-	local startTime = socket.gettime()
-
-	resetSiteVariables()
+	scriptEnvironmentGlobals.site = getProtectionWrapper(site, "site")
+	scriptEnvironmentGlobals.data = newDataFolderReader(DIR_DATA)
 
 
 
@@ -1801,13 +1824,12 @@ local function buildWebsite()
 	----------------------------------------------------------------
 
 	local config
-	local env = createEnvironment(scriptEnvironmentGlobals)
 
 	if not isFile"config.lua" then
 		config = {}
 	else
 		local chunk = assert(loadfile"config.lua")
-		setfenv(chunk, env)
+		setfenv(chunk, scriptEnvironment)
 		config = chunk()
 		assertTable(config, nil, nil, "config.lua must return a table.")
 	end
@@ -1841,17 +1863,10 @@ local function buildWebsite()
 		outputFileCounts[category] = 0
 	end
 
-	local err
-	pageLayoutTemplatePath = DIR_LAYOUTS.."/page.html"
-	pageLayoutTemplate, err = getFileContents(pageLayoutTemplatePath)
-	if not pageLayoutTemplate then
-		logprint("Notice: Could not load default page layout. (%s)", err)
-	end
-
 	if config.before then
-		scriptsCanOutput = true
+		pushContext("config")
 		config.before()
-		scriptsCanOutput = false
+		popContext("config")
 	end
 
 	-- Generate output.
@@ -1885,9 +1900,9 @@ local function buildWebsite()
 	end)
 
 	if config.after then
-		scriptsCanOutput = true
+		pushContext("config")
 		config.after()
-		scriptsCanOutput = false
+		popContext("config")
 	end
 
 	-- Cleanup old generated stuff.
@@ -1904,6 +1919,10 @@ local function buildWebsite()
 
 
 	----------------------------------------------------------------
+
+	if contextStack[1] then
+		logprint("Error: Context stack is not empty after generation. (Depth is %d)", #contextStack)
+	end
 
 	local endTime = socket.gettime()
 

@@ -122,6 +122,8 @@ Cats:
 
 {{fullscreenImage("/images/head.png")}}
 
+{{echoOgres()}}
+
 
 
 End of the first post!

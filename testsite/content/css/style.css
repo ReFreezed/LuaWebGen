@@ -2,4 +2,6 @@
 local textColor = "#99DDFF"
 }}
 
+/* Just a little comment here. Nothing to worry about. */
+
 body { color: {{textColor}}; }
