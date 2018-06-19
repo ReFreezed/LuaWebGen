@@ -1,5 +1,5 @@
 # LuaWebGen
-![](https://img.shields.io/badge/beta-0.4-green.svg)
+![](https://img.shields.io/badge/beta-0.5-green.svg)
 
 Static website generator in Lua 5.1. Somewhat inspired by [Hugo](https://gohugo.io/). Currently in **beta**.
 
@@ -32,12 +32,15 @@ A blog post, `my-first-post.md`:
 
 ```markdown
 {{
--- This is embedded Lua.
 page.title = "My First Blog Post!"
+local foo = "bar"
 }}
 
 Lorem ipsum dolor sit amet, consectetur adipiscing elit.
 Duis nec justo mollis, varius nulla sed, commodo nibh.
+
+1 + 2 * 3 = {{1+2*3}}<br>
+foo is {{foo}}
 
 # List of Cats
 
@@ -66,8 +69,8 @@ Page template, `page.html`:
 
 LuaWebGen requires Lua 5.1 and these libraries:
 
-- LuaFileSystem
-- LuaSocket
+- [LuaFileSystem](https://keplerproject.github.io/luafilesystem/)
+- [LuaSocket](http://w3.impa.br/~diego/software/luasocket/home.html)
 
 If you're on Windows you can simply install [Lua for Windows](https://github.com/rjpcomputing/luaforwindows).
 
@@ -75,8 +78,9 @@ If you're on Windows you can simply install [Lua for Windows](https://github.com
 
 To generate a website, run this from the command line:
 
-```
-lua main.lua "path/to/site/root"
+```batch
+cd path/to/site/root
+lua path/to/LuaWebGen/main.lua build
 ```
 
 LuaWebGen expects this folder hierarchy:

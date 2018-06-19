@@ -2,7 +2,8 @@
 
 - [Notes](#notes)
 - [Command Line](#command-line)
-	- [Options](#options)
+	- [Commands](#commands)
+	- [Build Options](#build-options)
 - [Site Configuration](#site-configuration)
 - [Control Structures](#control-structures)
 - [Constants](#constants)
@@ -18,7 +19,8 @@
 
 ## Notes
 
-You can use any standard Lua library normally in your code, like `io` and `math` (including <abbr title="LuaFileSystem">`lfs`</abbr> and `socket`).
+You can use any standard Lua library normally in your code, like `io` and `os`
+(including <abbr title="LuaFileSystem">`lfs`</abbr> and `socket`).
 
 You cannot add you own globals directly - use the *scripts* folder to define global functions,
 and the *data* folder to store globally accessible data.
@@ -28,13 +30,45 @@ The idea is that this restriction should prevent accidental global access.
 
 ## Command Line
 
-To generate your website, run this from the command line:
+To use LuaWebGen, navigate to your site's root folder and run this from the command line:
 
-```
-lua "path/to/LuaWebGen/main.lua" "path/to/site/root" [options]
+```batch
+lua "path/to/LuaWebGen/main.lua" some_command [options]
 ```
 
-### Options
+In Windows you can optionally add `path/to/LuaWebGen` to your [`PATH`](https://www.computerhope.com/issues/ch000549.htm)
+and take advantage of `webgen.exe`:
+
+```batch
+webgen some_command [options]
+```
+
+Much nicer! The rest of the documentation will use this format.
+
+### Commands
+
+#### `build`
+```batch
+webgen build [options]
+```
+
+Build the website. (Also look at available [options](#build-options).)
+
+#### `new page`
+```batch
+webgen new page "page_path"
+```
+
+Create a new page with some basic information. Example: `webgen new page blog/first-post.md`
+
+#### `new site`
+```batch
+webgen new site "folder_name"
+```
+
+Initialize a folder to contain a new site.
+
+### Build Options
 
 #### `--autobuild` or `-a`
 Auto-build website when changes are detected. This makes LuaWebGen run until you press `Ctrl`+`C` in the command prompt.
@@ -394,7 +428,7 @@ The title of the current page. Each page should update this value.
 Access data from the *data* folder.
 Type e.g. `data.cats` to retrieve the contents of `data/cats.lua`.
 Data files can be `.lua`, `.toml` or `.xml` files.
-(LuaWebGen uses [Penlight](https://stevedonovan.github.io/Penlight/api/topics/06-data.md.html#XML) for XML files.)
+(LuaWebGen uses [Penlight](https://stevedonovan.github.io/Penlight/api/topics/06-data.md.html#XML) for XML data.)
 
 #### params
 `params` or `P`

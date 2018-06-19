@@ -6,7 +6,7 @@
 --=
 --============================================================]]
 
-local _WEBGEN_VERSION = "0.4.0"
+local _WEBGEN_VERSION = "0.5.0"
 
 
 
@@ -118,6 +118,7 @@ local dateStringToTime
 local encodeHtmlEntities
 local error, errorf, fileerror, errorInGeneratedCodeFromTemplate
 local F, formatBytes
+local formatArticle
 local generateFromTemplate
 local generatorMeta
 local getDirectory, getFilename, getExtension
@@ -143,6 +144,7 @@ local tostringForTemplates
 local toUrl, toUrlAbsolute, urlize
 local traverseDirectory, traverseFiles
 local trim, trimNewlines
+local unindent
 local writeOutputFile, preserveExistingOutputFile
 
 
@@ -1312,53 +1314,231 @@ end
 
 
 
+function unindent(s)
+	local indent = s:match"^\t+"
+	if indent then
+		s = s
+			:gsub("\n"..indent, "\n")
+			:sub(#indent+1)
+			:gsub("\t+$", "")
+	end
+
+	return s
+end
+
+
+
+function formatArticle(s, values)
+	s = s:gsub(":(%a%w*):", function(k)
+		return  values[k]  or printf("WARNING: No format value for '%s'.", k)
+	end)
+
+	return unindent(s)
+end
+
+
+
 --==============================================================
 --==============================================================
 --==============================================================
 
 
 
-local ignoreModificationTimes = false
-local autobuild = false
-
-local pathToSiteOnDisc = nil
+-- webgen build [options]
+-- webgen new site
+-- webgen new page
 
 local args = {...}
 local i = 1
 
-while args[i] do
-	local arg = args[i]
+local command = args[i] or error("[arg] Missing command.")
+i = i+1
 
-	if arg == "-f" or arg == "--force" then
-		ignoreModificationTimes = true
+local ignoreModificationTimes = false
+local autobuild = false
 
-	elseif arg == "-a" or arg == "--autobuild" then
-		autobuild = true
+----------------------------------------------------------------
 
-	elseif arg == "-d" or arg == "--drafts" then
-		includeDrafts = true
+if command == "new" then
+	local kind = args[i] or error("[arg] Missing kind after 'new'.")
+	i = i+1
 
-	elseif arg:find"^%-" then
-		errorf("[arg] Unknown option '%s'.", arg)
+	if kind == "page" then
+		local pathRel = args[i] or error("[arg] Missing path after 'page'.")
+		i = i+1
 
-	elseif not pathToSiteOnDisc then
-		pathToSiteOnDisc = arg
+		if args[i] then
+			errorf("[arg] Unknown argument '%s'.", args[i])
+		end
+
+		local filename = getFilename(pathRel)
+		local ext      = getExtension(filename)
+		local basename = ext == "" and filename or filename:sub(1, #filename-#ext-1)
+		local title    = basename :gsub("%-+", " ") :gsub("^%a", string.upper) :gsub(" %a", string.upper)
+
+		local contents = formatArticle(
+			[=[
+				{{
+				page.title       = :titleQuoted:
+				page.publishDate = ":date:"
+				}}
+
+				:content:
+			]=], {
+				titleQuoted = F("%q", title),
+				content     = "",
+				date        = os.date"%Y-%m-%d %H:%M:%S",
+			}
+		)
+
+		local path = DIR_CONTENT.."/"..pathRel
+		if lfs.attributes(path, "mode") then
+			errorf("Item already exists: %s", path)
+		end
+
+		local file = assert(io.open(path, "wb"))
+		file:write(contents)
+		file:close()
+
+		printf("Created page: %s", path)
+
+	elseif kind == "site" then
+		local pathToSite = args[i] or error("[arg] Missing path after 'site'.")
+		i = i+1
+
+		if args[i] then
+			errorf("[arg] Unknown argument '%s'.", args[i])
+		end
+
+		-- Create folders.
+		for _, path in ipairs{
+			pathToSite,
+			pathToSite.."/"..DIR_CONTENT,
+			pathToSite.."/"..DIR_DATA,
+			pathToSite.."/"..DIR_LAYOUTS,
+			pathToSite.."/"..DIR_LOGS,
+			pathToSite.."/"..DIR_OUTPUT,
+			pathToSite.."/"..DIR_SCRIPTS,
+		} do
+			if not isDirectory(path) then
+				assert(lfs.mkdir(path))
+			end
+		end
+
+		-- Create config.
+		local path = pathToSite.."/config.lua"
+
+		if not isFile(path) then
+			local title = getFilename(pathToSite)
+
+			local contents = formatArticle(
+				[=[
+					return {
+						title         = :titleQuoted:,
+						baseUrl       = "http://example.com/",
+						languageCode  = "en",
+
+						ignoreFiles   = {"%.tmp$"},
+						ignoreFolders = {"^%."},
+					}
+				]=], {
+					titleQuoted = F("%q", title),
+				}
+			)
+
+			local file = assert(io.open(path, "wb"))
+			file:write(contents)
+			file:close()
+		end
+
+		-- Create default page layout.
+		local path = F("%s/%s/page.html", pathToSite, DIR_LAYOUTS)
+
+		if not isFile(path) then
+			local title = getFilename(pathToSite)
+
+			local contents = formatArticle(
+				[=[
+					<!DOCTYPE html>
+					<html lang="{{site.languageCode}}">
+					<head>
+						<meta charset="utf-8">
+
+						<meta name="viewport" content="width=device-width, initial-scale=1">
+						{{generatorMeta()}}
+
+						<base href="{{site.baseUrl}}">
+
+						<title>
+							{{page.title ~= "" and page.title.." |" or ""}}
+							{{site.title}}
+						</title>
+
+						<link rel="canonical" href="{{page.permalink}}">
+					</head>
+
+					<body>
+						{{page.content}}
+					</body>
+
+					</html>
+				]=], {
+					-- ...
+				}
+			)
+
+			local file = assert(io.open(path, "wb"))
+			file:write(contents)
+			file:close()
+		end
+
+		printf("Created site: %s", pathToSite)
 
 	else
-		errorf("[arg] Unknown argument '%s'.", arg)
+		errorf("[arg] Unknown kind '%s' after 'new'.", kind)
 	end
 
-	i = i+1
+	return
+
+----------------------------------------------------------------
+
+elseif command == "build" then
+	while args[i] do
+		local arg = args[i]
+
+		if arg == "--force" or arg == "-f" then
+			ignoreModificationTimes = true
+
+		elseif arg == "--autobuild" or arg == "-a" then
+			autobuild = true
+
+		elseif arg == "--drafts" or arg == "-d" then
+			includeDrafts = true
+
+		elseif arg:find"^%-" then
+			errorf("[arg] Unknown option '%s'.", arg)
+
+		else
+			errorf("[arg] Unknown argument '%s'.", arg)
+		end
+
+		i = i+1
+	end
+
+	if not (isDirectory(DIR_CONTENT) or isDirectory(DIR_LAYOUTS) or isFile"config.lua") then
+		error("The current folder doesn't seem to contain a site.")
+	end
+
+	if ignoreModificationTimes then  logprint("Option --force: Ignoring modification times.")  end
+	if autobuild               then  logprint("Option --autobuild: Auto-building website. Press Ctrl+C to stop.")  end
+	if includeDrafts           then  logprint("Option --drafts: Drafts are included.")  end
+
+	logprint("Site folder: %s", toNormalPath(lfs.currentdir()))
+
+----------------------------------------------------------------
+else
+	errorf("[arg] Unknown command '%s'.", command)
 end
-
-if not pathToSiteOnDisc then  error("Missing required pathToSiteOnDisc argument.")  end
-
-if ignoreModificationTimes then  logprint("Option --force: Ignoring modification times.")  end
-if autobuild               then  logprint("Option --autobuild: Auto-building website. Press Ctrl+C to stop.")  end
-if includeDrafts           then  logprint("Option --drafts: Drafts are included.")  end
-
-assert(lfs.chdir(pathToSiteOnDisc))
-logprint("Site folder: %s", toNormalPath(lfs.currentdir()))
 
 
 
