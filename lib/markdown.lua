@@ -360,9 +360,9 @@ local PD = {
 -- Pattern for matching a block tag that begins and ends in the leftmost
 -- column and may contain indented subtags, i.e.
 -- <div>
---    A nested block.
---    <div>
---        Nested data.
+--     A nested block.
+--     <div>
+--         Nested data.
 --     </div>
 -- </div>
 function block_pattern(tag)
@@ -378,6 +378,7 @@ end
 -- returns the protected string.
 function protect_range(text, start, stop)
 	local s = text:sub(start, stop)
+	-- print("--------") print(s) print("--------") -- DEBUG
 	local h = hash(s)
 	PD.blocks[h] = s
 	text = text:sub(1,start) .. h .. text:sub(stop)
@@ -396,6 +397,7 @@ function protect_matches(text, patterns)
 end
 
 -- Protects blocklevel tags in the specified text
+-- @Bug: Nested tags of the same type doesn't always get protected properly.
 function protect(text)
 	-- First protect potentially nested block tags
 	text = protect_matches(text, map(PD.tags, block_pattern))

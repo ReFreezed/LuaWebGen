@@ -111,7 +111,7 @@ Control structures in templates behave pretty much like in normal Lua, but here 
 
 #### fori
 
-Two versions of a simplified `for` statement.
+Two versions of a simplified `for` statement:
 
 ```markdown
 {{fori dog in data.dogs}}
@@ -145,6 +145,7 @@ An array of common image file extensions.
 - [`chooseExistingImage()`](#chooseexistingimage)
 - [`date()`](#date)
 - [`entities()`](#entities)
+- [`errorf()`](#errorf)
 - [`F()`](#f)
 - [`fileExists()`](#fileexists)
 - [`find()`](#find)
@@ -155,10 +156,14 @@ An array of common image file extensions.
 - [`indexOf()`](#indexof)
 - [`isAny()`](#isany)
 - [`markdown()`](#markdown)
+- [`max()`](#max)
+- [`min()`](#min)
 - [`newBuffer()`](#newbuffer)
 - [`printf()`](#printf)
+- [`round()`](#round)
 - [`sortNatural()`](#sortnatural)
 - [`split()`](#split)
+- [`thumb()`](#thumb)
 - [`trim()`](#trim)
 - [`trimNewlines()`](#trimnewlines)
 - [`url()`](#url)
@@ -187,6 +192,13 @@ Alias for [`os.date()`](http://www.lua.org/manual/5.1/manual.html#pdf-os.date).
 `html = entities( text )`
 
 Encode HTML entities, e.g. `<` to `&lt;`.
+
+#### errorf()
+`errorf( [ level=1, ] format, ... )`
+
+Trigger an error with a formatted message.
+
+Short form for `error(F(format, ...), level)`.
 
 #### F()
 `string = F( format, ... )`
@@ -240,6 +252,16 @@ Check if `value` exists in the `values` array.
 
 Convert markdown to HTML.
 
+#### max()
+`n = max( n1, n2, ... )`
+
+Alias for [`math.max()`](http://www.lua.org/manual/5.1/manual.html#pdf-math.max).
+
+#### min()
+`n = min( n1, n2, ... )`
+
+Alias for [`math.min()`](http://www.lua.org/manual/5.1/manual.html#pdf-math.min).
+
 #### newBuffer()
 `buffer = newBuffer( )`
 
@@ -261,6 +283,11 @@ local html = b() -- No arguments returns the buffer as a string.
 
 Short form for `print(F(format, ...))`.
 
+#### round()
+`number = round( number )`
+
+Round a number.
+
 #### sortNatural()
 `array = sortNatural( array [, attribute ] )`
 
@@ -274,6 +301,19 @@ Split a string by a pattern. Example:
 
 ```lua
 local dogs = split("Fido,Grumpy,The Destroyer", ",")
+```
+
+#### thumb()
+`html = thumb( imagePath, thumbWidth [, thumbHeight ] [, isLink=false ] )`
+
+Create a thumbnail from an image.
+At least one of `thumbWidth` or `thumbHeight` must be a positive number.
+Example:
+
+```
+{{thumb("images/gorillaz-fan-art.png", 400, 400, true)}}
+{{thumb("images/a-big-tree.gif", 512, true)}}
+{{thumb("images/1000-clown-cars.jpg", 0, 350, false)}}
 ```
 
 #### trim()
@@ -320,6 +360,7 @@ urlize("Hello, big world!") -- "hello-big-world"
 - [`echoRaw()`](#echoraw)
 - [`generateFromTemplate()`](#generatefromtemplate)
 - [`include()`](#include)
+- [`isCurrentUrl()`](#iscurrenturl)
 - [`outputRaw()`](#outputraw)
 
 There are currently two contexts where code can run:
@@ -360,7 +401,19 @@ generateFromTemplate("dogs/fido.md", "# Fido\n\nFido is fluffy!")
 #### include()
 `html = include( filename )`
 
-Get a HTML template from the *layouts* folder. Available in templates. **Note:** Exclude the extension in the filename (e.g. `include"footer"`).
+Get a HTML template from the *layouts* folder. Available in templates.
+**Note:** Exclude the extension in the filename (e.g. `include"footer"`).
+
+#### isCurrentUrl()
+`bool = isCurrentUrl( url )`
+
+Check if the relative URL of the current page is `url`. Example:
+
+```
+{{if isCurrentUrl"/blog/last-post/"}}
+You've reached the end!
+{{end}}
+```
 
 #### outputRaw()
 `outputRaw( path, contents )`
@@ -378,6 +431,9 @@ These values can be configured in *config.lua* .
 
 #### site.baseUrl
 The base part of the website's URL, e.g. `http://www.example.com/`.
+
+#### site.defaultLayout
+The default layout pages will use. The default value is `"page"` (which corresponds to the file `layouts/page.html`).
 
 #### site.languageCode
 The code for the language of the website, e.g. `dk`. (This doesn't do much yet, but will be used for i18n in the future.)
@@ -407,10 +463,10 @@ If the current page is in fact a page. This value is false for CSS files.
 
 #### page.layout
 What layout template the page should use.
-The default is `"page"` (which corresponds to the file `layouts/page.html`).
+The default is the value of `site.defaultLayout`.
 
 #### page.permalink
-The URL to the current page.
+The permanent URL to the current page.
 
 #### page.publishDate
 What date the page is published (in *local* time).
@@ -419,6 +475,9 @@ Must have the format `"YYYY-MM-DD hh:mm:ss"`.
 
 #### page.title
 The title of the current page. Each page should update this value.
+
+#### page.url
+The relative URL to the current page on the site.
 
 
 

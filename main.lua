@@ -6,7 +6,7 @@
 --=
 --============================================================]]
 
-local _WEBGEN_VERSION = "0.5.1"
+local _WEBGEN_VERSION = "0.6.0"
 
 
 
@@ -51,6 +51,7 @@ local IMAGE_EXTENSIONS = {"png","jpg","jpeg","gif"}
 -- Modules.
 package.path = debug.getinfo(1, "S").source:gsub("^@", ""):gsub("[^/\\]*$", "lib/?.lua;")..package.path
 
+local gd          = require"gd"
 local lfs         = require"lfs"
 local socket      = require"socket"
 
@@ -103,6 +104,8 @@ local outputFileByteCount               = 0
 local outputFilePreservedCount          = 0
 local outputFileSkippedPageCount        = 0
 
+local thumbnailInfos                    = nil
+
 
 
 -- Page variables.
@@ -117,6 +120,7 @@ local scriptParams = nil
 
 local assert, assertf, assertType, assertTable
 local createDirectory, isDirectoryEmpty, removeEmptyDirectories
+local createThumbnail
 local dateStringToTime
 local encodeHtmlEntities
 local error, errorf, fileerror, errorInGeneratedCodeFromTemplate
@@ -124,7 +128,7 @@ local F, formatBytes
 local formatArticle
 local generateFromTemplate
 local generatorMeta
-local getDirectory, getFilename, getExtension
+local getDirectory, getFilename, getExtension, getBasename
 local getFileContents
 local getLayoutTemplate
 local getLineNumber
@@ -135,10 +139,12 @@ local isFile, isDirectory
 local isStringMatchingAnyPattern
 local markdownToHtml
 local newDataFolderReader
+local newStringBuffer
 local parseMarkdownTemplate, parseHtmlTemplate, parseOtherTemplate
 local pcall
 local print, printf, log, logprint
 local pushContext, popContext, assertContext, getContext
+local round
 local sortNatural
 local splitString
 local storeArgs
@@ -190,9 +196,9 @@ function traverseFiles(dirPath, ignoreFolders, cb, _pathRelStart)
 			local mode = lfs.attributes(path, "mode")
 
 			if mode == "file" then
-				local pathRel = path:sub(_pathRelStart)
-				local ext     = getExtension(name)
-				local abort   = cb(path, pathRel, name, ext)
+				local pathRel  = path:sub(_pathRelStart)
+				local extLower = getExtension(name):lower()
+				local abort    = cb(path, pathRel, name, extLower)
 				if abort then  return true  end
 
 			elseif mode == "directory" and not (ignoreFolders and isStringMatchingAnyPattern(name, ignoreFolders)) then
@@ -608,14 +614,14 @@ function writeOutputFile(category, pathRel, data, modTime)
 	end
 
 	local filename = getFilename(pathRel)
-	local ext      = getExtension(filename)
+	local extLower = getExtension(filename):lower()
 
-	if fileProcessors[ext] then
+	if fileProcessors[extLower] then
 		pushContext("config")
-		data = fileProcessors[ext](data, pathRel)
+		data = fileProcessors[extLower](data, pathRel)
 		popContext("config")
 
-		assertType(data, "string", "File processor didn't return a string. (%s)", ext)
+		assertType(data, "string", "File processor didn't return a string. (%s)", extLower)
 	end
 
 	local path = DIR_OUTPUT.."/"..pathRel
@@ -994,6 +1000,13 @@ function getExtension(filename)
 	return filename:match"%.([^.]+)$" or ""
 end
 
+function getBasename(filename)
+	local ext = getExtension(filename)
+	if ext == "" then  return filename  end
+
+	return filename:sub(1, #filename-#ext-1)
+end
+
 
 
 -- generateFromTemplate( pathRelative, template [, modificationTime ] )
@@ -1003,11 +1016,12 @@ function generateFromTemplate(pathRel, template, modTime)
 
 	local filename = getFilename(pathRel)
 	local ext      = getExtension(filename)
+	local extLower = ext:lower()
 
-	assert(TEMPLATE_EXTENSION_SET[ext])
+	assert(TEMPLATE_EXTENSION_SET[extLower])
 
-	local isPage  = PAGE_EXTENSION_SET[ext] or false
-	local isIndex = isPage  and filename:sub(1, #filename-#ext-1) == "index"
+	local isPage  = PAGE_EXTENSION_SET[extLower] or false
+	local isIndex = isPage  and getBasename(filename) == "index"
 	local isHome  = isIndex and pathRel == filename
 
 	local category = isPage and "page" or "otherTemplate"
@@ -1037,13 +1051,14 @@ function generateFromTemplate(pathRel, template, modTime)
 
 	-- else
 		page = {
-			layout      = "page",
+			layout      = site.defaultLayout,
 			title       = "",
 			content     = "",
 
 			publishDate = os.date("%Y-%m-%d %H:%M:%S", 0),
 			isDraft     = false,
 
+			url         = "/"..permalinkRel,
 			permalink   = site.baseUrl..(removeTrailingSlashFromPermalinks and permalinkRel:gsub("/$", "") or permalinkRel),
 			rssLink     = "", -- @Incomplete @Doc
 
@@ -1057,9 +1072,9 @@ function generateFromTemplate(pathRel, template, modTime)
 
 		local outStr
 
-		if ext == "md" then
+		if extLower == "md" then
 			page.content = parseMarkdownTemplate(pathRel, template)
-		elseif ext == "html" then
+		elseif extLower == "html" then
 			page.content = parseHtmlTemplate(pathRel, template)
 		else
 			assert(not isPage)
@@ -1292,10 +1307,123 @@ function assertContext(ctxName, funcContext)
 	end
 end
 
+-- context = getContext( [ contextName ] )
 function getContext(ctxName)
 	if ctxName then  assertContext(ctxName)  end
 
 	return contextStack[#contextStack]
+end
+
+
+
+-- thumbnailInfo = createThumbnail( imagePathRelative, thumbWidth [, thumbHeight ] )
+do
+	local imageLoaders = {
+		["png"]  = gd.createFromPng,
+		["jpg"]  = gd.createFromJpeg,
+		["jpeg"] = gd.createFromJpeg,
+		["gif"]  = gd.createFromGif,
+	}
+	local imageCreatorMethods = {
+		["png"]  = "pngStr",
+		["jpg"]  = "jpegStr",
+		["jpeg"] = "jpegStr",
+		["gif"]  = "gifStr",
+	}
+
+	function createThumbnail(pathImageRel, thumbW, thumbH, errLevel)
+		thumbW   = thumbW or 0
+		thumbH   = thumbH or 0
+		errLevel = (errLevel or 1)+1
+
+		if thumbW == 0 and thumbH == 0 then
+			error("Thumbnail images must have at least a width or a height.", errLevel)
+		end
+
+		local id = F("%s:%dx%d", pathImageRel, thumbW, thumbH)
+		if thumbnailInfos[id] then
+			return thumbnailInfos[id]
+		end
+
+		local filename  = getFilename(pathImageRel)
+		local basename  = getBasename(filename)
+		local ext       = getExtension(filename)
+		local extLower  = ext:lower()
+		local folder    = pathImageRel:sub(1, #pathImageRel-#filename)
+		local pathImage = DIR_CONTENT.."/"..pathImageRel
+
+		if not isFile(pathImage) then
+			errorf(errLevel, "File does not exist: %s", pathImage)
+		end
+
+		local loadImage = imageLoaders[extLower]
+			or errorf(errLevel, "Unknown image file format '%'.", extLower)
+
+		local image = loadImage(pathImage)
+			or errorf(errLevel, "Could not load image '%s'. Maybe the image is corrupted?", pathImage)
+
+		local imageW, imageH = image:sizeXY()
+		assert(imageW > 0)
+		assert(imageH > 0)
+		local aspectRatio = imageW/imageH
+
+		if thumbW == 0 then
+			thumbW = round(thumbH*aspectRatio)
+		elseif thumbH == 0 then
+			thumbH = round(thumbW/aspectRatio)
+		end
+		thumbW = math.max(thumbW, 1)
+		thumbH = math.max(thumbH, 1)
+
+		local scale = math.min(imageW/thumbW, imageH/thumbH)
+
+		local thumb = gd.createTrueColor(thumbW, thumbH)
+		thumb:copyResampled(
+			image,
+			0, -- dstX
+			0, -- dstY
+			round((imageW-thumbW*scale)/2), -- srcX
+			round((imageH-thumbH*scale)/2), -- srcY
+			thumbW, -- dstW
+			thumbH, -- dstH
+			round(thumbW*scale), -- srcW
+			round(thumbH*scale)  -- srcH
+		)
+
+		local imageCreatorMethod = "jpegStr"--assert(imageCreatorMethods[extLower], extLower)
+		local contents           = thumb[imageCreatorMethod](thumb, 75)
+		local pathThumbRel       = F("%s%s.%dx%d.%s", folder, basename, thumbW, thumbH, "jpg")--ext)
+		writeOutputFile("otherRaw", pathThumbRel, contents)
+
+		local thumbInfo = {
+			path   = pathThumbRel,
+			width  = thumbW,
+			height = thumbH,
+		}
+
+		thumbnailInfos[id] = thumbInfo
+		return thumbInfo
+	end
+
+end
+
+
+
+function round(n)
+	return math.floor(n+0.5)
+end
+
+
+
+function newStringBuffer()
+	local buffer = {}
+
+	return function(...)
+		if select("#", ...) == 0 then  return table.concat(buffer)  end
+
+		local s = select("#", ...) == 1 and assertType(..., "string") or F(...)
+		table.insert(buffer, s)
+	end
 end
 
 
@@ -1333,8 +1461,7 @@ if command == "new" then
 		end
 
 		local filename = getFilename(pathRel)
-		local ext      = getExtension(filename)
-		local basename = ext == "" and filename or filename:sub(1, #filename-#ext-1)
+		local basename = getBasename(filename)
 		local title    = basename :gsub("%-+", " ") :gsub("^%a", string.upper) :gsub(" %a", string.upper)
 
 		local contents = formatArticle(
@@ -1587,6 +1714,7 @@ scriptEnvironmentGlobals = {
 	-- Utility functions.
 	date           = os.date,
 	entities       = encodeHtmlEntities,
+	errorf         = errorf,
 	F              = F,
 	find           = itemWith,
 	findAll        = itemWithAll,
@@ -1594,7 +1722,11 @@ scriptEnvironmentGlobals = {
 	getFilename    = getFilename,
 	indexOf        = indexOf,
 	markdown       = markdownToHtml,
+	max            = max,
+	min            = min,
+	newBuffer      = newStringBuffer,
 	printf         = printf,
+	round          = round,
 	sortNatural    = sortNatural,
 	split          = splitString,
 	trim           = trim,
@@ -1628,17 +1760,6 @@ scriptEnvironmentGlobals = {
 			if v1 == v2 then  return true  end
 		end
 		return false
-	end,
-
-	newBuffer = function()
-		local buffer = {}
-
-		return function(...)
-			if select("#", ...) == 0 then  return table.concat(buffer)  end
-
-			local s = select("#", ...) == 1 and assertType(..., "string") or F(...)
-			table.insert(buffer, s)
-		end
 	end,
 
 	X = function(node, tagName) -- @Doc
@@ -1705,6 +1826,22 @@ scriptEnvironmentGlobals = {
 	-- 	return texts
 	-- end
 
+	thumb = function(pathImageRel, thumbW, thumbH, isLink)
+		if type(thumbH) == "boolean" then
+			thumbH, isLink = 0, thumbH
+		end
+		assert(not pathImageRel:find"^/")
+
+		local thumbInfo = createThumbnail(pathImageRel, thumbW, thumbH, 2)
+
+		local b = newStringBuffer()
+		if isLink then  b('<a href="%s" target="_blank">', toUrl("/"..pathImageRel))  end
+		b('<img src="%s" width="%d" height="%d" alt="">', toUrl("/"..thumbInfo.path), thumbInfo.width, thumbInfo.height)
+		if isLink then  b('</a>')  end
+
+		return b()
+	end,
+
 	-- Context functions.
 
 	echo = function(s)
@@ -1742,6 +1879,11 @@ scriptEnvironmentGlobals = {
 		assertContext("config", "outputRaw")
 		assertType(contents, "string", "The contents must be a string.")
 		writeOutputFile("otherRaw", pathRel, contents)
+	end,
+
+	isCurrentUrl = function(url)
+		assertContext("template", "isCurrentUrl")
+		return page.url == url
 	end,
 }
 
@@ -1790,9 +1932,10 @@ local function buildWebsite()
 	local startTime = socket.gettime()
 
 	site = {
-		title        = "",
-		baseUrl      = "/",
-		languageCode = "",
+		title         = "",
+		baseUrl       = "/",
+		languageCode  = "",
+		defaultLayout = "page",
 	}
 
 	contextStack                      = {}
@@ -1815,6 +1958,8 @@ local function buildWebsite()
 	outputFilePreservedCount          = 0
 	outputFileSkippedPageCount        = 0
 
+	thumbnailInfos                    = {}
+
 	scriptEnvironmentGlobals.site = getProtectionWrapper(site, "site")
 	scriptEnvironmentGlobals.data = newDataFolderReader(DIR_DATA)
 
@@ -1834,9 +1979,10 @@ local function buildWebsite()
 		assertTable(config, nil, nil, "config.lua must return a table.")
 	end
 
-	site.title        = assertType(config.title        or "", "string", "config.title must be a string.")
-	site.baseUrl      = assertType(config.baseUrl      or "", "string", "config.baseUrl must be a string.")
-	site.languageCode = assertType(config.languageCode or "", "string", "config.languageCode must be a string.")
+	site.title         = assertType(config.title         or "",     "string", "config.title must be a string.")
+	site.baseUrl       = assertType(config.baseUrl       or "",     "string", "config.baseUrl must be a string.")
+	site.languageCode  = assertType(config.languageCode  or "",     "string", "config.languageCode must be a string.")
+	site.defaultLayout = assertType(config.defaultLayout or "page", "string", "config.defaultLayout must be a string.")
 
 	ignoreFiles   = assertTable(config.ignoreFiles   or {}, "number", "string", "config.ignoreFiles must be an array of strings.")
 	ignoreFolders = assertTable(config.ignoreFolders or {}, "number", "string", "config.ignoreFolders must be an array of strings.")
@@ -1870,13 +2016,13 @@ local function buildWebsite()
 	end
 
 	-- Generate output.
-	traverseFiles(DIR_CONTENT, ignoreFolders, function(path, pathRel, filename, ext)
+	traverseFiles(DIR_CONTENT, ignoreFolders, function(path, pathRel, filename, extLower)
 		local modTime = lfs.attributes(path, "modification")
 
 		if isStringMatchingAnyPattern(filename, ignoreFiles) then
 			-- Ignore.
 
-		elseif TEMPLATE_EXTENSION_SET[ext] then
+		elseif TEMPLATE_EXTENSION_SET[extLower] then
 			local template = assert(getFileContents(path))
 			generateFromTemplate(pathRel, template, modTime)
 
@@ -1886,7 +2032,7 @@ local function buildWebsite()
 			-- Non-templates should be OK to preserve (if there's no file processor).
 			local oldModTime
 				=   not ignoreModificationTimes
-				and not fileProcessors[ext]
+				and not fileProcessors[extLower]
 				and lfs.attributes(DIR_OUTPUT.."/"..pathRel, "modification")
 				or  nil
 
@@ -1906,7 +2052,7 @@ local function buildWebsite()
 	end
 
 	-- Cleanup old generated stuff.
-	traverseFiles(DIR_OUTPUT, nil, function(path, pathRel, filename, ext)
+	traverseFiles(DIR_OUTPUT, nil, function(path, pathRel, filename, extLower)
 		if not writtenOutputFiles[pathRel] then
 			log("Removing: %s", path)
 			assert(os.remove(path))

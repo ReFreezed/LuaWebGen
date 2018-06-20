@@ -1,5 +1,5 @@
 # LuaWebGen
-![](https://img.shields.io/badge/beta-0.5.1-green.svg)
+![](https://img.shields.io/badge/beta-0.6-green.svg)
 
 Static website generator in Lua 5.1. Somewhat inspired by [Hugo](https://gohugo.io/). Currently in **beta**.
 
@@ -69,8 +69,9 @@ Page template, `page.html`:
 
 LuaWebGen requires Lua 5.1 and these libraries:
 
-- [LuaFileSystem](https://keplerproject.github.io/luafilesystem/)
-- [LuaSocket](http://w3.impa.br/~diego/software/luasocket/home.html)
+- [Lua-GD](https://ittner.github.io/lua-gd/) for image manipulation.
+- [LuaFileSystem](https://keplerproject.github.io/luafilesystem/) for file system access.
+- [LuaSocket](http://w3.impa.br/~diego/software/luasocket/home.html) for URL handling.
 
 If you're on Windows you can simply install [Lua for Windows](https://github.com/rjpcomputing/luaforwindows).
 
