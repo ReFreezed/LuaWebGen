@@ -362,6 +362,7 @@ urlize("Hello, big world!") -- "hello-big-world"
 - [`include()`](#include)
 - [`isCurrentUrl()`](#iscurrenturl)
 - [`outputRaw()`](#outputraw)
+- [`subpages()`](#subpages)
 
 There are currently two contexts where code can run:
 
@@ -423,6 +424,22 @@ Output any data to a file. Available in `config.before()` and `config.after()`. 
 outputRaw("docs/versions.txt", "Version 1\nReleased: 2002-10-16\n")
 ```
 
+#### subpages()
+`pages = subpages( )`
+
+Recursively get all pages in the current folder and below, sorted by `publishDate`. Intended for index pages. Available in templates. Example:
+```markdown
+# Blog Archive
+
+{{fori page in subpages()}}
+- [{{page.publishDate}} {{page.title}}]({{page.permalink}})
+{{end}}
+```
+
+> **Note:** Two pages in the same folder cannot request all subpages - that would result in
+> an infinite loop as LuaWebGen tries to generate all subpages before returning a list of them.
+> You'll have to generate at least one of those two pages in `config.after()`.
+
 
 
 ### `site`
@@ -445,6 +462,15 @@ The title of the website.
 
 ### `page`
 
+#### page.aliases
+A list of slugs that point to previous locations of the current page. Example:
+```
+{{
+page.title   = "New Improved Page"
+page.aliases = {"/my-page/", "/some-archived-page/"}
+}}
+```
+
 #### page.content
 The contents of the current page. Available to layout templates.
 
@@ -460,6 +486,11 @@ If the current page is an index page.
 
 #### page.isPage
 If the current page is in fact a page. This value is false for CSS files.
+
+#### page.isSpecial
+If the current page is some kind of special page.
+Special pages are ignored by `subpages()`.
+Set this to `true` for e.g. 404 error pages.
 
 #### page.layout
 What layout template the page should use.

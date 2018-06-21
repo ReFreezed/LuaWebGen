@@ -6,7 +6,7 @@
 --=
 --============================================================]]
 
-local _WEBGEN_VERSION = "0.6.0"
+local _WEBGEN_VERSION = "0.7.0"
 
 
 
@@ -84,6 +84,9 @@ local scriptEnvironmentGlobals = nil
 -- Site variables.
 local site                              = nil
 
+local pages                             = nil
+local pagesGenerating                   = nil
+
 local contextStack                      = nil
 local proxies                           = nil
 local proxySources                      = nil
@@ -108,12 +111,6 @@ local thumbnailInfos                    = nil
 
 
 
--- Page variables.
-local page         = nil
-local scriptParams = nil
-
-
-
 --==============================================================
 --= Functions ==================================================
 --==============================================================
@@ -126,7 +123,7 @@ local encodeHtmlEntities
 local error, errorf, fileerror, errorInGeneratedCodeFromTemplate
 local F, formatBytes
 local formatArticle
-local generateFromTemplate
+local generateFromTemplate, generateFromTemplateFile
 local generatorMeta
 local getDirectory, getFilename, getExtension, getBasename
 local getFileContents
@@ -139,6 +136,7 @@ local isFile, isDirectory
 local isStringMatchingAnyPattern
 local markdownToHtml
 local newDataFolderReader
+local newPage
 local newStringBuffer
 local parseMarkdownTemplate, parseHtmlTemplate, parseOtherTemplate
 local pcall
@@ -234,7 +232,7 @@ end
 
 
 do
-	local function parseTemplate(path, template, pos, level, enableHtmlEncoding)
+	local function parseTemplate(page, path, template, pos, level, enableHtmlEncoding)
 
 		--= Generate Lua.
 		--= @Robustness: Validate each individual code snippet. [LOW]
@@ -284,7 +282,7 @@ do
 			elseif code == "do" then
 				table.insert(lua, "do\n")
 
-				local innerLua, innerEndCodePosStart, innerEndCodePosEnd = parseTemplate(path, template, codePosEnd+1, level+1, enableHtmlEncoding)
+				local innerLua, innerEndCodePosStart, innerEndCodePosEnd = parseTemplate(page, path, template, codePosEnd+1, level+1, enableHtmlEncoding)
 				local innerEndCode = trim(template:sub(innerEndCodePosStart+2, innerEndCodePosEnd-2))
 
 				if innerEndCode ~= "end" then
@@ -305,7 +303,7 @@ do
 				table.insert(lua, code)
 				table.insert(lua, " then\n")
 
-				local innerLua, innerEndCodePosStart, innerEndCodePosEnd = parseTemplate(path, template, codePosEnd+1, level+1, enableHtmlEncoding)
+				local innerLua, innerEndCodePosStart, innerEndCodePosEnd = parseTemplate(page, path, template, codePosEnd+1, level+1, enableHtmlEncoding)
 				local innerEndCode = trim(template:sub(innerEndCodePosStart+2, innerEndCodePosEnd-2))
 
 				for _, luaCode in ipairs(innerLua) do  table.insert(lua, luaCode)  end
@@ -315,7 +313,7 @@ do
 					table.insert(lua, innerEndCode)
 					table.insert(lua, " then\n")
 
-					innerLua, innerEndCodePosStart, innerEndCodePosEnd = parseTemplate(path, template, innerEndCodePosEnd+1, level+1, enableHtmlEncoding)
+					innerLua, innerEndCodePosStart, innerEndCodePosEnd = parseTemplate(page, path, template, innerEndCodePosEnd+1, level+1, enableHtmlEncoding)
 					innerEndCode = trim(template:sub(innerEndCodePosStart+2, innerEndCodePosEnd-2))
 
 					for _, luaCode in ipairs(innerLua) do  table.insert(lua, luaCode)  end
@@ -325,7 +323,7 @@ do
 				if innerEndCode == "else" then
 					table.insert(lua, "else\n")
 
-					innerLua, innerEndCodePosStart, innerEndCodePosEnd = parseTemplate(path, template, innerEndCodePosEnd+1, level+1, enableHtmlEncoding)
+					innerLua, innerEndCodePosStart, innerEndCodePosEnd = parseTemplate(page, path, template, innerEndCodePosEnd+1, level+1, enableHtmlEncoding)
 					innerEndCode = trim(template:sub(innerEndCodePosStart+2, innerEndCodePosEnd-2))
 
 					for _, luaCode in ipairs(innerLua) do  table.insert(lua, luaCode)  end
@@ -370,7 +368,7 @@ do
 					table.insert(lua, " do\n")
 				end
 
-				local innerLua, innerEndCodePosStart, innerEndCodePosEnd = parseTemplate(path, template, codePosEnd+1, level+1, enableHtmlEncoding)
+				local innerLua, innerEndCodePosStart, innerEndCodePosEnd = parseTemplate(page, path, template, codePosEnd+1, level+1, enableHtmlEncoding)
 				local innerEndCode = trim(template:sub(innerEndCodePosStart+2, innerEndCodePosEnd-2))
 
 				if innerEndCode ~= "end" then
@@ -391,7 +389,7 @@ do
 				table.insert(lua, code)
 				table.insert(lua, " do\n")
 
-				local innerLua, innerEndCodePosStart, innerEndCodePosEnd = parseTemplate(path, template, codePosEnd+1, level+1, enableHtmlEncoding)
+				local innerLua, innerEndCodePosStart, innerEndCodePosEnd = parseTemplate(page, path, template, codePosEnd+1, level+1, enableHtmlEncoding)
 				local innerEndCode = trim(template:sub(innerEndCodePosStart+2, innerEndCodePosEnd-2))
 
 				if innerEndCode ~= "end" then
@@ -411,7 +409,7 @@ do
 			elseif code == "repeat" then
 				table.insert(lua, "repeat\n")
 
-				local innerLua, innerEndCodePosStart, innerEndCodePosEnd = parseTemplate(path, template, codePosEnd+1, level+1, enableHtmlEncoding)
+				local innerLua, innerEndCodePosStart, innerEndCodePosEnd = parseTemplate(page, path, template, codePosEnd+1, level+1, enableHtmlEncoding)
 				local innerEndCode = trim(template:sub(innerEndCodePosStart+2, innerEndCodePosEnd-2))
 
 				if not innerEndCode:find"^until[ (]" then
@@ -481,12 +479,11 @@ do
 
 		setfenv(chunk, scriptEnvironment)
 
-		pushContext("template")
-
-		local ctx = getContext"template"
+		local ctx = pushContext("template")
+		ctx.page = page
 		ctx._scriptEnvironmentGlobals.page   = getProtectionWrapper(page, "page")
-		ctx._scriptEnvironmentGlobals.params = scriptParams
-		ctx._scriptEnvironmentGlobals.P      = scriptParams
+		ctx._scriptEnvironmentGlobals.params = page._params
+		ctx._scriptEnvironmentGlobals.P      = page._params
 		ctx.out = out
 
 		local ok, err = pcall(chunk)
@@ -506,8 +503,8 @@ do
 		return out
 	end
 
-	function parseMarkdownTemplate(path, template)
-		local md = parseTemplate(path, template, 1, 1, true)
+	function parseMarkdownTemplate(page, path, template)
+		local md = parseTemplate(page, path, template, 1, 1, true)
 
 		local html = markdownToHtml(md)
 		html = trimNewlines(html).."\n" -- :Beautify
@@ -517,8 +514,8 @@ do
 		return html
 	end
 
-	function parseHtmlTemplate(path, template)
-		local html = parseTemplate(path, template, 1, 1, true)
+	function parseHtmlTemplate(page, path, template)
+		local html = parseTemplate(page, path, template, 1, 1, true)
 		html = trimNewlines(html).."\n" -- :Beautify
 
 		-- print("-- HTML --") print(html) print("-- /HTML --")
@@ -526,8 +523,8 @@ do
 		return html
 	end
 
-	function parseOtherTemplate(path, template)
-		local contents = parseTemplate(path, template, 1, 1, false)
+	function parseOtherTemplate(page, path, template)
+		local contents = parseTemplate(page, path, template, 1, 1, false)
 		contents = trimNewlines(contents).."\n" -- :Beautify
 
 		-- print("-- CONTENTS --") print(contents) print("-- /CONTENTS --")
@@ -989,7 +986,7 @@ end
 
 
 function getDirectory(path)
-	return (path:gsub("/[^/]+$", ""))
+	return (path:gsub("/?[^/]+$", ""))
 end
 
 function getFilename(path)
@@ -1009,94 +1006,70 @@ end
 
 
 
--- generateFromTemplate( pathRelative, template [, modificationTime ] )
-function generateFromTemplate(pathRel, template, modTime)
-	assert(type(pathRel) == "string")
+-- generateFromTemplate( page, template [, modificationTime ] )
+function generateFromTemplate(page, template, modTime)
+	assert(type(page) == "table")
 	assert(type(template) == "string")
 
+	if page._isGenerated then
+		errorf(2, "Page has already generated. (%s)", page._path)
+	end
+	if pagesGenerating[page._pathOut] then
+		errorf(2, "Recursive page generation detected. (%s)", page._path)
+	end
+
+	pagesGenerating[page._pathOut] = true
+
+	local pathRel  = page._path
 	local filename = getFilename(pathRel)
 	local ext      = getExtension(filename)
 	local extLower = ext:lower()
 
-	assert(TEMPLATE_EXTENSION_SET[extLower])
+	local outStr
 
-	local isPage  = PAGE_EXTENSION_SET[extLower] or false
-	local isIndex = isPage  and getBasename(filename) == "index"
-	local isHome  = isIndex and pathRel == filename
+	if extLower == "md" then
+		page.content = parseMarkdownTemplate(page, pathRel, template)
+	elseif extLower == "html" then
+		page.content = parseHtmlTemplate(page, pathRel, template)
+	else
+		assert(not page.isPage)
+		outStr = parseOtherTemplate(page, pathRel, template)
+	end
 
-	local category = isPage and "page" or "otherTemplate"
-
-	local permalinkRel = (
-		not isPage and pathRel
-		or isHome and ""
-		or isIndex and pathRel:sub(1, -#filename-1)
-		or pathRel:sub(1, -#ext-2).."/"
-	)
-
-	local pathRelOut
-		=  (not isPage and permalinkRel)
-		or (permalinkRel == "" and "" or permalinkRel).."index.html"
-
-	-- UPDATE:
-	-- Templates should always regenerate, unless we know all includes are unmodified.
-	-- Just checking oldModTime isn't enough!
-
-	-- local oldModTime
-	-- 	=   not ignoreModificationTimes
-	-- 	and lfs.attributes(DIR_OUTPUT.."/"..pathRelOut, "modification")
-	-- 	or  nil
-
-	-- if not isPage and modTime and modTime == oldModTime then
-	-- 	preserveExistingOutputFile(category, pathRelOut)
-
-	-- else
-		page = {
-			layout      = site.defaultLayout,
-			title       = "",
-			content     = "",
-
-			publishDate = os.date("%Y-%m-%d %H:%M:%S", 0),
-			isDraft     = false,
-
-			url         = "/"..permalinkRel,
-			permalink   = site.baseUrl..(removeTrailingSlashFromPermalinks and permalinkRel:gsub("/$", "") or permalinkRel),
-			rssLink     = "", -- @Incomplete @Doc
-
-			isPage      = isPage,
-			isIndex     = isIndex,
-			isHome      = isHome,
-		}
-		-- print(pathRel, (not isPage and " " or isHome and "H" or isIndex and "I" or "P"), page.permalink) -- DEBUG
-
-		scriptParams = {}
-
-		local outStr
-
-		if extLower == "md" then
-			page.content = parseMarkdownTemplate(pathRel, template)
-		elseif extLower == "html" then
-			page.content = parseHtmlTemplate(pathRel, template)
-		else
-			assert(not isPage)
-			outStr = parseOtherTemplate(pathRel, template)
+	if page.isPage then
+		if
+			(page.isDraft and not includeDrafts) or -- Is draft?
+			(dateStringToTime(page.publishDate) > os.time()) -- Is in future?
+		then
+			outputFileSkippedPageCount = outputFileSkippedPageCount+1
+			pagesGenerating[page._pathOut] = nil
+			page._isSkipped = true
+			return
 		end
 
-		if isPage then
-			if
-				(page.isDraft and not includeDrafts) or -- Is draft?
-				(dateStringToTime(page.publishDate) > os.time()) -- Is in future?
-			then
-				outputFileSkippedPageCount = outputFileSkippedPageCount+1
-				return
-			end
+		local layoutTemplate, layoutPath = getLayoutTemplate(page)
+		outStr = parseHtmlTemplate(page, layoutPath, layoutTemplate)
+	end
 
-			local layoutTemplate, layoutPath = getLayoutTemplate(page.layout, pathRel)
-			outStr = parseHtmlTemplate(layoutPath, layoutTemplate)
-		end
+	assert(outStr)
+	writeOutputFile(page._category, page._pathOut, outStr, modTime)
 
-		assert(outStr)
-		writeOutputFile(category, pathRelOut, outStr, modTime)
-	-- end
+	pagesGenerating[page._pathOut] = nil
+	page._isGenerated = true
+end
+
+function generateFromTemplateFile(page)
+	if page._isSkipped then return end
+
+	local path     = DIR_CONTENT.."/"..page._path
+	local template = assert(getFileContents(path))
+	local modTime  = lfs.attributes(path, "modification")
+
+	if modTime then
+		page.publishDate = os.date("%Y-%m-%d %H:%M:%S", modTime) -- Default value.
+	end
+
+	generateFromTemplate(page, template, modTime)
 end
 
 
@@ -1200,21 +1173,16 @@ end
 
 
 
--- template, path = getLayoutTemplate( layoutName [, fileContext ] )
-function getLayoutTemplate(layoutName, fileContext)
-	local path = F("%s/%s.html", DIR_LAYOUTS, layoutName)
+-- template, path = getLayoutTemplate( page )
+function getLayoutTemplate(page)
+	local path = F("%s/%s.html", DIR_LAYOUTS, page.layout)
 
 	local template = layoutTemplates[path]
 	if template then  return template  end
 
 	local template, err = getFileContents(path)
-
 	if not template then
-		if fileContext then
-			errorf("%s: Could not load layout '%s'. (%s)", fileContext, layoutName, err)
-		else
-			errorf(    "Could not load layout '%s'. (%s)",              layoutName, err)
-		end
+		errorf("%s: Could not load layout '%s'. (%s)", page._path, page.layout, err)
 	end
 
 	layoutTemplates[path] = template
@@ -1288,6 +1256,7 @@ end
 function pushContext(ctxName)
 	local ctx = {_name=ctxName, _scriptEnvironmentGlobals={}}
 	table.insert(contextStack, ctx)
+	return ctx
 end
 
 function popContext(ctxName)
@@ -1424,6 +1393,65 @@ function newStringBuffer()
 		local s = select("#", ...) == 1 and assertType(..., "string") or F(...)
 		table.insert(buffer, s)
 	end
+end
+
+
+
+function newPage(pathRel)
+	assertType(pathRel, "string")
+
+	local filename = getFilename(pathRel)
+	local ext      = getExtension(filename)
+	local extLower = ext:lower()
+
+	assert(TEMPLATE_EXTENSION_SET[extLower], extLower)
+
+	local isPage  = PAGE_EXTENSION_SET[extLower] or false
+	local isIndex = isPage  and getBasename(filename) == "index"
+	local isHome  = isIndex and pathRel == filename
+
+	local category = isPage and "page" or "otherTemplate"
+
+	local permalinkRel = (
+		not isPage and pathRel
+		or isHome and ""
+		or isIndex and pathRel:sub(1, -#filename-1)
+		or pathRel:sub(1, -#ext-2).."/"
+	)
+
+	local pathRelOut
+		=  (not isPage and permalinkRel)
+		or (permalinkRel == "" and "" or permalinkRel).."index.html"
+
+	local page = {
+		_category   = category,
+		_isGenerated= false,
+		_isSkipped  = false,
+		_params     = {},
+		_path       = pathRel,
+		_pathOut    = pathRelOut,
+
+		layout      = site.defaultLayout,
+		title       = "",
+		content     = "",
+
+		publishDate = os.date("%Y-%m-%d %H:%M:%S", 0),
+		isDraft     = false,
+		isSpecial   = not isPage,
+
+		aliases     = {},
+
+		url         = "/"..permalinkRel,
+		permalink   = site.baseUrl..(removeTrailingSlashFromPermalinks and permalinkRel:gsub("/$", "") or permalinkRel),
+		rssLink     = "", -- @Incomplete @Doc
+
+		isPage      = isPage,
+		isIndex     = isIndex,
+		isHome      = isHome,
+	}
+	-- print(pathRel, (not isPage and " " or isHome and "H" or isIndex and "I" or "P"), page.permalink) -- DEBUG
+
+	return page
 end
 
 
@@ -1866,13 +1894,19 @@ scriptEnvironmentGlobals = {
 			errorf(2, "Could not read file '%s': %s", path, err)
 		end
 
-		local html = parseHtmlTemplate(path, template)
+		local html = parseHtmlTemplate(getContext().page, path, template)
 		return html
 	end,
 
 	generateFromTemplate = function(pathRel, template)
 		assertContext("config", "generateFromTemplate")
-		generateFromTemplate(pathRel, template, nil)
+
+		local page = newPage(pathRel)
+		generateFromTemplate(page, template)
+
+		if page.isPage and not page._isSkipped then
+			table.insert(pages, page)
+		end
 	end,
 
 	outputRaw = function(pathRel, contents)
@@ -1883,7 +1917,33 @@ scriptEnvironmentGlobals = {
 
 	isCurrentUrl = function(url)
 		assertContext("template", "isCurrentUrl")
-		return page.url == url
+		return getContext().page.url == url
+	end,
+
+	subpages = function()
+		assertContext("template", "subpages")
+
+		local pageCurrent = getContext().page
+		local dir = getDirectory(pageCurrent._path)
+
+		local subpages = {}
+		for _, page in ipairs(pages) do
+			if page ~= pageCurrent and page._path:sub(1, #dir) == dir then
+				if not page._isGenerated then
+					generateFromTemplateFile(page)
+				end
+				if not (page._isSkipped or page.isSpecial) then
+					table.insert(subpages, page)
+				end
+			end
+		end
+
+		table.sort(subpages, function(a, b)
+			if a.publishDate ~= b.publishDate then  return a.publishDate > b.publishDate  end
+			return a._path < b._path
+		end)
+
+		return subpages
 	end,
 }
 
@@ -1937,6 +1997,9 @@ local function buildWebsite()
 		languageCode  = "",
 		defaultLayout = "page",
 	}
+
+	pages                             = {}
+	pagesGenerating                   = {}
 
 	contextStack                      = {}
 	proxies                           = {}
@@ -2017,17 +2080,19 @@ local function buildWebsite()
 
 	-- Generate output.
 	traverseFiles(DIR_CONTENT, ignoreFolders, function(path, pathRel, filename, extLower)
-		local modTime = lfs.attributes(path, "modification")
-
 		if isStringMatchingAnyPattern(filename, ignoreFiles) then
 			-- Ignore.
 
 		elseif TEMPLATE_EXTENSION_SET[extLower] then
-			local template = assert(getFileContents(path))
-			generateFromTemplate(pathRel, template, modTime)
+			local page = newPage(pathRel)
+			if page.isPage then
+				table.insert(pages, page)
+			else
+				generateFromTemplateFile(page)
+			end
 
 		else
-			local category = "otherRaw"
+			local modTime = lfs.attributes(path, "modification")
 
 			-- Non-templates should be OK to preserve (if there's no file processor).
 			local oldModTime
@@ -2037,18 +2102,60 @@ local function buildWebsite()
 				or  nil
 
 			if modTime and modTime == oldModTime then
-				preserveExistingOutputFile(category, pathRel)
+				preserveExistingOutputFile("otherRaw", pathRel)
 			else
 				local contents = assert(getFileContents(path))
-				writeOutputFile(category, pathRel, contents, modTime)
+				writeOutputFile("otherRaw", pathRel, contents, modTime)
 			end
 		end
 	end)
+
+	for _, page in ipairs(pages) do
+		if not (page._isGenerated or page._isSkipped) then
+			generateFromTemplateFile(page)
+		end
+	end
 
 	if config.after then
 		pushContext("config")
 		config.after()
 		popContext("config")
+	end
+
+	for _, page in ipairs(pages) do
+		if page.isPage and not page._isSkipped then
+			assert(page._isGenerated)
+
+			for _, aliasUrl in ipairs(page.aliases) do
+				assert(aliasUrl:find"/$" ~= nil)
+
+				local aliasPathRel = (aliasUrl.."index.html"):gsub("^/", "")
+
+				local contents = formatArticle(
+					[=[
+						<!DOCTYPE html>
+						<html>
+							<head>
+								<meta charset="utf-8">
+								<meta name="robots" content="noindex">
+								<meta http-equiv="refresh" content="0; url=:urlPercent:">
+								<title>:url:</title>
+								<link rel="canonical" href=":urlPercent:">
+							</head>
+							<body>
+								<p>Page has moved. If you are not redirected automatically,
+								click <a href=":urlPercent:">here</a>.</p>
+							</body>
+						</html>
+					]=], {
+						url        =               encodeHtmlEntities(page.permalink) ,
+						urlPercent = toUrlAbsolute(encodeHtmlEntities(page.permalink)),
+					}
+				)
+
+				writeOutputFile("page", aliasPathRel, contents)
+			end
+		end
 	end
 
 	-- Cleanup old generated stuff.

@@ -1,5 +1,5 @@
 # LuaWebGen
-![](https://img.shields.io/badge/beta-0.6-green.svg)
+![](https://img.shields.io/badge/beta-0.7-green.svg)
 
 Static website generator in Lua 5.1. Somewhat inspired by [Hugo](https://gohugo.io/). Currently in **beta**.
 
@@ -14,7 +14,7 @@ Webpages are generated using HTML and markdown *templates* with embedded Lua cod
 
 ## Why?
 
-The rant: After using *Hugo* for a short time I got fed up with
+The rant: After using *Hugo* for a little while I got fed up with
 how annoying it was to add custom functionality (everything has to be a template),
 how "content" and "static" files were treated differently,
 how CSS files were excluded from the templating system,
