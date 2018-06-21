@@ -1,5 +1,5 @@
 # LuaWebGen
-![](https://img.shields.io/badge/beta-0.7-green.svg)
+![](https://img.shields.io/badge/beta-0.8-green.svg)
 
 Static website generator in Lua 5.1. Somewhat inspired by [Hugo](https://gohugo.io/). Currently in **beta**.
 

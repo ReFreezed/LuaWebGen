@@ -33,7 +33,7 @@ config.before = function()
 
 	-- Generate dog pages from database.
 	for _, dog in ipairs(data.dogs) do
-		local path     = F("dogs/%s.md", urlize(dog.name))
+		local path     = F("/dogs/%s.md", urlize(dog.name))
 		local template = F(dogPageFormat, dog.name, dog.age)
 
 		generateFromTemplate(path, template)

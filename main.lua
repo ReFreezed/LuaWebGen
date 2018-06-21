@@ -6,7 +6,7 @@
 --=
 --============================================================]]
 
-local _WEBGEN_VERSION = "0.7.0"
+local _WEBGEN_VERSION = "0.8.0"
 
 
 
@@ -139,6 +139,7 @@ local newDataFolderReader
 local newPage
 local newStringBuffer
 local parseMarkdownTemplate, parseHtmlTemplate, parseOtherTemplate
+local pathToSitePath, sitePathToPath
 local pcall
 local print, printf, log, logprint
 local pushContext, popContext, assertContext, getContext
@@ -282,7 +283,9 @@ do
 			elseif code == "do" then
 				table.insert(lua, "do\n")
 
-				local innerLua, innerEndCodePosStart, innerEndCodePosEnd = parseTemplate(page, path, template, codePosEnd+1, level+1, enableHtmlEncoding)
+				local innerLua, innerEndCodePosStart, innerEndCodePosEnd = parseTemplate(
+					page, path, template, codePosEnd+1, level+1, enableHtmlEncoding
+				)
 				local innerEndCode = trim(template:sub(innerEndCodePosStart+2, innerEndCodePosEnd-2))
 
 				if innerEndCode ~= "end" then
@@ -303,7 +306,9 @@ do
 				table.insert(lua, code)
 				table.insert(lua, " then\n")
 
-				local innerLua, innerEndCodePosStart, innerEndCodePosEnd = parseTemplate(page, path, template, codePosEnd+1, level+1, enableHtmlEncoding)
+				local innerLua, innerEndCodePosStart, innerEndCodePosEnd = parseTemplate(
+					page, path, template, codePosEnd+1, level+1, enableHtmlEncoding
+				)
 				local innerEndCode = trim(template:sub(innerEndCodePosStart+2, innerEndCodePosEnd-2))
 
 				for _, luaCode in ipairs(innerLua) do  table.insert(lua, luaCode)  end
@@ -313,7 +318,9 @@ do
 					table.insert(lua, innerEndCode)
 					table.insert(lua, " then\n")
 
-					innerLua, innerEndCodePosStart, innerEndCodePosEnd = parseTemplate(page, path, template, innerEndCodePosEnd+1, level+1, enableHtmlEncoding)
+					innerLua, innerEndCodePosStart, innerEndCodePosEnd = parseTemplate(
+						page, path, template, innerEndCodePosEnd+1, level+1, enableHtmlEncoding
+					)
 					innerEndCode = trim(template:sub(innerEndCodePosStart+2, innerEndCodePosEnd-2))
 
 					for _, luaCode in ipairs(innerLua) do  table.insert(lua, luaCode)  end
@@ -323,7 +330,9 @@ do
 				if innerEndCode == "else" then
 					table.insert(lua, "else\n")
 
-					innerLua, innerEndCodePosStart, innerEndCodePosEnd = parseTemplate(page, path, template, innerEndCodePosEnd+1, level+1, enableHtmlEncoding)
+					innerLua, innerEndCodePosStart, innerEndCodePosEnd = parseTemplate(
+						page, path, template, innerEndCodePosEnd+1, level+1, enableHtmlEncoding
+					)
 					innerEndCode = trim(template:sub(innerEndCodePosStart+2, innerEndCodePosEnd-2))
 
 					for _, luaCode in ipairs(innerLua) do  table.insert(lua, luaCode)  end
@@ -368,7 +377,9 @@ do
 					table.insert(lua, " do\n")
 				end
 
-				local innerLua, innerEndCodePosStart, innerEndCodePosEnd = parseTemplate(page, path, template, codePosEnd+1, level+1, enableHtmlEncoding)
+				local innerLua, innerEndCodePosStart, innerEndCodePosEnd = parseTemplate(
+					page, path, template, codePosEnd+1, level+1, enableHtmlEncoding
+				)
 				local innerEndCode = trim(template:sub(innerEndCodePosStart+2, innerEndCodePosEnd-2))
 
 				if innerEndCode ~= "end" then
@@ -389,7 +400,9 @@ do
 				table.insert(lua, code)
 				table.insert(lua, " do\n")
 
-				local innerLua, innerEndCodePosStart, innerEndCodePosEnd = parseTemplate(page, path, template, codePosEnd+1, level+1, enableHtmlEncoding)
+				local innerLua, innerEndCodePosStart, innerEndCodePosEnd = parseTemplate(
+					page, path, template, codePosEnd+1, level+1, enableHtmlEncoding
+				)
 				local innerEndCode = trim(template:sub(innerEndCodePosStart+2, innerEndCodePosEnd-2))
 
 				if innerEndCode ~= "end" then
@@ -409,7 +422,9 @@ do
 			elseif code == "repeat" then
 				table.insert(lua, "repeat\n")
 
-				local innerLua, innerEndCodePosStart, innerEndCodePosEnd = parseTemplate(page, path, template, codePosEnd+1, level+1, enableHtmlEncoding)
+				local innerLua, innerEndCodePosStart, innerEndCodePosEnd = parseTemplate(
+					page, path, template, codePosEnd+1, level+1, enableHtmlEncoding
+				)
 				local innerEndCode = trim(template:sub(innerEndCodePosStart+2, innerEndCodePosEnd-2))
 
 				if not innerEndCode:find"^until[ (]" then
@@ -485,6 +500,7 @@ do
 		ctx._scriptEnvironmentGlobals.params = page._params
 		ctx._scriptEnvironmentGlobals.P      = page._params
 		ctx.out = out
+		ctx.enableHtmlEncoding = enableHtmlEncoding
 
 		local ok, err = pcall(chunk)
 
@@ -615,7 +631,7 @@ function writeOutputFile(category, pathRel, data, modTime)
 
 	if fileProcessors[extLower] then
 		pushContext("config")
-		data = fileProcessors[extLower](data, pathRel)
+		data = fileProcessors[extLower](data, pathToSitePath(pathRel))
 		popContext("config")
 
 		assertType(data, "string", "File processor didn't return a string. (%s)", extLower)
@@ -624,8 +640,7 @@ function writeOutputFile(category, pathRel, data, modTime)
 	local path = DIR_OUTPUT.."/"..pathRel
 	log("Writing: %s", path)
 
-	local dirPath = path:gsub("/[^/]+$", "")
-	createDirectory(dirPath)
+	createDirectory(getDirectory(path))
 
 	local file = assert(io.open(path, "wb"))
 	file:write(data)
@@ -659,7 +674,7 @@ function preserveExistingOutputFile(category, pathRel)
 
 	local dataLen, err = lfs.attributes(path, "size")
 	if not dataLen then
-		logprint("Error: Could not retrieve size of file '%s': %s", path, err)
+		logprint("Error: Could not retrieve size of file '%s'. (%s)", path, err)
 		dataLen = 0
 	end
 
@@ -677,8 +692,9 @@ end
 
 
 function createDirectory(path)
-	assert(not path:find"^/") -- Avoid absolute paths - they were probably a mistake.
+	assert(not path:find"^/")   -- Avoid absolute paths - they were probably a mistake.
 	assert(not path:find"^%a:") -- Windows drive letter.
+	assert(not path:find"//")   -- Something went wrong somewhere.
 
 	local pathConstructed = ""
 
@@ -925,7 +941,7 @@ function newDataFolderReader(path)
 				dataObj = assert(xmlLib.parse(assert(getFileContents(F("%s/%s.xml", path, k))), false))
 
 			elseif isDirectory(F("%s/%s", path, k)) then
-				return newDataFolderReader(F("%s/%s", path, k))
+				dataObj = newDataFolderReader(F("%s/%s", path, k))
 
 			else
 				errorf("Bad data path '%s/%s'.", path, k)
@@ -985,12 +1001,12 @@ end
 
 
 
-function getDirectory(path)
-	return (path:gsub("/?[^/]+$", ""))
+function getDirectory(genericPath)
+	return (genericPath:gsub("/?[^/]+$", ""))
 end
 
-function getFilename(path)
-	return path:match"[^/]+$"
+function getFilename(genericPath)
+	return genericPath:match"[^/]+$"
 end
 
 function getExtension(filename)
@@ -1318,7 +1334,7 @@ do
 		local basename  = getBasename(filename)
 		local ext       = getExtension(filename)
 		local extLower  = ext:lower()
-		local folder    = pathImageRel:sub(1, #pathImageRel-#filename)
+		local folder    = pathImageRel:sub(1, #pathImageRel-#filename) -- Ending in "/".
 		local pathImage = DIR_CONTENT.."/"..pathImageRel
 
 		if not isFile(pathImage) then
@@ -1456,6 +1472,22 @@ end
 
 
 
+function pathToSitePath(path)
+	if path:find"^/" then
+		errorf(2, "Path is not valid: %s", path)
+	end
+	return "/"..path
+end
+
+function sitePathToPath(sitePath)
+	if not sitePath:find"^/" then
+		errorf(2, "Path is not a valid site path - they must start with '/': %s", sitePath)
+	end
+	return (sitePath:gsub("^/", ""))
+end
+
+
+
 --==============================================================
 --==============================================================
 --==============================================================
@@ -1482,6 +1514,7 @@ if command == "new" then
 
 	if kind == "page" then
 		local pathRel = args[i] or error("[arg] Missing path after 'page'.")
+		pathRel = pathRel:gsub("^/", "")
 		i = i+1
 
 		if args[i] then
@@ -1661,20 +1694,22 @@ end
 -- Prepare log file.
 --==============================================================
 
-if not isDirectory(DIR_LOGS) then
-	assert(lfs.mkdir(DIR_LOGS))
+do
+	if not isDirectory(DIR_LOGS) then
+		assert(lfs.mkdir(DIR_LOGS))
+	end
+
+	local basePath = DIR_LOGS..os.date"/%Y%m%d_%H%M%S"
+
+	logPath = basePath..".log"
+	local i = 1
+	while isFile(logPath) do
+		i = i+1
+		logPath = basePath.."_"..i..".log"
+	end
+
+	logFile = io.open(logPath, "w")
 end
-
-local basePath = DIR_LOGS..os.date"/%Y%m%d_%H%M%S"
-
-logPath = basePath..".log"
-local i = 1
-while isFile(logPath) do
-	i = i+1
-	logPath = basePath.."_"..i..".log"
-end
-
-logFile = io.open(logPath, "w")
 
 
 
@@ -1763,24 +1798,28 @@ scriptEnvironmentGlobals = {
 	urlAbs         = toUrlAbsolute,
 	urlize         = urlize,
 
-	chooseExistingFile = function(pathWithoutExt, exts)
+	chooseExistingFile = function(sitePathWithoutExt, exts)
+		local pathWithoutExt = sitePathToPath(sitePathWithoutExt)
+
 		for _, ext in ipairs(exts) do
 			local path = pathWithoutExt.."."..ext
-			if isFile(DIR_CONTENT.."/"..path) then  return path  end
+			if isFile(DIR_CONTENT.."/"..path) then  return pathToSitePath(path)  end
 		end
+
 		return nil
 	end,
 
-	chooseExistingImage = function(pathWithoutExt)
-		return scriptEnvironmentGlobals.chooseExistingFile(pathWithoutExt, IMAGE_EXTENSIONS)
+	chooseExistingImage = function(sitePathWithoutExt)
+		return scriptEnvironmentGlobals.chooseExistingFile(sitePathWithoutExt, IMAGE_EXTENSIONS)
 	end,
 
-	fileExists = function(path)
+	fileExists = function(sitePath)
+		local path = sitePathToPath(sitePath)
 		return isFile(DIR_CONTENT.."/"..path)
 	end,
 
-	getExtension = function(path)
-		return getExtension(getFilename(path))
+	getExtension = function(genericPath)
+		return getExtension(getFilename(genericPath))
 	end,
 
 	isAny = function(v1, values)
@@ -1854,12 +1893,12 @@ scriptEnvironmentGlobals = {
 	-- 	return texts
 	-- end
 
-	thumb = function(pathImageRel, thumbW, thumbH, isLink)
+	thumb = function(sitePathImageRel, thumbW, thumbH, isLink)
 		if type(thumbH) == "boolean" then
 			thumbH, isLink = 0, thumbH
 		end
-		assert(not pathImageRel:find"^/")
 
+		local pathImageRel = sitePathToPath(sitePathImageRel)
 		local thumbInfo = createThumbnail(pathImageRel, thumbW, thumbH, 2)
 
 		local b = newStringBuffer()
@@ -1874,10 +1913,11 @@ scriptEnvironmentGlobals = {
 
 	echo = function(s)
 		assertContext("template", "echo")
-		if enableHtmlEncoding then
+		local ctx = getContext"template"
+		if ctx.enableHtmlEncoding then
 			s = encodeHtmlEntities(s)
 		end
-		table.insert(getContext"template".out, s)
+		table.insert(ctx.out, s)
 	end,
 
 	echoRaw = function(s)
@@ -1887,6 +1927,7 @@ scriptEnvironmentGlobals = {
 
 	include = function(htmlFileBasename)
 		assertContext("template", "include")
+		assert(not htmlFileBasename:find"^/")
 
 		local path = F("%s/%s.html", DIR_LAYOUTS, htmlFileBasename)
 		local template, err = getFileContents(path)
@@ -1898,9 +1939,10 @@ scriptEnvironmentGlobals = {
 		return html
 	end,
 
-	generateFromTemplate = function(pathRel, template)
+	generateFromTemplate = function(sitePathRel, template)
 		assertContext("config", "generateFromTemplate")
 
+		local pathRel = sitePathToPath(sitePathRel)
 		local page = newPage(pathRel)
 		generateFromTemplate(page, template)
 
@@ -1909,9 +1951,11 @@ scriptEnvironmentGlobals = {
 		end
 	end,
 
-	outputRaw = function(pathRel, contents)
+	outputRaw = function(sitePathRel, contents)
 		assertContext("config", "outputRaw")
 		assertType(contents, "string", "The contents must be a string.")
+
+		local pathRel = sitePathToPath(sitePathRel)
 		writeOutputFile("otherRaw", pathRel, contents)
 	end,
 
@@ -2127,7 +2171,7 @@ local function buildWebsite()
 			assert(page._isGenerated)
 
 			for _, aliasUrl in ipairs(page.aliases) do
-				assert(aliasUrl:find"/$" ~= nil)
+				assert(aliasUrl:find"/$")
 
 				local aliasPathRel = (aliasUrl.."index.html"):gsub("^/", "")
 

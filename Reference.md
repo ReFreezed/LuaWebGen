@@ -311,9 +311,9 @@ At least one of `thumbWidth` or `thumbHeight` must be a positive number.
 Example:
 
 ```
-{{thumb("images/gorillaz-fan-art.png", 400, 400, true)}}
-{{thumb("images/a-big-tree.gif", 512, true)}}
-{{thumb("images/1000-clown-cars.jpg", 0, 350, false)}}
+{{thumb("/images/gorillaz-fan-art.png", 400, 400, true)}}
+{{thumb("/images/a-big-tree.gif", 512, true)}}
+{{thumb("/images/1000-clown-cars.jpg", 0, 350, false)}}
 ```
 
 #### trim()
@@ -373,6 +373,7 @@ There are currently two contexts where code can run:
 `echo( string )`
 
 Output a string from a template. HTML entities are encoded automatically. Available in templates.
+Also, see [`echoRaw()`](#echoraw).
 
 > **Note:** This function is used under the hood and it's often not necessary to call it manually.
 > For example, these rows do the same thing:
@@ -384,19 +385,33 @@ Output a string from a template. HTML entities are encoded automatically. Availa
 #### echoRaw()
 `echoRaw( string )`
 
-Like `echo()`, output a string from a template, except this string doesn't become HTML encoded. Available in templates.
+Like [`echo()`](#echo), output a string from a template, except HTML entities don't become encoded in this string.
+Available in templates.
 
 ```lua
 echo   ("a < b") -- Output is "a &lt; b"
 echoRaw("a < b") -- Output is "a < b"
 ```
 
+> **Note:** In templates, if echo isn't used then HTML entities are sometimes encoded and
+> sometimes not - LuaWebGen tries to be smart about it:
+> ```
+> {{"<br>"}}            -- Output is "<br>"
+> {{"Foo <br>"}}        -- Output is "Foo &lt;br&gt;"
+>
+> {{echo"<br>"}}        -- Output is "&lt;br&gt;"
+> {{echo"Foo <br>"}}    -- Output is "Foo &lt;br&gt;"
+>
+> {{echoRaw"<br>"}}     -- Output is "<br>"
+> {{echoRaw"Foo <br>"}} -- Output is "Foo <br>"
+> ```
+
 #### generateFromTemplate()
 `generateFromTemplate( path, templateString )`
 
 Generate a page from a template. Available in `config.before()` and `config.after()`. Example:
 ```lua
-generateFromTemplate("dogs/fido.md", "# Fido\n\nFido is fluffy!")
+generateFromTemplate("/dogs/fido.md", "# Fido\n\nFido is fluffy!")
 ```
 
 #### include()
@@ -421,7 +436,7 @@ You've reached the end!
 
 Output any data to a file. Available in `config.before()` and `config.after()`. Example:
 ```lua
-outputRaw("docs/versions.txt", "Version 1\nReleased: 2002-10-16\n")
+outputRaw("/docs/versions.txt", "Version 1\nReleased: 2002-10-16\n")
 ```
 
 #### subpages()
@@ -444,7 +459,7 @@ Recursively get all pages in the current folder and below, sorted by `publishDat
 
 ### `site`
 
-These values can be configured in *config.lua* .
+These values can be configured in `config.lua`.
 
 #### site.baseUrl
 The base part of the website's URL, e.g. `http://www.example.com/`.
