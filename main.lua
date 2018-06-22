@@ -6,7 +6,7 @@
 --=
 --============================================================]]
 
-local _WEBGEN_VERSION = "0.8.0"
+local _WEBGEN_VERSION = "0.9.0"
 
 
 
@@ -121,12 +121,12 @@ local createThumbnail
 local dateStringToTime
 local encodeHtmlEntities
 local error, errorf, fileerror, errorInGeneratedCodeFromTemplate
-local F, formatBytes
-local formatArticle
+local F, formatBytes, formatTemplate
 local generateFromTemplate, generateFromTemplateFile
 local generatorMeta
 local getDirectory, getFilename, getExtension, getBasename
 local getFileContents
+local getKeys
 local getLayoutTemplate
 local getLineNumber
 local getProtectionWrapper
@@ -144,6 +144,7 @@ local pcall
 local print, printf, log, logprint
 local pushContext, popContext, assertContext, getContext
 local round
+local serializeLua
 local sortNatural
 local splitString
 local storeArgs
@@ -497,8 +498,8 @@ do
 		local ctx = pushContext("template")
 		ctx.page = page
 		ctx._scriptEnvironmentGlobals.page   = getProtectionWrapper(page, "page")
-		ctx._scriptEnvironmentGlobals.params = page._params
-		ctx._scriptEnvironmentGlobals.P      = page._params
+		ctx._scriptEnvironmentGlobals.params = page.params
+		ctx._scriptEnvironmentGlobals.P      = page.params
 		ctx.out = out
 		ctx.enableHtmlEncoding = enableHtmlEncoding
 
@@ -808,6 +809,18 @@ function formatBytes(n)
 		return F("%.2f KB", n/(1024))
 	end
 	return F("%d bytes", n)
+end
+
+function formatTemplate(s, values)
+	s = s:gsub(":([%a_][%w_]*):", function(k)
+		if values[k] == nil then
+			logprint("[formatTemplate] WARNING: No value for ':%s:'.", k)
+		else
+			return values[k]
+		end
+	end)
+
+	return unindent(s)
 end
 
 
@@ -1259,16 +1272,6 @@ end
 
 
 
-function formatArticle(s, values)
-	s = s:gsub(":(%a%w*):", function(k)
-		return  values[k]  or printf("WARNING: No format value for '%s'.", k)
-	end)
-
-	return unindent(s)
-end
-
-
-
 function pushContext(ctxName)
 	local ctx = {_name=ctxName, _scriptEnvironmentGlobals={}}
 	table.insert(contextStack, ctx)
@@ -1296,7 +1299,8 @@ end
 function getContext(ctxName)
 	if ctxName then  assertContext(ctxName)  end
 
-	return contextStack[#contextStack]
+	local ctx = contextStack[#contextStack] or error("There is no context.")
+	return ctx
 end
 
 
@@ -1443,9 +1447,12 @@ function newPage(pathRel)
 		_category   = category,
 		_isGenerated= false,
 		_isSkipped  = false,
-		_params     = {},
 		_path       = pathRel,
 		_pathOut    = pathRelOut,
+
+		isPage      = isPage,
+		isIndex     = isIndex,
+		isHome      = isHome,
 
 		layout      = site.defaultLayout,
 		title       = "",
@@ -1461,9 +1468,7 @@ function newPage(pathRel)
 		permalink   = site.baseUrl..(removeTrailingSlashFromPermalinks and permalinkRel:gsub("/$", "") or permalinkRel),
 		rssLink     = "", -- @Incomplete @Doc
 
-		isPage      = isPage,
-		isIndex     = isIndex,
-		isHome      = isHome,
+		params      = {},
 	}
 	-- print(pathRel, (not isPage and " " or isHome and "H" or isIndex and "I" or "P"), page.permalink) -- DEBUG
 
@@ -1484,6 +1489,96 @@ function sitePathToPath(sitePath)
 		errorf(2, "Path is not a valid site path - they must start with '/': %s", sitePath)
 	end
 	return (sitePath:gsub("^/", ""))
+end
+
+
+
+-- Return any data as a Lua code string.
+-- luaString = serializeLua( value )
+do
+	local SIMPLE_TYPES = {["boolean"]=true,["nil"]=true,["number"]=true,}
+	local KEYWORDS = {
+		["and"]=true,["break"]=true,["do"]=true,["else"]=true,["elseif"]=true,
+		["end"]=true,["false"]=true,["for"]=true,["function"]=true,["if"]=true,
+		["in"]=true,["local"]=true,["nil"]=true,["not"]=true,["or"]=true,["repeat"]=true,
+		["return"]=true,["then"]=true,["true"]=true,["until"]=true,["while"]=true,
+	}
+
+	local function _serializeLua(out, data)
+		local dataType = type(data)
+
+		if dataType == "table" then
+			local first   = true
+			local i       = 0
+			local indices = {}
+
+			local insert = table.insert
+			insert(out, " { ")
+
+			while true do
+				i = i+1
+
+				if data[i] == nil then
+					i = i+1
+					if data[i] == nil then  break  end
+
+					if not first then  insert(out, ",")  end
+					insert(out, "nil")
+					first = false
+				end
+
+				if not first then  insert(out, ",")  end
+				first = false
+
+				_serializeLua(out, data[i])
+				indices[i] = true
+			end
+
+			for k, v in pairs(data) do
+				if not indices[k] then
+					if not first then  insert(out, ",")  end
+					first = false
+
+					if not KEYWORDS[k] and type(k) == "string" and k:find"^[a-zA-Z_][a-zA-Z0-9_]*$" then
+						insert(out, k)
+					else
+						insert(out, "[")
+						_serializeLua(out, k)
+						insert(out, "]")
+					end
+
+					insert(out, "=")
+					_serializeLua(out, v)
+				end
+			end
+
+			insert(out, " } ")
+
+		elseif dataType == "string" then
+			table.insert(out, F("%q", data))
+
+		elseif SIMPLE_TYPES[dataType] then
+			table.insert(out, tostring(data))
+
+		else
+			errorf("Cannot serialize value type '%s'. (%s)", dataType, tostring(data))
+		end
+
+		return out
+	end
+
+	function serializeLua(data)
+		return (table.concat(_serializeLua({}, data)))
+	end
+
+end
+
+
+
+function getKeys(t)
+	local keys = {}
+	for k in pairs(t) do  table.insert(keys, k)  end
+	return keys
 end
 
 
@@ -1525,7 +1620,7 @@ if command == "new" then
 		local basename = getBasename(filename)
 		local title    = basename :gsub("%-+", " ") :gsub("^%a", string.upper) :gsub(" %a", string.upper)
 
-		local contents = formatArticle(
+		local contents = formatTemplate(
 			[=[
 				{{
 				page.title       = :titleQuoted:
@@ -1580,7 +1675,7 @@ if command == "new" then
 		if not isFile(path) then
 			local title = getFilename(pathToSite)
 
-			local contents = formatArticle(
+			local contents = formatTemplate(
 				[=[
 					return {
 						title         = :titleQuoted:,
@@ -1606,7 +1701,7 @@ if command == "new" then
 		if not isFile(path) then
 			local title = getFilename(pathToSite)
 
-			local contents = formatArticle(
+			local contents = formatTemplate(
 				[=[
 					<!DOCTYPE html>
 					<html lang="{{site.languageCode}}">
@@ -1783,15 +1878,19 @@ scriptEnvironmentGlobals = {
 	findAll        = itemWithAll,
 	generatorMeta  = generatorMeta,
 	getFilename    = getFilename,
+	getKeys        = getKeys,
 	indexOf        = indexOf,
 	markdown       = markdownToHtml,
 	max            = max,
 	min            = min,
 	newBuffer      = newStringBuffer,
+	formatTemplate = formatTemplate,
 	printf         = printf,
 	round          = round,
 	sortNatural    = sortNatural,
 	split          = splitString,
+	toLua          = serializeLua,
+	toTime         = dateStringToTime,
 	trim           = trim,
 	trimNewlines   = trimNewlines,
 	url            = toUrl,
@@ -1909,6 +2008,10 @@ scriptEnvironmentGlobals = {
 		return b()
 	end,
 
+	cssPrefix = function(prop, v)
+		return F("-ms-%s: %s; -moz-%s: %s; -webkit-%s: %s; %s: %s;", prop, v, prop, v, prop, v, prop, v)
+	end,
+
 	-- Context functions.
 
 	echo = function(s)
@@ -1943,12 +2046,14 @@ scriptEnvironmentGlobals = {
 		assertContext("config", "generateFromTemplate")
 
 		local pathRel = sitePathToPath(sitePathRel)
-		local page = newPage(pathRel)
+		local page    = newPage(pathRel)
 		generateFromTemplate(page, template)
 
 		if page.isPage and not page._isSkipped then
 			table.insert(pages, page)
 		end
+
+		return page
 	end,
 
 	outputRaw = function(sitePathRel, contents)
@@ -1962,6 +2067,11 @@ scriptEnvironmentGlobals = {
 	isCurrentUrl = function(url)
 		assertContext("template", "isCurrentUrl")
 		return getContext().page.url == url
+	end,
+
+	isCurrentUrlBelow = function(urlPrefix)
+		assertContext("template", "isCurrentUrl")
+		return getContext().page.url:sub(1, #urlPrefix) == urlPrefix
 	end,
 
 	subpages = function()
@@ -1995,7 +2105,7 @@ scriptEnvironmentGlobals = {
 
 scriptEnvironment = setmetatable({}, {
 	__index = function(env, k)
-		local v = getContext()._scriptEnvironmentGlobals[k] or scriptEnvironmentGlobals[k]
+		local v = scriptEnvironmentGlobals[k] or getContext()._scriptEnvironmentGlobals[k]
 		if v ~= nil then  return v  end
 
 		v = scriptFunctions[k]
@@ -2009,12 +2119,12 @@ scriptEnvironment = setmetatable({}, {
 				error(err, 2)
 			end
 
+			setfenv(chunk, env)
 			v = chunk()
 			if type(v) ~= "function" then
 				errorf(2, "%s did not return a function.", path)
 			end
 
-			setfenv(v, env)
 			scriptFunctions[k] = v
 			return v
 		end
@@ -2175,7 +2285,7 @@ local function buildWebsite()
 
 				local aliasPathRel = (aliasUrl.."index.html"):gsub("^/", "")
 
-				local contents = formatArticle(
+				local contents = formatTemplate(
 					[=[
 						<!DOCTYPE html>
 						<html>

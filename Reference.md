@@ -143,6 +143,7 @@ An array of common image file extensions.
 
 - [`chooseExistingFile()`](#chooseexistingfile)
 - [`chooseExistingImage()`](#chooseexistingimage)
+- [`cssPrefix()`](#cssprefix)
 - [`date()`](#date)
 - [`entities()`](#entities)
 - [`errorf()`](#errorf)
@@ -150,9 +151,11 @@ An array of common image file extensions.
 - [`fileExists()`](#fileexists)
 - [`find()`](#find)
 - [`findAll()`](#findall)
+- [`formatTemplate()`](#formattemplate)
 - [`generatorMeta()`](#generatormeta)
 - [`getExtension()`](#getextension)
 - [`getFilename()`](#getfilename)
+- [`getKeys()`](#getkeys)
 - [`indexOf()`](#indexof)
 - [`isAny()`](#isany)
 - [`markdown()`](#markdown)
@@ -164,6 +167,8 @@ An array of common image file extensions.
 - [`sortNatural()`](#sortnatural)
 - [`split()`](#split)
 - [`thumb()`](#thumb)
+- [`toLua()`](#tolua)
+- [`toTime()`](#totime)
 - [`trim()`](#trim)
 - [`trimNewlines()`](#trimnewlines)
 - [`url()`](#url)
@@ -181,6 +186,16 @@ Return the path of an existing file with any of the specified extensions. Return
 Return the path of an existing image file with any of the specified extensions. Returns `nil` if no image file exists.
 
 Short form for `chooseExistingFile(pathWithoutExtension, IMAGE_EXTENSIONS)`.
+
+#### cssPrefix()
+`css = cssPrefix( property, value )`
+
+Quick and dirty way of adding vendor-specific prefixes to a CSS property. Example:
+
+```lua
+local css = cssPrefix("flex", "auto")
+-- css is "-ms-flex: auto; -moz-flex: auto; -webkit-flex: auto; flex: auto;"
+```
 
 #### date()
 `string = date( format [, time=now ] )`
@@ -220,6 +235,34 @@ Get the item in the array whose `attribute` is `value`. Returns `nil` if no item
 
 Get all items in the array whose `attribute` is `value`.
 
+#### formatTemplate()
+`template = formatTemplate( format, valueTable )`
+
+Quick and dirty formatting of a template, presumably before using `generateFromTemplate()`.
+This replaces all instances of `:key:` with the corresponding field from `values`.
+Example:
+
+```lua
+local template = formatTemplate(
+	[[
+		{{
+		page.title  = :title:
+		page.layout = "awesome"
+		}}
+
+		My dog likes :thing:.
+		Other dogs probably like :thing: too!
+	]],
+	{
+		title = F("%q", "Timmie the Dog"), -- Remember, the title is in the Lua code.
+		thing = "bones",
+	}
+)
+generateFromTemplate("dogs/info.md", template)
+```
+
+Also see [`toLua()`](#tolua).
+
 #### generatorMeta()
 `html = generatorMeta( [ hideVersion=false ] )`
 
@@ -236,6 +279,11 @@ Get the extension part of a path or filename.
 `filename = getFilename( path )`
 
 Get the filename part of a path.
+
+#### getKeys()
+`keys = getKeys( table )`
+
+Get the keys from a table.
 
 #### indexOf()
 `index = indexOf( array, value )`
@@ -316,6 +364,47 @@ Example:
 {{thumb("/images/1000-clown-cars.jpg", 0, 350, false)}}
 ```
 
+#### toLua()
+`luaString = toLua( value )`
+
+Convert any value to Lua code. Useful e.g. when sending tables to layouts. Example:
+
+```lua
+local credits = {
+	{what="Fabric", who="Soft Inc."},
+	{what="Paint",  who="Bob Bobson Co."},
+}
+
+local template = formatTemplate(
+	[[
+		{{
+		page.title = :title:
+		P.creditsInPageFooter = :credits:
+		}}
+
+		Experience the best carpets around!
+	]],
+	{
+		title   = toLua("Carpets"),
+		credits = toLua(credits),
+	}
+)
+
+generateFromTemplate("products/carpets.md", template)
+```
+
+#### toTime()
+`time = toTime( datetime )`
+
+Convert a *datetime* used in LuaWebGen to a normal time value that standard libraries understand.
+`datetime` must have the format `"YYYY-MM-DD hh:mm:ss"`.
+Example:
+
+```lua
+local time = toTime(page.publishDate)
+local publishYear = os.date("%Y", time)
+```
+
 #### trim()
 `string = trim( string )`
 
@@ -361,6 +450,7 @@ urlize("Hello, big world!") -- "hello-big-world"
 - [`generateFromTemplate()`](#generatefromtemplate)
 - [`include()`](#include)
 - [`isCurrentUrl()`](#iscurrenturl)
+- [`isCurrentUrlBelow()`](#iscurrenturlbelow)
 - [`outputRaw()`](#outputraw)
 - [`subpages()`](#subpages)
 
@@ -407,11 +497,15 @@ echoRaw("a < b") -- Output is "a < b"
 > ```
 
 #### generateFromTemplate()
-`generateFromTemplate( path, templateString )`
+`page = generateFromTemplate( path, templateString )`
 
 Generate a page from a template. Available in `config.before()` and `config.after()`. Example:
+
 ```lua
-generateFromTemplate("/dogs/fido.md", "# Fido\n\nFido is fluffy!")
+local path     = "/dogs/fido.md"
+local template = "# Fido\n\nFido is fluffy!"
+local page     = generateFromTemplate(path, template)
+printf("We generated page '%s'.", page.url)
 ```
 
 #### include()
@@ -429,6 +523,17 @@ Check if the relative URL of the current page is `url`. Example:
 {{if isCurrentUrl"/blog/last-post/"}}
 You've reached the end!
 {{end}}
+```
+
+#### isCurrentUrlBelow()
+`bool = isCurrentUrlBelow( urlPrefix )`
+
+Check if the relative URL of the current page starts with `urlPrefix`. Example:
+
+```html
+{{local class = isCurrentUrlBelow"/blog/" and "current" or ""}}
+
+<a href="/blog/" class="{{class}}">Blog</a>
 ```
 
 #### outputRaw()
@@ -487,7 +592,7 @@ page.aliases = {"/my-page/", "/some-archived-page/"}
 ```
 
 #### page.content
-The contents of the current page. Available to layout templates.
+The contents of the current page. Available in layouts.
 
 #### page.isDraft
 If the current page is a draft.
@@ -508,8 +613,11 @@ Special pages are ignored by `subpages()`.
 Set this to `true` for e.g. 404 error pages.
 
 #### page.layout
-What layout template the page should use.
+What layout the page should use.
 The default is the value of `site.defaultLayout`.
+
+#### page.params
+Table for storing any custom data you want.
 
 #### page.permalink
 The permanent URL to the current page.
@@ -538,6 +646,6 @@ Data files can be `.lua`, `.toml` or `.xml` files.
 #### params
 `params` or `P`
 
-Table for storing any custom data you want.
+Table for storing any custom data you want. Short form for [`page.params`](#pageparams).
 
 

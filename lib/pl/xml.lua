@@ -21,6 +21,7 @@
 -- classic Lua XML parser by Roberto Ierusalimschy.
 -- modified to output LOM format.
 -- http://lua-users.org/wiki/LuaXml
+-- modified more by Marcus Thunström. (2018-06-22)
 -- </pre>
 -- See @{06-data.md.XML|the Guide}
 --
@@ -368,9 +369,9 @@ local function _dostring(t, buf, self, xml_escape, parentns, idn, indent, attr_i
         if s_find(k, "\1", 1, true) then
             local ns, attrk = s_match(k, "^([^\1]*)\1?(.*)$");
             nsid = nsid + 1;
-            t_insert(buf, " xmlns:ns"..nsid.."='"..xml_escape(ns).."' ".."ns"..nsid..":"..attrk.."='"..xml_escape(v).."'");
+            t_insert(buf, " xmlns:ns"..nsid.."=\""..xml_escape(ns).."\" ".."ns"..nsid..":"..attrk.."=\""..xml_escape(v).."\"");
         elseif not(k == "xmlns" and v == parentns) then
-            t_insert(buf, alf..k.."='"..xml_escape(v).."'");
+            t_insert(buf, alf..k.."=\""..xml_escape(v).."\"");
         end
     end
     -- it's useful for testing to have predictable attribute ordering, if available
@@ -416,7 +417,7 @@ function _M.tostring(t,idn,indent, attr_indent, xml)
         if type(xml) == "string" then
             buf[1] = xml
         else
-            buf[1] = "<?xml version='1.0'?>"
+            buf[1] = "<?xml version=\"1.0\"?>"
         end
     end
     _dostring(t, buf, _dostring, xml_escape, nil,idn,indent, attr_indent);
@@ -518,21 +519,22 @@ function _M.walk(doc, depth_first, operation)
     if depth_first then operation(doc.tag,doc) end
 end
 
-local html_empty_elements = { --lists all HTML empty (void) elements
-    br      = true,
-    img     = true,
-    meta    = true,
-    frame   = true,
+local html_empty_elements = { --lists all HTML empty (void) elements  :Edit
     area    = true,
-    hr      = true,
     base    = true,
+    br      = true,
     col     = true,
-    link    = true,
-    input   = true,
-    option  = true,
-    param   = true,
-    isindex = true,
     embed   = true,
+    frame   = true,
+    hr      = true,
+    img     = true,
+    input   = true,
+    isindex = true,
+    link    = true,
+    meta    = true,
+    param   = true,
+    track   = true,
+    wbr     = true,
 }
 
 local escapes = { quot = "\"", apos = "'", lt = "<", gt = ">", amp = "&" }
