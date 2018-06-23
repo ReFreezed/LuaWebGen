@@ -91,6 +91,9 @@ Site-specific configurations are stored in `config.lua` in the site root. The fi
 title         -- See site.title
 baseUrl       -- See site.baseUrl
 languageCode  -- See site.languageCode
+defaultLayout -- See site.defaultLayout
+
+redirections  -- Table with source URL slugs as keys and target URLs are values.
 
 ignoreFiles   -- Array of filename patterns to exclude from site generation.
 ignoreFolders -- Array of folder name patterns to exclude from site generation.
@@ -98,7 +101,8 @@ ignoreFolders -- Array of folder name patterns to exclude from site generation.
 processors    -- Table with file content processors.
 
 before        -- Function that is called before site generation.
-after         -- Function that is called after site generation.
+after         -- Function that is called after main site generation.
+validate      -- Function that is called after all tasks are done.
 ```
 
 All fields are optional.
@@ -172,8 +176,10 @@ An array of common image file extensions.
 - [`trim()`](#trim)
 - [`trimNewlines()`](#trimnewlines)
 - [`url()`](#url)
-- [`urlAbs()`](#urlAbs)
+- [`urlAbs()`](#urlabs)
+- [`urlExists()`](#urlexists)
 - [`urlize()`](#urlize)
+- [`validateUrls()`](#validateurls)
 
 #### chooseExistingFile()
 `path = chooseExistingFile( pathWithoutExtension, extensions )`
@@ -432,6 +438,22 @@ Percent-encode a URL (spaces become `%20` etc.).
 
 Same as [`url()`](#url) but also prepends `site.baseUrl` to relative URLs, making them absolute.
 
+#### urlExists()
+`urlExists( url )`
+
+Check that files for URLs exist.
+Useful e.g. after moving a bunch of pages (that now should have aliases).
+Example:
+
+```lua
+function config.validate()
+	local url = "/old-folder/my-post/"
+	if not urlExists(url) then
+		error("Page is missing: "..url)
+	end
+end
+```
+
 #### urlize()
 `urlPart = urlize( string )`
 
@@ -439,6 +461,22 @@ Make a string look like a URL. Useful e.g. when converting page titles to URL sl
 
 ```lua
 urlize("Hello, big world!") -- "hello-big-world"
+```
+
+#### validateUrls()
+`validateUrls( url )`
+
+Check that files for URLs exist.
+Useful e.g. after moving a bunch of pages (that now should have aliases).
+Example:
+
+```lua
+function config.validate()
+	validateUrls{
+		"/old-folder/my-post/",
+		"/work-in-progress/dog.png",
+	}
+end
 ```
 
 

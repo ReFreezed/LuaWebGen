@@ -3,6 +3,11 @@ local config = {
 	baseUrl       = "http://example.com/",
 	languageCode  = "en",
 
+	redirections  = {
+		["/also-first/"] = "/first/",
+		["/duck/"]       = "https://duckduckgo.com/",
+	},
+
 	ignoreFiles   = {"%.tmp$", "%.psd$"},
 	ignoreFolders = {"^%."},
 

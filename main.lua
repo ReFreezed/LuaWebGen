@@ -122,7 +122,7 @@ local dateStringToTime
 local encodeHtmlEntities
 local error, errorf, fileerror, errorInGeneratedCodeFromTemplate
 local F, formatBytes, formatTemplate
-local generateFromTemplate, generateFromTemplateFile
+local generateFromTemplate, generateFromTemplateFile, generateRedirection
 local generatorMeta
 local getDirectory, getFilename, getExtension, getBasename
 local getFileContents
@@ -154,6 +154,7 @@ local toUrl, toUrlAbsolute, urlize
 local traverseDirectory, traverseFiles
 local trim, trimNewlines
 local unindent
+local urlExists
 local writeOutputFile, preserveExistingOutputFile
 
 
@@ -693,9 +694,12 @@ end
 
 
 function createDirectory(path)
-	assert(not path:find"^/")   -- Avoid absolute paths - they were probably a mistake.
-	assert(not path:find"^%a:") -- Windows drive letter.
-	assert(not path:find"//")   -- Something went wrong somewhere.
+	if path:find"^/" or path:find"^%a:" then
+		errorf(2, "[Internal] Absolute paths are disabled. (%s)", path)
+	end
+	if path:find"//" then
+		errorf(2, "Path looks invalid: '%s'", path)
+	end
 
 	local pathConstructed = ""
 
@@ -1099,6 +1103,37 @@ function generateFromTemplateFile(page)
 	end
 
 	generateFromTemplate(page, template, modTime)
+end
+
+function generateRedirection(slug, targetUrl)
+	if not slug:find"^/" then
+		errorf(2, "URL slugs must begin with a '/'. (%s)", slug)
+	end
+
+	local pathRel  = (slug:gsub("/$", "").."/index.html"):gsub("^/", "")
+	local contents = formatTemplate(
+		[=[
+			<!DOCTYPE html>
+			<html>
+				<head>
+					<meta charset="utf-8">
+					<meta name="robots" content="noindex">
+					<meta http-equiv="refresh" content="0; url=:urlPercent:">
+					<title>:url:</title>
+					<link rel="canonical" href=":urlPercent:">
+				</head>
+				<body>
+					<p>Page has moved. If you are not redirected automatically,
+					click <a href=":urlPercent:">here</a>.</p>
+				</body>
+			</html>
+		]=], {
+			url        =               encodeHtmlEntities(targetUrl) ,
+			urlPercent = toUrlAbsolute(encodeHtmlEntities(targetUrl)),
+		}
+	)
+
+	writeOutputFile("page", pathRel, contents)
 end
 
 
@@ -1583,6 +1618,22 @@ end
 
 
 
+function urlExists(url)
+	if not url:find"^/" then
+		errorf(2, "Local URLs must begin with a '/'. (%s)", url)
+	end
+
+	if url:find"/$" then
+		url = url.."index.html"
+	elseif not getFilename(url):find(".", 1, true) then
+		url = url.."/index.html"
+	end
+
+	return isFile(DIR_OUTPUT..url)
+end
+
+
+
 --==============================================================
 --==============================================================
 --==============================================================
@@ -1876,6 +1927,7 @@ scriptEnvironmentGlobals = {
 	F              = F,
 	find           = itemWith,
 	findAll        = itemWithAll,
+	formatTemplate = formatTemplate,
 	generatorMeta  = generatorMeta,
 	getFilename    = getFilename,
 	getKeys        = getKeys,
@@ -1884,7 +1936,6 @@ scriptEnvironmentGlobals = {
 	max            = max,
 	min            = min,
 	newBuffer      = newStringBuffer,
-	formatTemplate = formatTemplate,
 	printf         = printf,
 	round          = round,
 	sortNatural    = sortNatural,
@@ -1895,6 +1946,7 @@ scriptEnvironmentGlobals = {
 	trimNewlines   = trimNewlines,
 	url            = toUrl,
 	urlAbs         = toUrlAbsolute,
+	urlExists      = urlExists,
 	urlize         = urlize,
 
 	chooseExistingFile = function(sitePathWithoutExt, exts)
@@ -2099,6 +2151,20 @@ scriptEnvironmentGlobals = {
 
 		return subpages
 	end,
+
+	validateUrls = function(urls)
+		local ok = true
+		for _, url in ipairs(urls) do
+			if not urlExists(url) then
+				printf("Error: URL is missing: %s", url)
+				ok = false
+			end
+		end
+
+		if not ok then
+			error("URLs were missing.", 2)
+		end
+	end
 }
 
 
@@ -2145,21 +2211,15 @@ scriptEnvironment = setmetatable({}, {
 local function buildWebsite()
 	local startTime = socket.gettime()
 
+
 	site = {
 		title         = "",
 		baseUrl       = "/",
 		languageCode  = "",
 		defaultLayout = "page",
+
+		redirections  = nil,
 	}
-
-	pages                             = {}
-	pagesGenerating                   = {}
-
-	contextStack                      = {}
-	proxies                           = {}
-	proxySources                      = {}
-	layoutTemplates                   = {}
-	scriptFunctions                   = {}
 
 	ignoreFiles                       = nil
 	ignoreFolders                     = nil
@@ -2167,6 +2227,16 @@ local function buildWebsite()
 	fileProcessors                    = nil
 
 	removeTrailingSlashFromPermalinks = false
+
+	pages                             = {}
+	pagesGenerating                   = {}
+
+
+	contextStack                      = {}
+	proxies                           = {}
+	proxySources                      = {}
+	layoutTemplates                   = {}
+	scriptFunctions                   = {}
 
 	writtenOutputFiles                = {}
 	outputFileCount                   = 0
@@ -2200,6 +2270,8 @@ local function buildWebsite()
 	site.baseUrl       = assertType(config.baseUrl       or "",     "string", "config.baseUrl must be a string.")
 	site.languageCode  = assertType(config.languageCode  or "",     "string", "config.languageCode must be a string.")
 	site.defaultLayout = assertType(config.defaultLayout or "page", "string", "config.defaultLayout must be a string.")
+
+	site.redirections = assertTable(config.redirections or {}, "string", "string", "config.redirections must be a table of strings.")
 
 	ignoreFiles   = assertTable(config.ignoreFiles   or {}, "number", "string", "config.ignoreFiles must be an array of strings.")
 	ignoreFolders = assertTable(config.ignoreFolders or {}, "number", "string", "config.ignoreFolders must be an array of strings.")
@@ -2280,36 +2352,20 @@ local function buildWebsite()
 		if page.isPage and not page._isSkipped then
 			assert(page._isGenerated)
 
-			for _, aliasUrl in ipairs(page.aliases) do
-				assert(aliasUrl:find"/$")
-
-				local aliasPathRel = (aliasUrl.."index.html"):gsub("^/", "")
-
-				local contents = formatTemplate(
-					[=[
-						<!DOCTYPE html>
-						<html>
-							<head>
-								<meta charset="utf-8">
-								<meta name="robots" content="noindex">
-								<meta http-equiv="refresh" content="0; url=:urlPercent:">
-								<title>:url:</title>
-								<link rel="canonical" href=":urlPercent:">
-							</head>
-							<body>
-								<p>Page has moved. If you are not redirected automatically,
-								click <a href=":urlPercent:">here</a>.</p>
-							</body>
-						</html>
-					]=], {
-						url        =               encodeHtmlEntities(page.permalink) ,
-						urlPercent = toUrlAbsolute(encodeHtmlEntities(page.permalink)),
-					}
-				)
-
-				writeOutputFile("page", aliasPathRel, contents)
+			for _, aliasSlug in ipairs(page.aliases) do
+				generateRedirection(aliasSlug, page.permalink)
 			end
 		end
+	end
+
+	for slug, targetUrl in pairs(site.redirections) do
+		generateRedirection(slug, targetUrl)
+	end
+
+	if config.validate then
+		pushContext("validation")
+		config.validate()
+		popContext("validation")
 	end
 
 	-- Cleanup old generated stuff.
