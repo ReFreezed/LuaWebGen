@@ -6,7 +6,7 @@
 --=
 --============================================================]]
 
-local _WEBGEN_VERSION = "0.9.0"
+local _WEBGEN_VERSION = "0.10.0"
 
 
 
@@ -46,6 +46,8 @@ local OUTPUT_CATEGORY_SET = {["page"]=true, ["otherTemplate"]=true, ["otherRaw"]
 
 local IMAGE_EXTENSIONS = {"png","jpg","jpeg","gif"}
 
+local NOOP = function()end
+
 
 
 -- Modules.
@@ -75,39 +77,46 @@ local logPath                  = ""
 local logBuffer                = {}
 
 local includeDrafts            = false
+local verbosePrint             = false
 
 local scriptEnvironment        = nil
 local scriptEnvironmentGlobals = nil
 
+local oncePrints               = {}
+
 
 
 -- Site variables.
-local site                              = nil
+local site                       = nil
 
-local pages                             = nil
-local pagesGenerating                   = nil
+local pages                      = nil
+local pagesGenerating            = nil
 
-local contextStack                      = nil
-local proxies                           = nil
-local proxySources                      = nil
-local layoutTemplates                   = nil
-local scriptFunctions                   = nil
+local contextStack               = nil
+local proxies                    = nil
+local proxySources               = nil
+local layoutTemplates            = nil
+local scriptFunctions            = nil
 
-local ignoreFiles                       = nil
-local ignoreFolders                     = nil
+local ignoreFiles                = nil
+local ignoreFolders              = nil
 
-local fileProcessors                    = nil
+local fileProcessors             = nil
 
-local removeTrailingSlashFromPermalinks = false
+local outputPathFormat           = "%s"
+local rewriteExcludes            = nil
 
-local writtenOutputFiles                = nil
-local outputFileCount                   = 0
-local outputFileCounts                  = nil
-local outputFileByteCount               = 0
-local outputFilePreservedCount          = 0
-local outputFileSkippedPageCount        = 0
+local noTrailingSlash            = false
 
-local thumbnailInfos                    = nil
+local writtenOutputFiles         = nil
+local writtenOutputUrls          = nil
+local outputFileCount            = 0
+local outputFileCounts           = nil
+local outputFileByteCount        = 0
+local outputFilePreservedCount   = 0
+local outputFileSkippedPageCount = 0
+
+local thumbnailInfos             = nil
 
 
 
@@ -132,6 +141,7 @@ local getLineNumber
 local getProtectionWrapper
 local indexOf, itemWith, itemWithAll
 local insertLineNumberCode
+local isAny
 local isFile, isDirectory
 local isStringMatchingAnyPattern
 local markdownToHtml
@@ -141,8 +151,9 @@ local newStringBuffer
 local parseMarkdownTemplate, parseHtmlTemplate, parseOtherTemplate
 local pathToSitePath, sitePathToPath
 local pcall
-local print, printf, log, logprint
+local print, printOnce, printf, printfOnce, log, logprint, logVerbose
 local pushContext, popContext, assertContext, getContext
+local rewriteOutputPath
 local round
 local serializeLua
 local sortNatural
@@ -622,11 +633,13 @@ end
 
 
 
--- writeOutputFile( category, pathRelative, dataString [ modificationTime ] )
-function writeOutputFile(category, pathRel, data, modTime)
-	if writtenOutputFiles[pathRel] then
-		errorf("Duplicate output file '%s'.", pathRel)
+-- writeOutputFile( category, pathRelative, url, dataString [ modificationTime ] )
+function writeOutputFile(category, pathRel, url, data, modTime)
+	local pathOutputRel = rewriteOutputPath(pathRel)
+	if writtenOutputFiles[pathOutputRel] then
+		errorf("Duplicate output file '%s'.", pathOutputRel)
 	end
+	assert(not writtenOutputUrls[url])
 
 	local filename = getFilename(pathRel)
 	local extLower = getExtension(filename):lower()
@@ -639,8 +652,8 @@ function writeOutputFile(category, pathRel, data, modTime)
 		assertType(data, "string", "File processor didn't return a string. (%s)", extLower)
 	end
 
-	local path = DIR_OUTPUT.."/"..pathRel
-	log("Writing: %s", path)
+	local path = DIR_OUTPUT.."/"..pathOutputRel
+	logVerbose("Writing: %s", path)
 
 	createDirectory(getDirectory(path))
 
@@ -655,8 +668,9 @@ function writeOutputFile(category, pathRel, data, modTime)
 		end
 	end
 
-	table.insert(writtenOutputFiles, pathRel)
-	writtenOutputFiles[pathRel] = true
+	table.insert(writtenOutputFiles, pathOutputRel)
+	writtenOutputFiles[pathOutputRel] = true
+	writtenOutputUrls[url] = true
 
 	assert(OUTPUT_CATEGORY_SET[category], category)
 	outputFileCount = outputFileCount+1
@@ -665,14 +679,16 @@ function writeOutputFile(category, pathRel, data, modTime)
 	outputFileByteCount = outputFileByteCount+#data
 end
 
--- preserveExistingOutputFile( category, pathRelative )
-function preserveExistingOutputFile(category, pathRel)
-	if writtenOutputFiles[pathRel] then
-		errorf("Duplicate output file '%s'.", pathRel)
+-- preserveExistingOutputFile( category, pathRelative, url )
+function preserveExistingOutputFile(category, pathRel, url)
+	local pathOutputRel = rewriteOutputPath(pathRel)
+	if writtenOutputFiles[pathOutputRel] then
+		errorf("Duplicate output file '%s'.", pathOutputRel)
 	end
+	assert(not writtenOutputUrls[url])
 
-	local path = DIR_OUTPUT.."/"..pathRel
-	-- log("Preserving: %s", path)
+	local path = DIR_OUTPUT.."/"..pathOutputRel
+	-- logVerbose("Preserving: %s", path)
 
 	local dataLen, err = lfs.attributes(path, "size")
 	if not dataLen then
@@ -680,8 +696,9 @@ function preserveExistingOutputFile(category, pathRel)
 		dataLen = 0
 	end
 
-	table.insert(writtenOutputFiles, pathRel)
-	writtenOutputFiles[pathRel] = true
+	table.insert(writtenOutputFiles, pathOutputRel)
+	writtenOutputFiles[pathOutputRel] = true
+	writtenOutputUrls[url] = true
 
 	assert(OUTPUT_CATEGORY_SET[category], category)
 	outputFileCount = outputFileCount+1
@@ -725,7 +742,7 @@ function removeEmptyDirectories(dirPath)
 		if name ~= "." and name ~= ".." and isDirectory(path) then
 			removeEmptyDirectories(path)
 			if isDirectoryEmpty(path) then
-				log("Removing empty folder: %s", path)
+				logVerbose("Removing empty folder: %s", path)
 				assert(lfs.rmdir(path))
 			end
 		end
@@ -748,18 +765,35 @@ do
 
 		log(table.concat(values, "\t", 1, argCount))
 	end
+
+	function printOnce(...)
+		local argCount = select("#", ...)
+		for i = 1, argCount do
+			values[i] = tostring(select(i, ...))
+		end
+
+		local s = table.concat(values, "\t", 1, argCount)
+
+		if oncePrints[s] then  return  end
+		oncePrints[s] = true
+
+		_print(...)
+		log(s)
+	end
 end
 
 function printf(s, ...)
 	print(s:format(...))
 end
 
+function printfOnce(s, ...)
+	printOnce(s:format(...))
+end
+
 -- log( string )
 -- log( formatString, ... )
 function log(s, ...)
-	if select("#", ...) > 0 then
-		s = s:format(...)
-	end
+	if select("#", ...) > 0 then  s = s:format(...)  end
 
 	if not logFile then
 		table.insert(logBuffer, s)
@@ -775,11 +809,17 @@ function log(s, ...)
 end
 
 function logprint(s, ...)
-	if select("#", ...) > 0 then
-		s = s:format(...)
-	end
+	if select("#", ...) > 0 then  s = s:format(...)  end
 
 	printf("[%s]  %s", os.date"%Y-%m-%d %H:%M:%S", s)
+end
+
+function logVerbose(...)
+	if verbosePrint then
+		logprint(...)
+	else
+		log(...)
+	end
 end
 
 
@@ -1085,7 +1125,7 @@ function generateFromTemplate(page, template, modTime)
 	end
 
 	assert(outStr)
-	writeOutputFile(page._category, page._pathOut, outStr, modTime)
+	writeOutputFile(page._category, page._pathOut, page.url, outStr, modTime)
 
 	pagesGenerating[page._pathOut] = nil
 	page._isGenerated = true
@@ -1133,7 +1173,7 @@ function generateRedirection(slug, targetUrl)
 		}
 	)
 
-	writeOutputFile("page", pathRel, contents)
+	writeOutputFile("page", pathRel, slug, contents)
 end
 
 
@@ -1417,7 +1457,7 @@ do
 		local imageCreatorMethod = "jpegStr"--assert(imageCreatorMethods[extLower], extLower)
 		local contents           = thumb[imageCreatorMethod](thumb, 75)
 		local pathThumbRel       = F("%s%s.%dx%d.%s", folder, basename, thumbW, thumbH, "jpg")--ext)
-		writeOutputFile("otherRaw", pathThumbRel, contents)
+		writeOutputFile("otherRaw", pathThumbRel, "/"..pathThumbRel, contents)
 
 		local thumbInfo = {
 			path   = pathThumbRel,
@@ -1500,7 +1540,7 @@ function newPage(pathRel)
 		aliases     = {},
 
 		url         = "/"..permalinkRel,
-		permalink   = site.baseUrl..(removeTrailingSlashFromPermalinks and permalinkRel:gsub("/$", "") or permalinkRel),
+		permalink   = site.baseUrl..(noTrailingSlash and permalinkRel:gsub("/$", "") or permalinkRel),
 		rssLink     = "", -- @Incomplete @Doc
 
 		params      = {},
@@ -1512,11 +1552,11 @@ end
 
 
 
-function pathToSitePath(path)
-	if path:find"^/" then
-		errorf(2, "Path is not valid: %s", path)
+function pathToSitePath(pathRel)
+	if pathRel:find"^/" then
+		errorf(2, "Path is not valid: %s", pathRel)
 	end
-	return "/"..path
+	return "/"..pathRel
 end
 
 function sitePathToPath(sitePath)
@@ -1623,13 +1663,41 @@ function urlExists(url)
 		errorf(2, "Local URLs must begin with a '/'. (%s)", url)
 	end
 
-	if url:find"/$" then
-		url = url.."index.html"
-	elseif not getFilename(url):find(".", 1, true) then
-		url = url.."/index.html"
+	return writtenOutputUrls[url] == true
+end
+
+
+
+function isAny(v1, values)
+	for _, v2 in ipairs(values) do
+		if v1 == v2 then  return true  end
+	end
+	return false
+end
+
+
+
+function rewriteOutputPath(pathRel)
+	local sitePath = pathToSitePath(pathRel)
+
+	for _, pat in ipairs(rewriteExcludes) do
+		if sitePath:find(pat) then  return pathRel  end
 	end
 
-	return isFile(DIR_OUTPUT..url)
+	if type(outputPathFormat) == "function" then
+		local sitePathNew = outputPathFormat(sitePath)
+
+		if type(sitePathNew) ~= "string" then
+			errorf("config.rewriteOutputPath() did not return a string. (%s)", sitePath)
+		elseif sitePathNew == "" then
+			errorf("config.rewriteOutputPath() returned an empty string. (%s)", sitePath)
+		end
+
+		return (sitePathToPath(sitePathNew))
+
+	else
+		return (sitePathToPath(outputPathFormat:format(sitePath)))
+	end
 end
 
 
@@ -1810,6 +1878,9 @@ elseif command == "build" then
 		elseif arg == "--drafts" or arg == "-d" then
 			includeDrafts = true
 
+		elseif arg == "--verbose" or arg == "-v" then
+			verbosePrint = true
+
 		elseif arg:find"^%-" then
 			errorf("[arg] Unknown option '%s'.", arg)
 
@@ -1827,6 +1898,7 @@ elseif command == "build" then
 	if ignoreModificationTimes then  logprint("Option --force: Ignoring modification times.")  end
 	if autobuild               then  logprint("Option --autobuild: Auto-building website. Press Ctrl+C to stop.")  end
 	if includeDrafts           then  logprint("Option --drafts: Drafts are included.")  end
+	if verbosePrint            then  logprint("Option --verbose: Verbose printing enabled.")  end
 
 	logprint("Site folder: %s", toNormalPath(lfs.currentdir()))
 
@@ -1921,6 +1993,8 @@ scriptEnvironmentGlobals = {
 	P              = nil,
 
 	-- Utility functions.
+	----------------------------------------------------------------
+
 	date           = os.date,
 	entities       = encodeHtmlEntities,
 	errorf         = errorf,
@@ -1932,11 +2006,14 @@ scriptEnvironmentGlobals = {
 	getFilename    = getFilename,
 	getKeys        = getKeys,
 	indexOf        = indexOf,
+	isAny          = isAny,
 	markdown       = markdownToHtml,
 	max            = max,
 	min            = min,
 	newBuffer      = newStringBuffer,
 	printf         = printf,
+	printfOnce     = printfOnce,
+	printOnce      = printOnce,
 	round          = round,
 	sortNatural    = sortNatural,
 	split          = splitString,
@@ -1953,8 +2030,8 @@ scriptEnvironmentGlobals = {
 		local pathWithoutExt = sitePathToPath(sitePathWithoutExt)
 
 		for _, ext in ipairs(exts) do
-			local path = pathWithoutExt.."."..ext
-			if isFile(DIR_CONTENT.."/"..path) then  return pathToSitePath(path)  end
+			local pathRel = pathWithoutExt.."."..ext
+			if isFile(DIR_CONTENT.."/"..pathRel) then  return pathToSitePath(pathRel)  end
 		end
 
 		return nil
@@ -1965,19 +2042,12 @@ scriptEnvironmentGlobals = {
 	end,
 
 	fileExists = function(sitePath)
-		local path = sitePathToPath(sitePath)
-		return isFile(DIR_CONTENT.."/"..path)
+		local pathRel = sitePathToPath(sitePath)
+		return isFile(DIR_CONTENT.."/"..pathRel)
 	end,
 
 	getExtension = function(genericPath)
 		return getExtension(getFilename(genericPath))
-	end,
-
-	isAny = function(v1, values)
-		for _, v2 in ipairs(values) do
-			if v1 == v2 then  return true  end
-		end
-		return false
 	end,
 
 	X = function(node, tagName) -- @Doc
@@ -2064,7 +2134,32 @@ scriptEnvironmentGlobals = {
 		return F("-ms-%s: %s; -moz-%s: %s; -webkit-%s: %s; %s: %s;", prop, v, prop, v, prop, v, prop, v)
 	end,
 
+	warning = function(s)
+		s = F("!!! WARNING: %s !!!", s)
+		local border = ("!"):rep(#s)
+		print()
+		print(border)
+		printf("!!! WARNING: %s !!!", s)
+		print(border)
+		print()
+	end,
+
+	warningOnce = function(s)
+		s = F("!!! WARNING: %s !!!", s)
+
+		if oncePrints[s] then  return  end
+		oncePrints[s] = true
+
+		local border = ("!"):rep(#s)
+		print()
+		print(border)
+		print(s)
+		print(border)
+		print()
+	end,
+
 	-- Context functions.
+	----------------------------------------------------------------
 
 	echo = function(s)
 		assertContext("template", "echo")
@@ -2113,7 +2208,7 @@ scriptEnvironmentGlobals = {
 		assertType(contents, "string", "The contents must be a string.")
 
 		local pathRel = sitePathToPath(sitePathRel)
-		writeOutputFile("otherRaw", pathRel, contents)
+		writeOutputFile("otherRaw", pathRel, sitePathRel, contents)
 	end,
 
 	isCurrentUrl = function(url)
@@ -2165,6 +2260,8 @@ scriptEnvironmentGlobals = {
 			error("URLs were missing.", 2)
 		end
 	end
+
+	----------------------------------------------------------------
 }
 
 
@@ -2210,6 +2307,7 @@ scriptEnvironment = setmetatable({}, {
 
 local function buildWebsite()
 	local startTime = socket.gettime()
+	oncePrints = {}
 
 
 	site = {
@@ -2221,31 +2319,35 @@ local function buildWebsite()
 		redirections  = nil,
 	}
 
-	ignoreFiles                       = nil
-	ignoreFolders                     = nil
+	ignoreFiles                = nil
+	ignoreFolders              = nil
 
-	fileProcessors                    = nil
+	fileProcessors             = nil
 
-	removeTrailingSlashFromPermalinks = false
+	outputPathFormat           = "%s"
+	rewriteExcludes            = nil
 
-	pages                             = {}
-	pagesGenerating                   = {}
+	noTrailingSlash            = false
+
+	pages                      = {}
+	pagesGenerating            = {}
 
 
-	contextStack                      = {}
-	proxies                           = {}
-	proxySources                      = {}
-	layoutTemplates                   = {}
-	scriptFunctions                   = {}
+	contextStack               = {}
+	proxies                    = {}
+	proxySources               = {}
+	layoutTemplates            = {}
+	scriptFunctions            = {}
 
-	writtenOutputFiles                = {}
-	outputFileCount                   = 0
-	outputFileCounts                  = {}
-	outputFileByteCount               = 0
-	outputFilePreservedCount          = 0
-	outputFileSkippedPageCount        = 0
+	writtenOutputFiles         = {}
+	writtenOutputUrls          = {}
+	outputFileCount            = 0
+	outputFileCounts           = {}
+	outputFileByteCount        = 0
+	outputFilePreservedCount   = 0
+	outputFileSkippedPageCount = 0
 
-	thumbnailInfos                    = {}
+	thumbnailInfos             = {}
 
 	scriptEnvironmentGlobals.site = getProtectionWrapper(site, "site")
 	scriptEnvironmentGlobals.data = newDataFolderReader(DIR_DATA)
@@ -2266,19 +2368,59 @@ local function buildWebsite()
 		assertTable(config, nil, nil, "config.lua must return a table.")
 	end
 
-	site.title         = assertType(config.title         or "",     "string", "config.title must be a string.")
-	site.baseUrl       = assertType(config.baseUrl       or "",     "string", "config.baseUrl must be a string.")
-	site.languageCode  = assertType(config.languageCode  or "",     "string", "config.languageCode must be a string.")
-	site.defaultLayout = assertType(config.defaultLayout or "page", "string", "config.defaultLayout must be a string.")
+	local function get(k, default, assertFunc, ...)
+		local v = config[k]
+		if v == nil then  return default  end
 
-	site.redirections = assertTable(config.redirections or {}, "string", "string", "config.redirections must be a table of strings.")
+		assertFunc(v, ...)
 
-	ignoreFiles   = assertTable(config.ignoreFiles   or {}, "number", "string", "config.ignoreFiles must be an array of strings.")
-	ignoreFolders = assertTable(config.ignoreFolders or {}, "number", "string", "config.ignoreFolders must be an array of strings.")
+		config[k] = nil
+		return v
+	end
 
-	fileProcessors = assertTable(config.processors or {}, "string", "function", "config.processors must be a table of functions.")
+	local function getV(k, default, vType) -- Value.
+		return get(k, default, assertType, vType, "config.%s must be a %s.", k, vType)
+	end
 
-	removeTrailingSlashFromPermalinks = assertType(config.removeTrailingSlashFromPermalinks or false, "boolean", "config.removeTrailingSlashFromPermalinks must be a boolean.")
+	local function getT(k, default, kType, vType) -- Table
+		return get(k, default, assertTable, kType, vType, "config.%s must be a table of [%s]=%s.", k, kType, vType)
+	end
+
+	local function getA(k, default, vType) -- Array.
+		return get(k, default, assertTable, "number", vType, "config.%s must be an array of %s.", k, vType)
+	end
+
+	site.title             = getV("title",             "",     "string")
+	site.baseUrl           = getV("baseUrl",           "",     "string")
+	site.languageCode      = getV("languageCode",      "",     "string")
+	site.defaultLayout     = getV("defaultLayout",     "page", "string")
+
+	site.redirections      = getT("redirections",      {},     "string", "string")
+
+	ignoreFiles            = getA("ignoreFiles",       {},     "string")
+	ignoreFolders          = getA("ignoreFolders",     {},     "string")
+
+	fileProcessors         = getT("processors",        {},     "string", "function")
+
+	--[[
+	local handleHtaccess   = getV("htaccess",          false,  "boolean")
+	local htaccessWww      = getV("htaccessWww",       nil,    "boolean")
+	local htaccessErrors   = getT("htaccessErrors",    {},     "number", "string")
+	--]]
+
+	outputPathFormat       = get("rewriteOutputPath", "%s", NOOP)
+	assert(isAny(type(outputPathFormat), {"string","function"}), "config.rewriteOutputPath must be a string or a function.")
+	rewriteExcludes        = getA("rewriteExcludes",   {},     "string")
+
+	local onBefore         = getV("before",            nil,    "function")
+	local onAfter          = getV("after",             nil,    "function")
+	local onValidate       = getV("validate",          nil,    "function")
+
+	noTrailingSlash        = getV("removeTrailingSlashFromPermalinks", false, "boolean")
+
+	for k in pairs(config) do
+		printf("WARNING: Unknown config field '%s'.", k)
+	end
 
 
 	-- Fix details.
@@ -2298,9 +2440,9 @@ local function buildWebsite()
 		outputFileCounts[category] = 0
 	end
 
-	if config.before then
+	if onBefore then
 		pushContext("config")
-		config.before()
+		onBefore()
 		popContext("config")
 	end
 
@@ -2319,19 +2461,20 @@ local function buildWebsite()
 
 		else
 			local modTime = lfs.attributes(path, "modification")
+			local pathOutputRel = rewriteOutputPath(pathRel)
 
 			-- Non-templates should be OK to preserve (if there's no file processor).
 			local oldModTime
 				=   not ignoreModificationTimes
 				and not fileProcessors[extLower]
-				and lfs.attributes(DIR_OUTPUT.."/"..pathRel, "modification")
+				and lfs.attributes(DIR_OUTPUT.."/"..pathOutputRel, "modification")
 				or  nil
 
 			if modTime and modTime == oldModTime then
-				preserveExistingOutputFile("otherRaw", pathRel)
+				preserveExistingOutputFile("otherRaw", pathRel, pathRel)
 			else
 				local contents = assert(getFileContents(path))
-				writeOutputFile("otherRaw", pathRel, contents, modTime)
+				writeOutputFile("otherRaw", pathRel, "/"..pathRel, contents, modTime)
 			end
 		end
 	end)
@@ -2342,9 +2485,9 @@ local function buildWebsite()
 		end
 	end
 
-	if config.after then
+	if onAfter then
 		pushContext("config")
-		config.after()
+		onAfter()
 		popContext("config")
 	end
 
@@ -2362,16 +2505,16 @@ local function buildWebsite()
 		generateRedirection(slug, targetUrl)
 	end
 
-	if config.validate then
+	if onValidate then
 		pushContext("validation")
-		config.validate()
+		onValidate()
 		popContext("validation")
 	end
 
 	-- Cleanup old generated stuff.
-	traverseFiles(DIR_OUTPUT, nil, function(path, pathRel, filename, extLower)
-		if not writtenOutputFiles[pathRel] then
-			log("Removing: %s", path)
+	traverseFiles(DIR_OUTPUT, nil, function(path, pathOutputRel, filename, extLower)
+		if not writtenOutputFiles[pathOutputRel] then
+			logVerbose("Removing: %s", path)
 			assert(os.remove(path))
 		end
 	end)

@@ -47,21 +47,21 @@ Much nicer! The rest of the documentation will use this format.
 
 ### Commands
 
-#### `build`
+#### build
 ```batch
 webgen build [options]
 ```
 
 Build the website. (Also look at available [options](#build-options).)
 
-#### `new page`
+#### new page
 ```batch
 webgen new page "page_path"
 ```
 
 Create a new page with some basic information. Example: `webgen new page blog/first-post.md`
 
-#### `new site`
+#### new site
 ```batch
 webgen new site "folder_name"
 ```
@@ -81,6 +81,9 @@ Force-update all.
 This makes LuaWebGen treat all previously outputted files as if they were modified.
 This has the same effect as deleting the `output` folder.
 
+#### `--verbose` or `-v`
+Enable verbose printing in the console.
+
 
 
 ## Site Configuration
@@ -88,24 +91,61 @@ This has the same effect as deleting the `output` folder.
 Site-specific configurations are stored in `config.lua` in the site root. The file is expected to return a table with any of these fields:
 
 ```lua
-title         -- See site.title
-baseUrl       -- See site.baseUrl
-languageCode  -- See site.languageCode
-defaultLayout -- See site.defaultLayout
+title             -- See site.title
+baseUrl           -- See site.baseUrl
+languageCode      -- See site.languageCode
+defaultLayout     -- See site.defaultLayout
 
-redirections  -- Table with source URL slugs as keys and target URLs are values.
+redirections      -- Table with source URL slugs as keys and target URLs are values.
 
-ignoreFiles   -- Array of filename patterns to exclude from site generation.
-ignoreFolders -- Array of folder name patterns to exclude from site generation.
+ignoreFiles       -- Array of filename patterns to exclude from site generation.
+ignoreFolders     -- Array of folder name patterns to exclude from site generation.
 
-processors    -- Table with file content processors.
+processors        -- Table with file content processors.
 
-before        -- Function that is called before site generation.
-after         -- Function that is called after main site generation.
-validate      -- Function that is called after all tasks are done.
+rewriteOutputPath -- See below.
+rewriteExcludes   -- See below.
+
+before            -- Function that is called before site generation.
+after             -- Function that is called after main site generation.
+validate          -- Function that is called after all tasks are done.
 ```
 
 All fields are optional.
+
+#### rewriteOutputPath
+Use this to control where files are written inside the *output* folder.
+Note that URLs don't change.
+Example usage of `rewriteOutputPath` is to use it together with URL rewriting on the server.
+Most people should ignore this configuration entirely.
+
+If the value is a string then it's used as format for the path. Example:
+```lua
+config.rewriteOutputPath = "/subfolder%s" -- %s is the original path.
+-- "content/index.html"   is written to "output/subfolder/index.html"
+-- "content/blog/post.md" is written to "output/subfolder/blog/post/index.html"
+-- etc.
+```
+
+If the value is a function then the function is expected to return the rewritten path. Example:
+```lua
+config.rewriteOutputPath = function(path)
+	-- Put .css and .js files in a subfolder.
+	if isAny(getExtension(path), {"css","js"}) then
+		return "/subfolder"..path
+	end
+	return path
+end
+```
+
+The default value for `rewriteOutputPath` is `"%s"`
+
+#### rewriteExcludes
+This is an array of path patterns for files that should not be rewritten by `rewriteOutputPath`. Example:
+```lua
+-- Exclude topmost .htaccess file.
+config.rewriteExcludes = {"^/%.htaccess$"}
+```
 
 
 
@@ -167,6 +207,8 @@ An array of common image file extensions.
 - [`min()`](#min)
 - [`newBuffer()`](#newbuffer)
 - [`printf()`](#printf)
+- [`printfOnce()`](#printfOnce)
+- [`printOnce()`](#printOnce)
 - [`round()`](#round)
 - [`sortNatural()`](#sortnatural)
 - [`split()`](#split)
@@ -180,6 +222,8 @@ An array of common image file extensions.
 - [`urlExists()`](#urlexists)
 - [`urlize()`](#urlize)
 - [`validateUrls()`](#validateurls)
+- [`warning()`](#warning)
+- [`warningOnce()`](#warningonce)
 
 #### chooseExistingFile()
 `path = chooseExistingFile( pathWithoutExtension, extensions )`
@@ -337,6 +381,16 @@ local html = b() -- No arguments returns the buffer as a string.
 
 Short form for `print(F(format, ...))`.
 
+#### printfOnce()
+`printfOnce( format, ... )`
+
+Print a formatted message only once. Meant for preventing too much spam in the console/log.
+
+#### printOnce()
+`printOnce( ... )`
+
+Print value(s) only once. Meant for preventing too much spam in the console/log.
+
 #### round()
 `number = round( number )`
 
@@ -479,6 +533,16 @@ function config.validate()
 end
 ```
 
+#### warning()
+`warning( message )`
+
+Prints a big warning message to the console. Nothing else happens.
+
+#### warningOnce()
+`warningOnce( message )`
+
+Prints a big warning message to the console once only. Nothing else happens.
+
 
 
 ### Context-Specific Functions
@@ -492,10 +556,11 @@ end
 - [`outputRaw()`](#outputraw)
 - [`subpages()`](#subpages)
 
-There are currently two contexts where code can run:
+There are currently 3 contexts where code can run:
 
 - Templates (HTML, markdown and CSS files)
 - Config (`config.before()` and `config.after()`)
+- Validation (`config.validate()`)
 
 #### echo()
 `echo( string )`
