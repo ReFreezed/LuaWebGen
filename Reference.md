@@ -319,12 +319,6 @@ Alias for [`string.format()`](http://www.lua.org/manual/5.1/manual.html#pdf-stri
 
 Check if a file exists in the *content* folder.
 
-#### img()
-`html = img( url [, alt="", title ] )`<br>
-`html = img( url [, alt="", useAltAsTitle=false ] )`
-
-Create a simple HTML `<img>` element.
-
 #### files()
 `paths = files( folder, [ onlyFilenames=false, ] filenamePattern )`<br>
 `paths = files( folder, [ onlyFilenames=false, ] fileExtensionArray )`<br>
@@ -413,6 +407,12 @@ Get the filename part of a path.
 `keys = getKeys( table )`
 
 Get the keys from a table.
+
+#### img()
+`html = img( url [, alt="", title ] )`<br>
+`html = img( url [, alt="", useAltAsTitle=false ] )`
+
+Create a simple HTML `<img>` element.
 
 #### indexOf()
 `index = indexOf( array, value )`
