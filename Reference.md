@@ -152,12 +152,39 @@ config.rewriteExcludes = {"^/%.htaccess$"}
 ## Control Structures
 
 Control structures in templates behave pretty much like in normal Lua, but here are some additions.
+To use a "templateified" control structure put the keyword right after `{{`:
 
-#### fori
+```
+Normal if:
+{{
+if foo == "bar" then
+	echo("Foo is bar!")
+end
+}}
 
-Two versions of a simplified `for` statement:
+Templateified if:
+{{if foo == "bar"}}
+Foo is bar!
+{{end}}
+
+{{  if  foo  ==  "bar"  }}
+Extra spaces are fine.
+{{  end  }}
+```
+
+#### for / fori
+
+Several versions of a simplified `for` statement:
 
 ```markdown
+{{for 3}}
+- Loop forwards: {{i}}
+{{end}}
+
+{{for -3}}
+- Loop backwards: {{i}}
+{{end}}
+
 {{fori dog in data.dogs}}
 - {{dog.name}}
 {{end}}
@@ -174,8 +201,15 @@ Two versions of a simplified `for` statement:
 #### `_WEBGEN_VERSION`
 The current version of LuaWebGen, e.g. `1.0.2`.
 
+#### `DATA_FILE_EXTENSIONS`
+An array of data file extensions that LuaWebGen understands. Currently contains `lua`, `toml` and `xml`.
+
+> **Note:** LuaWebGen uses [Penlight](https://stevedonovan.github.io/Penlight/api/topics/06-data.md.html#XML) for XML data.
+>
+> (TODO: Add example usage.)
+
 #### `IMAGE_EXTENSIONS`
-An array of common image file extensions.
+An array of common image file extensions. Currently contains `png`, `jpg`, `jpeg` and `gif`.
 
 
 
@@ -185,6 +219,7 @@ An array of common image file extensions.
 
 ### Utility Functions
 
+- [`a()`](#a)
 - [`chooseExistingFile()`](#chooseexistingfile)
 - [`chooseExistingImage()`](#chooseexistingimage)
 - [`cssPrefix()`](#cssprefix)
@@ -193,13 +228,16 @@ An array of common image file extensions.
 - [`errorf()`](#errorf)
 - [`F()`](#f)
 - [`fileExists()`](#fileexists)
+- [`files()`](#files)
 - [`find()`](#find)
 - [`findAll()`](#findall)
 - [`formatTemplate()`](#formattemplate)
 - [`generatorMeta()`](#generatormeta)
+- [`getBasename()`](#getbasename)
 - [`getExtension()`](#getextension)
 - [`getFilename()`](#getfilename)
 - [`getKeys()`](#getkeys)
+- [`img()`](#img)
 - [`indexOf()`](#indexof)
 - [`isAny()`](#isany)
 - [`markdown()`](#markdown)
@@ -209,6 +247,7 @@ An array of common image file extensions.
 - [`printf()`](#printf)
 - [`printfOnce()`](#printfOnce)
 - [`printOnce()`](#printOnce)
+- [`removeItem()`](#removeitem)
 - [`round()`](#round)
 - [`sortNatural()`](#sortnatural)
 - [`split()`](#split)
@@ -224,6 +263,11 @@ An array of common image file extensions.
 - [`validateUrls()`](#validateurls)
 - [`warning()`](#warning)
 - [`warningOnce()`](#warningonce)
+
+#### a()
+`html = a( url [, label=prettyUrl ] )`
+
+Create a simple HTML `<a>` element.
 
 #### chooseExistingFile()
 `path = chooseExistingFile( pathWithoutExtension, extensions )`
@@ -275,6 +319,31 @@ Alias for [`string.format()`](http://www.lua.org/manual/5.1/manual.html#pdf-stri
 
 Check if a file exists in the *content* folder.
 
+#### img()
+`html = img( url [, alt="", title ] )`<br>
+`html = img( url [, alt="", useAltAsTitle=false ] )`
+
+Create a simple HTML `<img>` element.
+
+#### files()
+`paths = files( folder, [ onlyFilenames=false, ] filenamePattern )`<br>
+`paths = files( folder, [ onlyFilenames=false, ] fileExtensionArray )`<br>
+`paths = files( folder, [ onlyFilenames=false, ] filterFunction )`
+
+Get a list of files in a folder inside the *content* folder. Examples:
+
+```lua
+local function dogFilter(filename)
+	if filename:find"dog" then
+		return true
+	end
+end
+
+local imagePaths  = files("/images", IMAGE_EXTENSIONS)
+local psFilePaths = files("/resources/misc", "%.psd$")
+local dogPaths    = files("/animal-files", dogFilter)
+```
+
 #### find()
 `item, index = find( array, attribute, value )`
 
@@ -320,6 +389,16 @@ Generate HTML generator meta tag (e.g. `<meta name="generator" content="LuaWebGe
 This tag makes it possible to track how many websites use this generator, which is cool.
 This should be placed in the `<head>` element.
 
+#### getBasename()
+`basename = getBasename( filename )`
+
+Remove the extension from a filename. Example:
+
+```lua
+local basename = getBasename"blog/my-post.html"
+print(basename) -- "my-post"
+```
+
 #### getExtension()
 `extension = getExtension( path )`
 
@@ -341,9 +420,10 @@ Get the keys from a table.
 Get the index of a value in an array. Returns `nil` if the value was not found.
 
 #### isAny()
-`bool = isAny( value, values )`
+`bool = isAny( valueToCompare, value1, value2, ... )`<br>
+`bool = isAny( valueToCompare, arrayOfValues )`
 
-Check if `value` exists in the `values` array.
+Compare a value against a set of values.
 
 #### markdown()
 `html = markdown( markdownText )`
@@ -390,6 +470,11 @@ Print a formatted message only once. Meant for preventing too much spam in the c
 `printOnce( ... )`
 
 Print value(s) only once. Meant for preventing too much spam in the console/log.
+
+#### removeItem()
+`removeItem( array, value1, ... )`
+
+Remove one or more values from an array. Does not remove duplicate values.
 
 #### round()
 `number = round( number )`
@@ -743,8 +828,7 @@ The relative URL to the current page on the site.
 #### data
 Access data from the *data* folder.
 Type e.g. `data.cats` to retrieve the contents of `data/cats.lua`.
-Data files can be `.lua`, `.toml` or `.xml` files.
-(LuaWebGen uses [Penlight](https://stevedonovan.github.io/Penlight/api/topics/06-data.md.html#XML) for XML data.)
+See [`DATA_FILE_EXTENSIONS`](#data_file_extensions) for supported data formats.
 
 #### params
 `params` or `P`

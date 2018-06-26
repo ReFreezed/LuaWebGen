@@ -6,7 +6,7 @@
 --=
 --============================================================]]
 
-local _WEBGEN_VERSION = "0.10.0"
+local _WEBGEN_VERSION = "0.11.0"
 
 
 
@@ -44,7 +44,8 @@ local PAGE_EXTENSION_SET     = {["html"]=true, ["md"]=true}
 
 local OUTPUT_CATEGORY_SET = {["page"]=true, ["otherTemplate"]=true, ["otherRaw"]=true}
 
-local IMAGE_EXTENSIONS = {"png","jpg","jpeg","gif"}
+local DATA_FILE_EXTENSIONS = {"lua","toml","xml"}
+local IMAGE_EXTENSIONS     = {"png","jpg","jpeg","gif"}
 
 local NOOP = function()end
 
@@ -82,7 +83,11 @@ local verbosePrint             = false
 local scriptEnvironment        = nil
 local scriptEnvironmentGlobals = nil
 
+local dataReaderPaths          = setmetatable({}, {__mode="k"})
+local dataIsPreloaded          = setmetatable({}, {__mode="k"})
 local oncePrints               = {}
+
+local _
 
 
 
@@ -145,7 +150,7 @@ local isAny
 local isFile, isDirectory
 local isStringMatchingAnyPattern
 local markdownToHtml
-local newDataFolderReader
+local newDataFolderReader, isDataFolderReader, preloadData
 local newPage
 local newStringBuffer
 local parseMarkdownTemplate, parseHtmlTemplate, parseOtherTemplate
@@ -153,6 +158,7 @@ local pathToSitePath, sitePathToPath
 local pcall
 local print, printOnce, printf, printfOnce, log, logprint, logVerbose
 local pushContext, popContext, assertContext, getContext
+local removeItem
 local rewriteOutputPath
 local round
 local serializeLua
@@ -246,10 +252,17 @@ end
 
 
 do
+	local function maybeInsertPossibleValueExpression(lua, code)
+		local expr = F("do\n\tlocal v = (\n\t\t%s\n\t)\n\tif type(v) == 'string' and v:match'%%S' == '<' then  echoRaw(v)  elseif v ~= nil then  echo(v)  end\nend\n", code)
+		if not loadstring(expr) then  return false  end
+
+		table.insert(lua, expr)
+		return true
+	end
+
 	local function parseTemplate(page, path, template, pos, level, enableHtmlEncoding)
 
 		--= Generate Lua.
-		--= @Robustness: Validate each individual code snippet. [LOW]
 		--==============================================================
 
 		local blockStartPos = pos
@@ -273,24 +286,115 @@ do
 			local codePosEnd
 			local longCommentLevel = template:match("^%-%-%[(=*)%[", pos)
 
+			-- Note: A long comment here refers to a comment that spans the whole code block:
+			-- "{{--[===[ A comment, yay! ]] ... ]===]}}"
 			if longCommentLevel then
 				pos = pos+4+#longCommentLevel -- Eat "--[=[".
 				_, codePosEnd = template:find("%]"..longCommentLevel.."%]}}", pos)
-				assert(codePosEnd, pos)
+
+				if not codePosEnd then
+					fileerror(
+						path, template, pos,
+						'Comment block never ends. ("{{--[%s[" must end with "]%s]}}")',
+						longCommentLevel, longCommentLevel
+					)
+				end
+
 			else
 				_, codePosEnd = template:find("}}", pos, true)
-				assert(codePosEnd, pos)
+
+				if not codePosEnd then
+					fileerror(path, template, pos, 'Code block never ends.')
+				end
 			end
 
-			local code = trim(template:sub(codePosStart+2, codePosEnd-2))
+			local codeUntrimmed = template:sub(codePosStart+2, codePosEnd-2)
+			local code          = trim(codeUntrimmed)
 			-- print("CODE: "..code)
-
-			-- local markdownContextIsHtml = ?
 
 			----------------------------------------------------------------
 
-			if code:find"^%-%-" then
-				-- Ignore comments.
+			-- Comments.
+			if longCommentLevel or code:find"^%-%-[^\n]*$" then
+				-- void
+
+			-- fori item in array ... end
+			-- fori array ... end
+			elseif code:find"^fori%f[^%w_]" then
+				local foriItem, foriArr = code:match"^fori +([%a_][%w_]+) +in +(%S.*)$"
+
+				if not foriArr then
+					foriArr = code:match"^fori +(.+)$"
+
+					if not foriArr then
+						fileerror(path, template, pos, "Invalid fori statement.")
+					end
+				end
+
+				table.insert(lua, "for _, ")
+				table.insert(lua, foriItem or "it")
+				table.insert(lua, " in ipairs(")
+				table.insert(lua, foriArr)
+				table.insert(lua, ") do\n")
+
+				local innerLua, innerEndCodePosStart, innerEndCodePosEnd = parseTemplate(
+					page, path, template, codePosEnd+1, level+1, enableHtmlEncoding
+				)
+				local innerEndCode = trim(template:sub(innerEndCodePosStart+2, innerEndCodePosEnd-2))
+
+				if innerEndCode ~= "end" then
+					fileerror(
+						path, template, innerEndCodePosStart,
+						"Expected end for 'fori' starting at line %d.",
+						getLineNumber(template, pos)
+					)
+				end
+
+				for _, luaCode in ipairs(innerLua) do  table.insert(lua, luaCode)  end
+				table.insert(lua, "end\n")
+
+				codePosEnd = innerEndCodePosEnd
+
+			-- Value expression.
+			elseif not code:find"^function%s*%(" and maybeInsertPossibleValueExpression(lua, code) then
+				-- void
+
+			-- for index, item in expression ... end
+			-- for index = from, to, step ... end
+			-- for to ... end
+			elseif codeUntrimmed:find"^ *for%f[^%w_]" then
+				local shortformBackwards, shortformNumber = code:match"^for%s+(%-?)(%d+)$"
+
+				if shortformBackwards == "-" then
+					table.insert(lua, "for i = ")
+					table.insert(lua, shortformNumber)
+					table.insert(lua, ", 1, -1 do\n")
+				elseif shortformNumber then
+					table.insert(lua, "for i = 1, ")
+					table.insert(lua, shortformNumber)
+					table.insert(lua, " do\n")
+				else
+					table.insert(lua, code)
+					table.insert(lua, " do\n")
+				end
+
+				local innerLua, innerEndCodePosStart, innerEndCodePosEnd = parseTemplate(
+					page, path, template, codePosEnd+1, level+1, enableHtmlEncoding
+				)
+				local innerEndCode = trim(template:sub(innerEndCodePosStart+2, innerEndCodePosEnd-2))
+
+				if innerEndCode ~= "end" then
+					fileerror(
+						path, template, innerEndCodePosStart,
+						"Expected end for 'for' starting at line %d.",
+						getLineNumber(template, pos)
+					)
+				end
+
+				for _, luaCode in ipairs(innerLua) do  table.insert(lua, luaCode)  end
+				table.insert(lua, "end\n")
+
+				codePosEnd = innerEndCodePosEnd
 
 			-- do ... end
 			elseif code == "do" then
@@ -315,7 +419,7 @@ do
 				codePosEnd = innerEndCodePosEnd
 
 			-- if expression ... end
-			elseif code:find"^if[ (]" then
+			elseif codeUntrimmed:find"^ *if%f[^%w_]" then
 				table.insert(lua, code)
 				table.insert(lua, " then\n")
 
@@ -364,52 +468,8 @@ do
 
 				codePosEnd = innerEndCodePosEnd
 
-			-- for index, item in ipairs(expression) ... end
-			-- fori item in expression ... end
-			-- fori expression ... end
-			elseif code:find"^fori? " then
-				if code:find"^fori" then
-					local foriItem, foriArr = code:match"^fori +([%a_][%w_]+) +in +(%S.*)$"
-
-					if not foriArr then
-						foriArr = code:match"^fori +(.+)$"
-					end
-
-					if not foriArr then
-						fileerror(path, template, pos, "Invalid fori statement.")
-					end
-
-					table.insert(lua, "for _, ")
-					table.insert(lua, foriItem or "it")
-					table.insert(lua, " in ipairs(")
-					table.insert(lua, foriArr)
-					table.insert(lua, ") do\n")
-
-				else
-					table.insert(lua, code)
-					table.insert(lua, " do\n")
-				end
-
-				local innerLua, innerEndCodePosStart, innerEndCodePosEnd = parseTemplate(
-					page, path, template, codePosEnd+1, level+1, enableHtmlEncoding
-				)
-				local innerEndCode = trim(template:sub(innerEndCodePosStart+2, innerEndCodePosEnd-2))
-
-				if innerEndCode ~= "end" then
-					fileerror(
-						path, template, innerEndCodePosStart,
-						"Expected end for '%s' starting at line %d.",
-						code:match"^%w+", getLineNumber(template, pos)
-					)
-				end
-
-				for _, luaCode in ipairs(innerLua) do  table.insert(lua, luaCode)  end
-				table.insert(lua, "end\n")
-
-				codePosEnd = innerEndCodePosEnd
-
 			-- while expression ... end
-			elseif code:find"^while[ (]" then
+			elseif codeUntrimmed:find"^ *while%f[^%w_]" then
 				table.insert(lua, code)
 				table.insert(lua, " do\n")
 
@@ -459,11 +519,6 @@ do
 			elseif code:find"^/" then
 				table.insert(lua, F("echo(url%q)\n", code))
 
-			-- Other kind of code block that doesn't return any value.
-			elseif code:find"^local " or code:find"^[%w_.]+ *=[^=]" then
-				table.insert(lua, code)
-				table.insert(lua, "\n")
-
 			-- End of block.
 			elseif code == "end" or code:find"^until[ (]" or code == "else" or code:find"^elseif[ (]" then
 				if level == 1 then
@@ -471,9 +526,9 @@ do
 				end
 				return lua, codePosStart, codePosEnd
 
-			-- Expression that returns a value (or function call that doesn't).
 			else
-				table.insert(lua, F("do\n\tlocal v = (%s)\n\tif type(v) == 'string' and v:match'%%S' == '<' then  echoRaw(v)  elseif v ~= nil then  echo(tostring(v))  end\nend\n", code))
+				table.insert(lua, code)
+				table.insert(lua, "\n")
 			end
 
 			----------------------------------------------------------------
@@ -869,17 +924,21 @@ end
 
 
 
-function toUrl(urlStr)
-	urlStr = escapeUri(urlStr)
-	urlStr = urlStr:gsub("%%[0-9a-f][0-9a-f]", URI_PERCENT_CODES_TO_NOT_ENCODE)
+function toUrl(url)
+	if type(url) ~= "string" then
+		errorf(2, "Bad type of 'url' argument. (Got %s)", type(url))
+	end
 
-	return urlStr
+	url = escapeUri(url)
+	url = url:gsub("%%[0-9a-f][0-9a-f]", URI_PERCENT_CODES_TO_NOT_ENCODE)
+
+	return url
 end
 -- print(toUrl("http://www.example.com/some-path/File~With (Stuff_åäö).jpg?key=value&foo=bar#hash")) -- TEST
 
-function toUrlAbsolute(urlStr)
-	urlStr = urlStr:gsub("^/%f[^/]", site.baseUrl)
-	return toUrl(urlStr)
+function toUrlAbsolute(url)
+	url = url:gsub("^/%f[^/]", site.baseUrl)
+	return toUrl(url)
 end
 
 function urlize(text)
@@ -958,7 +1017,7 @@ end
 
 
 
--- table = sortNatural( table [, attribute ] )
+-- array = sortNatural( array [, attribute ] )
 do
 	local function pad(numStr)
 		return ("%03d%s"):format(#numStr, numStr)
@@ -988,20 +1047,41 @@ function newDataFolderReader(path)
 		__index = function(dataFolderReader, k)
 			local dataObj
 
-			if isFile(F("%s/%s.lua", path, k)) then
-				dataObj = assert(loadfile(F("%s/%s.lua", path, k)))()
+			if type(k) ~= "string" then
+				return nil
+
+			elseif k == "." or k == ".." then
+				errorf(2, "Bad data key '%s'.", k)
+
+			elseif isFile(F("%s/%s.lua", path, k)) then
+				local filePath = F("%s/%s.lua", path, k)
+				local chunk    = assert(loadfile(filePath))
+				setfenv(chunk, scriptEnvironment)
+
+				pushContext("none")
+				dataObj = chunk()
+				popContext("none")
+
+				if not dataObj then
+					errorf(2, "Lua data file returned nothing. (%s)", filePath)
+				end
 
 			elseif isFile(F("%s/%s.toml", path, k)) then
-				dataObj = parseToml(assert(getFileContents(F("%s/%s.toml", path, k))))
+				local filePath = F("%s/%s.toml", path, k)
+				local contents = assert(getFileContents(filePath))
+				dataObj = assert(parseToml(contents))
 
 			elseif isFile(F("%s/%s.xml", path, k)) then
-				dataObj = assert(xmlLib.parse(assert(getFileContents(F("%s/%s.xml", path, k))), false))
+				local filePath = F("%s/%s.xml", path, k)
+				local contents = assert(getFileContents(filePath))
+				dataObj = assert(xmlLib.parse(contents, false))
 
 			elseif isDirectory(F("%s/%s", path, k)) then
 				dataObj = newDataFolderReader(F("%s/%s", path, k))
 
 			else
-				errorf("Bad data path '%s/%s'.", path, k)
+				printfOnce("Bad data path '%s/%s'.", path, k)
+				return nil
 			end
 
 			assert(dataObj ~= nil)
@@ -1010,7 +1090,29 @@ function newDataFolderReader(path)
 		end,
 	})
 
+	dataReaderPaths[dataFolderReader] = path
 	return dataFolderReader
+end
+
+function isDataFolderReader(t)
+	return dataReaderPaths[t] ~= nil
+end
+
+function preloadData(dataFolderReader)
+	if dataIsPreloaded[dataFolderReader] then  return  end
+
+	for name in lfs.dir(dataReaderPaths[dataFolderReader]) do
+		local path     = dataReaderPaths[dataFolderReader].."/"..name
+		local basename = getBasename(name)
+
+		if not rawget(dataFolderReader, basename) and name ~= "." and name ~= ".." and (isFile(path) or isDirectory(path)) then
+			if indexOf(DATA_FILE_EXTENSIONS, getExtension(name)) then
+				local _ = dataFolderReader[basename]
+			end
+		end
+	end
+
+	dataIsPreloaded[dataFolderReader] = true
 end
 
 
@@ -1380,7 +1482,7 @@ end
 
 
 
--- thumbnailInfo = createThumbnail( imagePathRelative, thumbWidth [, thumbHeight ] )
+-- thumbnailInfo = createThumbnail( imagePathRelative, thumbWidth [, thumbHeight, errorLevel=1 )
 do
 	local imageLoaders = {
 		["png"]  = gd.createFromPng,
@@ -1668,10 +1770,22 @@ end
 
 
 
-function isAny(v1, values)
-	for _, v2 in ipairs(values) do
-		if v1 == v2 then  return true  end
+-- bool = isAny( valueToCompare, value1, ... )
+-- bool = isAny( valueToCompare, arrayOfValues )
+function isAny(v, ...)
+	local len = select("#", ...)
+
+	if len == 1 and type(...) == "table" then
+		for _, item in ipairs(...) do
+			if v == item then  return true  end
+		end
+
+	else
+		for i = 1, len do
+			if v == select(i, ...) then  return true  end
+		end
 	end
+
 	return false
 end
 
@@ -1697,6 +1811,17 @@ function rewriteOutputPath(pathRel)
 
 	else
 		return (sitePathToPath(outputPathFormat:format(sitePath)))
+	end
+end
+
+
+
+-- removeItem( array, value1, ... )
+function removeItem(t, ...)
+	for i = 1, select("#", ...) do
+		local iToRemove = indexOf(t, select(i, ...))
+
+		if iToRemove then  table.remove(t, iToRemove)  end
 	end
 end
 
@@ -1896,7 +2021,7 @@ elseif command == "build" then
 	end
 
 	if ignoreModificationTimes then  logprint("Option --force: Ignoring modification times.")  end
-	if autobuild               then  logprint("Option --autobuild: Auto-building website. Press Ctrl+C to stop.")  end
+	if autobuild               then  logprint("Option --autobuild: Auto-building website.")  end
 	if includeDrafts           then  logprint("Option --drafts: Drafts are included.")  end
 	if verbosePrint            then  logprint("Option --verbose: Verbose printing enabled.")  end
 
@@ -1935,8 +2060,9 @@ end
 --==============================================================
 
 scriptEnvironmentGlobals = {
-	_WEBGEN_VERSION  = _WEBGEN_VERSION,
-	IMAGE_EXTENSIONS = IMAGE_EXTENSIONS,
+	_WEBGEN_VERSION      = _WEBGEN_VERSION,
+	DATA_FILE_EXTENSIONS = DATA_FILE_EXTENSIONS,
+	IMAGE_EXTENSIONS     = IMAGE_EXTENSIONS,
 
 	-- Lua globals.
 	_G             = nil, -- Deny direct access to the script environment.
@@ -1952,8 +2078,6 @@ scriptEnvironmentGlobals = {
 	loadfile       = loadfile,
 	loadstring     = loadstring,
 	module         = module,
-	next           = next,
-	pairs          = pairs,
 	pcall          = _pcall,
 	print          = print,
 	rawequal       = rawequal,
@@ -1968,6 +2092,29 @@ scriptEnvironmentGlobals = {
 	type           = type,
 	unpack         = unpack,
 	xpcall         = xpcall,
+
+	next = function(t)
+		if isDataFolderReader(t) then  preloadData(t)  end
+
+		return next(t)
+	end,
+
+	pairs = function(t)
+		if isDataFolderReader(t) then
+			preloadData(t)
+
+			local keys = sortNatural(getKeys(t))
+			local i    = 0
+
+			return function()
+				i = i+1
+				local k = keys[i]
+				if k then  return k, t[k]  end
+			end
+		end
+
+		return pairs(t)
+	end,
 
 	-- Lua modules.
 	coroutine      = coroutine,
@@ -2014,6 +2161,7 @@ scriptEnvironmentGlobals = {
 	printf         = printf,
 	printfOnce     = printfOnce,
 	printOnce      = printOnce,
+	removeItem     = removeItem,
 	round          = round,
 	sortNatural    = sortNatural,
 	split          = splitString,
@@ -2048,6 +2196,10 @@ scriptEnvironmentGlobals = {
 
 	getExtension = function(genericPath)
 		return getExtension(getFilename(genericPath))
+	end,
+
+	getBasename = function(genericPath)
+		return getBasename(getFilename(genericPath))
 	end,
 
 	X = function(node, tagName) -- @Doc
@@ -2158,12 +2310,84 @@ scriptEnvironmentGlobals = {
 		print()
 	end,
 
+	-- html = a( url [, label=prettyUrl ] )
+	a = function(url, label)
+		return F(
+			'<a href="%s">%s</a>',
+			encodeHtmlEntities(toUrl(url)),
+			encodeHtmlEntities(label or url:gsub("^https?://", ""):gsub("^www%.", ""):gsub("/+$", ""))
+		)
+	end,
+
+	-- html = img( url [, alt="", title ] )
+	-- html = img( url [, alt="", useAltAsTitle ] )
+	img = function(url, alt, title)
+		if title then
+			return F(
+				'<img src="%s" alt="%s" title="%s">',
+				encodeHtmlEntities(toUrl(url)),
+				encodeHtmlEntities(alt or ""),
+				encodeHtmlEntities(title == true and alt or title)
+			)
+		else
+			return F(
+				'<img src="%s" alt="%s">',
+				encodeHtmlEntities(toUrl(url)),
+				encodeHtmlEntities(alt or "")
+			)
+		end
+	end,
+
+	-- filePaths = files( folder, [ onlyFilenames=false, ] stringPattern )
+	-- filePaths = files( folder, [ onlyFilenames=false, ] fileExtensionArray )
+	-- filePaths = files( folder, [ onlyFilenames=false, ] filterFunction )
+	files = function(sitePath, onlyFilenames, filter)
+		if type(onlyFilenames) ~= "boolean" then
+			onlyFilenames, filter = false, onlyFilenames
+		end
+
+		local pathRel = sitePathToPath(sitePath)
+		local dirPath = pathRel == "" and DIR_CONTENT or DIR_CONTENT.."/"..pathRel
+		local sitePaths = {}
+
+		for name in lfs.dir(dirPath) do
+			if name ~= "." and name ~= ".." and isFile(dirPath.."/"..name) then
+				if filter == nil then
+					table.insert(sitePaths, (onlyFilenames and name or sitePath.."/"..name))
+
+				elseif type(filter) == "string" then
+					if name:find(filter) then
+						table.insert(sitePaths, (onlyFilenames and name or sitePath.."/"..name))
+					end
+
+				elseif type(filter) == "table" then
+					if indexOf(filter, getExtension(name)) then
+						table.insert(sitePaths, (onlyFilenames and name or sitePath.."/"..name))
+					end
+
+				elseif type(filter) == "function" then
+					if filter(name) then
+						table.insert(sitePaths, (onlyFilenames and name or sitePath.."/"..name))
+					end
+
+				else
+					errorf(2, "Invalid filter type '%s'. (Must be string, table or function)", type(filter))
+				end
+			end
+		end
+
+		return sitePaths
+	end,
+
 	-- Context functions.
 	----------------------------------------------------------------
 
 	echo = function(s)
 		assertContext("template", "echo")
+		s = tostringForTemplates(s)
+
 		local ctx = getContext"template"
+
 		if ctx.enableHtmlEncoding then
 			s = encodeHtmlEntities(s)
 		end
@@ -2172,7 +2396,7 @@ scriptEnvironmentGlobals = {
 
 	echoRaw = function(s)
 		assertContext("template", "echoRaw")
-		table.insert(getContext"template".out, s)
+		table.insert(getContext"template".out, tostringForTemplates(s))
 	end,
 
 	include = function(htmlFileBasename)
@@ -2409,7 +2633,7 @@ local function buildWebsite()
 	--]]
 
 	outputPathFormat       = get("rewriteOutputPath", "%s", NOOP)
-	assert(isAny(type(outputPathFormat), {"string","function"}), "config.rewriteOutputPath must be a string or a function.")
+	assert(isAny(type(outputPathFormat), "string","function"), "config.rewriteOutputPath must be a string or a function.")
 	rewriteExcludes        = getA("rewriteExcludes",   {},     "string")
 
 	local onBefore         = getV("before",            nil,    "function")
@@ -2552,6 +2776,8 @@ buildWebsite()
 
 
 if autobuild then
+	_print("Press Ctrl+C to stop auto-building.")
+
 	local lastDirTree = nil
 
 	while true do

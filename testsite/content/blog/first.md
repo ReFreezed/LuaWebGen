@@ -1,5 +1,5 @@
 {{
-page.title = 'First "Post"<!>'
+page.title = 'First Post!'
 P.foo = "bar"
 }}
 
@@ -20,8 +20,7 @@ A constructed HTML image > {{'<img src="'..url'/images/head.png'..'">'}} < insid
 {{--[=[ --[[ Comment 3 {{"asdf"}} ]] ]=]}}
 
 {{local localVar = 123}}
-{{--localVar = globalVar}}
-{{--globalVar = 123}}
+{{localVar}}
 
 
 
@@ -29,17 +28,7 @@ A constructed HTML image > {{'<img src="'..url'/images/head.png'..'">'}} < insid
 
 {{date("%Y-%m-%d")}}
 
-
-
-## Do
-
-{{do}}
-Outer do...end
-{{do}}
-Inner do...end
-{{end}}
-Back to outer do...end
-{{end}}
+{{site}}
 
 
 
@@ -84,6 +73,14 @@ Favorite fruit is neither apple nor banana. :(
 
 
 
+## Do
+
+{{do}}
+do...end
+{{end}}
+
+
+
 ## HTML
 
 <p style="text-align: center;">
@@ -91,14 +88,6 @@ Favorite fruit is neither apple nor banana. :(
 	- 1
 	- 2
 </p>
-
-
-
-## Parsing Tests
-
-{{page}}
-
-foo < {{P.foo}} == "baz" > 0? <hr>
 
 
 
@@ -118,11 +107,9 @@ Cats:
 
 ## Scripts
 
-{{ipsum()}}
+{{echoOgres()}} {{ipsum()}}
 
 {{fullscreenImage("/images/head.png")}}
-
-{{echoOgres()}}
 
 
 
