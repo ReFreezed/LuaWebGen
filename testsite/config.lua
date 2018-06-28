@@ -12,6 +12,13 @@ local config = {
 	ignoreFolders = {"^%."},
 
 	processors    = {}, -- Defined here below...
+
+	-- Enable special .htaccess file handling.
+	htaccess = {
+		redirect = true,
+		-- www = false,
+		-- errors = {[403]="/403/", [404]="/404/", [500]="/500/"},
+	},
 }
 
 
