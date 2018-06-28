@@ -11,7 +11,7 @@ local config = {
 	ignoreFiles   = {"%.tmp$", "%.psd$"},
 	ignoreFolders = {"^%."},
 
-	processors    = {},
+	processors    = {}, -- Defined here below...
 }
 
 

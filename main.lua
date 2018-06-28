@@ -915,7 +915,7 @@ function formatTemplate(s, values)
 		if values[k] == nil then
 			logprint("[formatTemplate] WARNING: No value for ':%s:'.", k)
 		else
-			return values[k]
+			return tostring(values[k])
 		end
 	end)
 
@@ -1080,7 +1080,7 @@ function newDataFolderReader(path)
 				dataObj = newDataFolderReader(F("%s/%s", path, k))
 
 			else
-				printfOnce("Bad data path '%s/%s'.", path, k)
+				printfOnce("WARNING: Bad data path '%s/%s'.", path, k)
 				return nil
 			end
 
@@ -1105,7 +1105,12 @@ function preloadData(dataFolderReader)
 		local path     = dataReaderPaths[dataFolderReader].."/"..name
 		local basename = getBasename(name)
 
-		if not rawget(dataFolderReader, basename) and name ~= "." and name ~= ".." and (isFile(path) or isDirectory(path)) then
+		if
+			not rawget(dataFolderReader, basename) and name ~= "." and name ~= ".." and (
+				(isFile(path)      and not isStringMatchingAnyPattern(name, ignoreFiles  )) or
+				(isDirectory(path) and not isStringMatchingAnyPattern(name, ignoreFolders))
+			)
+		then
 			if indexOf(DATA_FILE_EXTENSIONS, getExtension(name)) then
 				local _ = dataFolderReader[basename]
 			end

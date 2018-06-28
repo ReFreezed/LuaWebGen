@@ -245,8 +245,8 @@ An array of common image file extensions. Currently contains `png`, `jpg`, `jpeg
 - [`min()`](#min)
 - [`newBuffer()`](#newbuffer)
 - [`printf()`](#printf)
-- [`printfOnce()`](#printfOnce)
-- [`printOnce()`](#printOnce)
+- [`printfOnce()`](#printfonce)
+- [`printOnce()`](#printonce)
 - [`removeItem()`](#removeitem)
 - [`round()`](#round)
 - [`sortNatural()`](#sortnatural)
@@ -352,7 +352,7 @@ Get all items in the array whose `attribute` is `value`.
 `template = formatTemplate( format, valueTable )`
 
 Quick and dirty formatting of a template, presumably before using `generateFromTemplate()`.
-This replaces all instances of `:key:` with the corresponding field from `values`.
+This replaces all instances of `:key:` with the corresponding field from `valueTable`.
 Example:
 
 ```lua
