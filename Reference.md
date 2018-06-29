@@ -96,7 +96,7 @@ baseUrl           -- See site.baseUrl
 languageCode      -- See site.languageCode
 defaultLayout     -- See site.defaultLayout
 
-redirections      -- Table with source URL slugs as keys and target URLs are values.
+redirections      -- Table with source URLs as keys and target URLs are values.
 
 ignoreFiles       -- Array of filename patterns to exclude from site generation.
 ignoreFolders     -- Array of folder name patterns to exclude from site generation.
@@ -109,9 +109,28 @@ rewriteExcludes   -- See below.
 before            -- Function that is called before site generation.
 after             -- Function that is called after main site generation.
 validate          -- Function that is called after all tasks are done.
+
+htaccess = {      -- Table with special .htaccess file settings. (Apache server)
+    redirect      -- Flag for using mod_rewrite to redirect URLs.
+}
 ```
 
 All fields are optional.
+
+#### redirections
+Table of URL redirections, with source URLs as keys and target URLs are values. Example:
+
+```lua
+config.redirections = {
+	["/old-post/"] = "/new-post/",
+	["/duck/"]     = "https://duckduckgo.com/",
+}
+```
+
+Also see [page.aliases](#pagealiases) for page-level redirections (which work the same way),
+and [htaccess.redirect](#htaccessredirect) if you're on an Apache server.
+
+> **Note:** Queries are not yet supported for the source URLs.
 
 #### rewriteOutputPath
 Use this to control where files are written inside the *output* folder.
@@ -145,6 +164,16 @@ This is an array of path patterns for files that should not be rewritten by `rew
 ```lua
 -- Exclude topmost .htaccess file.
 config.rewriteExcludes = {"^/%.htaccess$"}
+```
+
+#### htaccess.redirect
+If set, then rewrite directives are written into a .htaccess file at the
+top of the *output* folder for all page aliases and redirections.
+If the file already exists then the directives are inserted at the end of the file.
+To control where the directives are inserted, add the following to the line where they should be inserted:
+
+```
+# :webgen.redirections:
 ```
 
 
@@ -778,6 +807,8 @@ page.title   = "New Improved Page"
 page.aliases = {"/my-page/", "/some-archived-page/"}
 }}
 ```
+
+> **Note:** Queries are not yet supported in aliases.
 
 #### page.content
 The contents of the current page. Available in layouts.

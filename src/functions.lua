@@ -25,6 +25,8 @@
 	getLayoutTemplate
 	getLineNumber
 	getProtectionWrapper
+	gsub2
+	htaccessRewriteEscapeRegex, htaccessRewriteEscapeReplacement
 	indexOf, itemWith, itemWithAll
 	insertLineNumberCode
 	isAny
@@ -1142,6 +1144,9 @@ function generateRedirection(slug, targetUrl)
 	if not slug:find"^/" then
 		errorf(2, "URL slugs must begin with a '/'. (%s)", slug)
 	end
+	if slug:find"?" then
+		errorf(2, "Queries are not supported in redirections yet. (%s)", slug) -- @Incomplete
+	end
 
 	if writtenRedirects[slug] == targetUrl then
 		errorf(2, "Duplicate redirect from '%s' to '%s'.", slug, targetUrl)
@@ -1439,31 +1444,43 @@ do
 		thumbW = math.max(thumbW, 1)
 		thumbH = math.max(thumbH, 1)
 
-		local scale = math.min(imageW/thumbW, imageH/thumbH)
-
-		local thumb = gd.createTrueColor(thumbW, thumbH)
-		thumb:copyResampled(
-			image,
-			0, -- dstX
-			0, -- dstY
-			round((imageW-thumbW*scale)/2), -- srcX
-			round((imageH-thumbH*scale)/2), -- srcY
-			thumbW, -- dstW
-			thumbH, -- dstH
-			round(thumbW*scale), -- srcW
-			round(thumbH*scale)  -- srcH
-		)
-
-		local imageCreatorMethod = "jpegStr"--assert(imageCreatorMethods[extLower], extLower)
-		local contents           = thumb[imageCreatorMethod](thumb, 75)
-		local pathThumbRel       = F("%s%s.%dx%d.%s", folder, basename, thumbW, thumbH, "jpg")--ext)
-		writeOutputFile("otherRaw", pathThumbRel, "/"..pathThumbRel, contents)
+		local pathThumbRel = F("%s%s.%dx%d.%s", folder, basename, thumbW, thumbH, "jpg")--ext)
 
 		local thumbInfo = {
 			path   = pathThumbRel,
 			width  = thumbW,
 			height = thumbH,
 		}
+
+		local pathThumbOutputRel = rewriteOutputPath(pathThumbRel)
+
+		local modTimeImage = lfs.attributes(pathImage, "modification")
+		local modTimeThumb = lfs.attributes(DIR_OUTPUT.."/"..pathThumbOutputRel, "modification")
+
+		if modTimeImage and modTimeImage == modTimeThumb and not ignoreModificationTimes then
+			-- @Note: This will bypass any file processor for JPG files. Not sure if OK. 2018-06-30
+			preserveExistingOutputFile("otherRaw", pathThumbRel, "/"..pathThumbRel)
+
+		else
+			local scale = math.min(imageW/thumbW, imageH/thumbH)
+
+			local thumb = gd.createTrueColor(thumbW, thumbH)
+			thumb:copyResampled(
+				image,
+				0, -- dstX
+				0, -- dstY
+				round((imageW-thumbW*scale)/2), -- srcX
+				round((imageH-thumbH*scale)/2), -- srcY
+				thumbW, -- dstW
+				thumbH, -- dstH
+				round(thumbW*scale), -- srcW
+				round(thumbH*scale)  -- srcH
+			)
+
+			local imageCreatorMethod = "jpegStr"--assert(imageCreatorMethods[extLower], extLower)
+			local contents = thumb[imageCreatorMethod](thumb, 75)
+			writeOutputFile("otherRaw", pathThumbRel, "/"..pathThumbRel, contents, modTimeImage)
+		end
 
 		thumbnailInfos[id] = thumbInfo
 		return thumbInfo
@@ -1721,6 +1738,30 @@ function removeItem(t, ...)
 
 		if iToRemove then  table.remove(t, iToRemove)  end
 	end
+end
+
+
+
+-- Same as string.gsub(), but "%" has no meaning in the replacement.
+function gsub2(s, pat, repl, ...)
+	return s:gsub(pat, repl:gsub("%%", "%%%%"), ...)
+end
+
+
+
+-- string = htaccessRewriteEscapeRegex( string [, isWhole=false ] )
+function htaccessRewriteEscapeRegex(s, isWhole)
+	if isWhole and s == "-" then  return "\\-"  end
+
+	s = s:gsub('[.+*?^$()[%]\\"]', "\\%0")
+
+	if isWhole then  s = s:gsub("^!", "\\!")  end
+
+	return s
+end
+
+function htaccessRewriteEscapeReplacement(s)
+	return (s:gsub('[&%\\"]', "\\%0"))
 end
 
 

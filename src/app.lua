@@ -933,8 +933,40 @@ local function buildWebsite()
 	if handleHtaccess then
 		local contents = getFileContents(DIR_CONTENT.."/.htaccess") or ""
 
-		if htaccessRedirect then
-			-- ...
+		if htaccessRedirect and next(writtenRedirects) then
+			local b = newStringBuffer()
+			b("<IfModule mod_rewrite.c>\n")
+			b("\tRewriteEngine On\n")
+
+			for _, slug in ipairs(sortNatural(getKeys(writtenRedirects))) do
+				local targetUrl = writtenRedirects[slug]
+
+				b('\tRewriteCond %%{REQUEST_URI} "^%s$"\n', htaccessRewriteEscapeRegex(slug))
+				b('\tRewriteRule .* "%s" [R=301,L]\n', htaccessRewriteEscapeReplacement(targetUrl))
+
+				--[[ Rewrite examples.  @Incomplete: Queries.
+
+				# from /dogs/index.php
+				# to   /dogs
+				RewriteCond  %{REQUEST_URI}   ^/dogs/index\.php$
+				RewriteRule  .*               /dogs  [R=301,L]
+
+				# from /dogs/info.php?p=mr_bark
+				# to   /dogs/mr-bark
+				RewriteCond  %{REQUEST_URI}   ^/dogs/info\.php$
+				RewriteCond  %{QUERY_STRING}  ^p=mr_bark$
+				RewriteRule  .*               /dogs/mr-bark?  [R=301,L]
+				]]
+			end
+
+			b("</IfModule>\n")
+			local directives = b()
+
+			local count
+			contents, count = gsub2(contents, "# *:webgen%.redirections: *\n", directives)
+			if count == 0 then
+				contents = F("%s\n%s", contents, directives)
+			end
 		end
 
 		writeOutputFile("otherRaw", ".htaccess", "/.htaccess", contents)

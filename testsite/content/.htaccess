@@ -2,6 +2,6 @@
 
 ErrorDocument 404 "<html><body>Error 404: Not found!</body></html>
 
-# :LuaWebGen.redirections:
+# :webgen.redirections:
 
 ErrorDocument 403 "<html><body>Error 403: Forbidden!</body></html>
