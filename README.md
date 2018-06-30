@@ -77,7 +77,7 @@ If you're on Windows you can simply install [Lua for Windows](https://github.com
 
 > **Note:** LuaWebGen has only been tested on Windows.
 
-To generate a website, run this from the [command line](https://github.com/ReFreezed/LuaWebGen/wiki/Command-Line.md):
+To generate a website, run this from the [command line](https://github.com/ReFreezed/LuaWebGen/wiki/Command-Line):
 
 ```batch
 cd path/to/site/root
