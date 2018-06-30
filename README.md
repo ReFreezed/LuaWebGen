@@ -8,7 +8,7 @@ Webpages are generated using HTML and markdown *templates* with embedded Lua cod
 - [Why?](#why)
 - [Example](#example)
 - [Installation / Usage](#installation--usage)
-- [Reference](Reference.md)
+- [Documentation](https://github.com/ReFreezed/LuaWebGen/wiki)
 
 
 
@@ -77,7 +77,7 @@ If you're on Windows you can simply install [Lua for Windows](https://github.com
 
 > **Note:** LuaWebGen has only been tested on Windows.
 
-To generate a website, run this from the command line:
+To generate a website, run this from the [command line](https://github.com/ReFreezed/LuaWebGen/wiki/Command-Line.md):
 
 ```batch
 cd path/to/site/root
