@@ -3,21 +3,21 @@ local config = {
 	baseUrl       = "http://example.com/",
 	languageCode  = "en",
 
-	redirections  = {
-		["/also-first/"] = "/first/",
-		["/duck/"]       = "https://duckduckgo.com/",
-	},
-
 	ignoreFiles   = {"%.tmp$", "%.psd$"},
 	ignoreFolders = {"^%."},
 
 	processors    = {}, -- Defined here below...
 
+	-- autoLockPages = true,
+
+	redirections  = {
+		["/also-first/"] = "/first/",
+		["/duck/"]       = "https://duckduckgo.com/",
+	},
+
 	-- Enable special .htaccess file handling.
 	htaccess = {
 		redirect = true,
-		-- www = false,
-		-- errors = {[403]="/403/", [404]="/404/", [500]="/500/"},
 	},
 }
 

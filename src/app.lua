@@ -20,8 +20,8 @@ local i = 1
 local command = args[i] or error("[arg] Missing command.")
 i = i+1
 
-local ignoreModificationTimes = false
-local autobuild = false
+_G.ignoreModificationTimes = false
+_G.autobuild = false
 
 ----------------------------------------------------------------
 
@@ -206,6 +206,8 @@ elseif command == "build" then
 	if verbosePrint            then  logprint("Option --verbose: Verbose printing enabled.")  end
 
 	logprint("Site folder: %s", toNormalPath(lfs.currentdir()))
+
+	-- Continue...
 
 ----------------------------------------------------------------
 else
@@ -588,6 +590,20 @@ scriptEnvironmentGlobals = {
 		end
 	end,
 
+	validateUrls = function(urls)
+		local ok = true
+		for _, url in ipairs(urls) do
+			if not urlExists(url) then
+				printf("Error: URL is missing: %s", url)
+				ok = false
+			end
+		end
+
+		if not ok then
+			error("URLs were missing.", 2)
+		end
+	end,
+
 	-- Context functions.
 	----------------------------------------------------------------
 
@@ -678,7 +694,7 @@ scriptEnvironmentGlobals = {
 		return getContext().page.url.v:sub(1, #urlPrefix) == urlPrefix
 	end,
 
-	subpages = function()
+	subpages = function(allowCurrentPage)
 		assertContext("template", "subpages")
 
 		local pageCurrent = getContext().page
@@ -686,7 +702,7 @@ scriptEnvironmentGlobals = {
 
 		local subpages = {}
 		for _, page in ipairs(pages) do
-			if page ~= pageCurrent and page._path:sub(1, #dir) == dir then
+			if (page ~= pageCurrent or allowCurrentPage) and page._path:sub(1, #dir) == dir then
 				if not page._isGenerated then
 					generateFromTemplateFile(page)
 				end
@@ -711,18 +727,12 @@ scriptEnvironmentGlobals = {
 		return subpages
 	end,
 
-	validateUrls = function(urls)
-		local ok = true
-		for _, url in ipairs(urls) do
-			if not urlExists(url) then
-				printf("Error: URL is missing: %s", url)
-				ok = false
-			end
-		end
+	lock = function()
+		assertContext("template", "lock")
 
-		if not ok then
-			error("URLs were missing.", 2)
-		end
+		local page = getContext().page
+		page._isLocked = true -- Note: It's OK to lock multiple times.
+		page._readonly = true
 	end,
 
 	-- Hacks. (These are not very robust!)
@@ -839,7 +849,7 @@ local function buildWebsite()
 	oncePrints = {}
 	resetSiteVariables()
 
-	scriptEnvironmentGlobals.site = getProtectionWrapper(site, "site", true)
+	scriptEnvironmentGlobals.site = getProtectionWrapper(site, "site")
 	scriptEnvironmentGlobals.data = newDataFolderReader(DIR_DATA)
 
 
@@ -923,13 +933,14 @@ local function buildWebsite()
 	local onAfter          = getV("after",             nil,    "function")
 	local onValidate       = getV("validate",          nil,    "function")
 
+	autoLockPages          = getV("autoLockPages",     false,  "boolean")
 	noTrailingSlash        = getV("removeTrailingSlashFromPermalinks", false, "boolean")
 
 	for k in pairs(config) do
-		printf("WARNING: Unknown config field '%s'.", k)
+		logprint("WARNING: Unknown config field '%s'.", k)
 	end
 	for k in pairs(htaccess or {}) do
-		printf("WARNING: Unknown config.htaccess field '%s'.", k)
+		logprint("WARNING: Unknown config.htaccess field '%s'.", k)
 	end
 
 

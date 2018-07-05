@@ -41,7 +41,7 @@
 	parseMarkdownTemplate, parseHtmlTemplate, parseOtherTemplate
 	pathToSitePath, sitePathToPath
 	pcall
-	print, printOnce, printf, printfOnce, log, logprint, logVerbose
+	print, printOnce, printf, printfOnce, log, logprint, logprintOnce, logVerbose
 	pushContext, popContext, assertContext, getContext
 	removeItem
 	rewriteOutputPath
@@ -140,7 +140,7 @@ end
 
 do
 	local function maybeInsertPossibleValueExpression(lua, code)
-		local expr = F("do\n\tlocal v = (\n\t\t%s\n\t)\n\tif type(v) == 'string' and v:match'%%S' == '<' then  echoRaw(v)  elseif v ~= nil then  echo(v)  end\nend\n", code)
+		local expr = F("do  local v = (%s\n)  if type(v) == 'string' and v:match'%%S' == '<' then  echoRaw(v)  elseif v ~= nil then  echo(v)  end end ", code)
 		if not loadstring(expr) then  return false  end
 
 		table.insert(lua, expr)
@@ -161,9 +161,11 @@ do
 
 			if codePosStart > pos then
 				local plainSegment = template:sub(pos, codePosStart-1)
-				local luaStatement = F("echoRaw(%q)\n", plainSegment) --:gsub("\\\n", "\\n")
+				local luaStatement = F("echoRaw(%q)", plainSegment) --:gsub("\\\n", "\\n")
 				table.insert(lua, luaStatement)
 			end
+
+			local autoLock = (autoLockPages and codePosStart == 1)
 
 			pos = codePosStart
 			pos = pos+2 -- Eat "{{".
@@ -222,7 +224,7 @@ do
 				table.insert(lua, foriItem or "it")
 				table.insert(lua, " in ipairs(")
 				table.insert(lua, foriArr)
-				table.insert(lua, ") do\n")
+				table.insert(lua, "\n) do ")
 
 				local innerLua, innerEndCodePosStart, innerEndCodePosEnd = parseTemplate(
 					page, path, template, codePosEnd+1, level+1, enableHtmlEncoding
@@ -238,7 +240,7 @@ do
 				end
 
 				for _, luaCode in ipairs(innerLua) do  table.insert(lua, luaCode)  end
-				table.insert(lua, "end\n")
+				table.insert(lua, "end ")
 
 				codePosEnd = innerEndCodePosEnd
 
@@ -255,14 +257,14 @@ do
 				if shortformBackwards == "-" then
 					table.insert(lua, "for i = ")
 					table.insert(lua, shortformNumber)
-					table.insert(lua, ", 1, -1 do\n")
+					table.insert(lua, ", 1, -1 do ")
 				elseif shortformNumber then
 					table.insert(lua, "for i = 1, ")
 					table.insert(lua, shortformNumber)
-					table.insert(lua, " do\n")
+					table.insert(lua, " do ")
 				else
 					table.insert(lua, code)
-					table.insert(lua, " do\n")
+					table.insert(lua, "\ndo ")
 				end
 
 				local innerLua, innerEndCodePosStart, innerEndCodePosEnd = parseTemplate(
@@ -279,13 +281,13 @@ do
 				end
 
 				for _, luaCode in ipairs(innerLua) do  table.insert(lua, luaCode)  end
-				table.insert(lua, "end\n")
+				table.insert(lua, "\nend ")
 
 				codePosEnd = innerEndCodePosEnd
 
 			-- do ... end
 			elseif code == "do" then
-				table.insert(lua, "do\n")
+				table.insert(lua, "do ")
 
 				local innerLua, innerEndCodePosStart, innerEndCodePosEnd = parseTemplate(
 					page, path, template, codePosEnd+1, level+1, enableHtmlEncoding
@@ -301,14 +303,14 @@ do
 				end
 
 				for _, luaCode in ipairs(innerLua) do  table.insert(lua, luaCode)  end
-				table.insert(lua, "end\n")
+				table.insert(lua, "\nend ")
 
 				codePosEnd = innerEndCodePosEnd
 
 			-- if expression ... end
 			elseif codeUntrimmed:find"^ *if%f[^%w_]" then
 				table.insert(lua, code)
-				table.insert(lua, " then\n")
+				table.insert(lua, "\nthen ")
 
 				local innerLua, innerEndCodePosStart, innerEndCodePosEnd = parseTemplate(
 					page, path, template, codePosEnd+1, level+1, enableHtmlEncoding
@@ -320,7 +322,7 @@ do
 
 				while innerEndCode:find"^elseif[ (]" do
 					table.insert(lua, innerEndCode)
-					table.insert(lua, " then\n")
+					table.insert(lua, "\nthen ")
 
 					innerLua, innerEndCodePosStart, innerEndCodePosEnd = parseTemplate(
 						page, path, template, innerEndCodePosEnd+1, level+1, enableHtmlEncoding
@@ -332,7 +334,7 @@ do
 				end
 
 				if innerEndCode == "else" then
-					table.insert(lua, "else\n")
+					table.insert(lua, "else ")
 
 					innerLua, innerEndCodePosStart, innerEndCodePosEnd = parseTemplate(
 						page, path, template, innerEndCodePosEnd+1, level+1, enableHtmlEncoding
@@ -351,14 +353,14 @@ do
 					)
 				end
 
-				table.insert(lua, "end\n")
+				table.insert(lua, "end ")
 
 				codePosEnd = innerEndCodePosEnd
 
 			-- while expression ... end
 			elseif codeUntrimmed:find"^ *while%f[^%w_]" then
 				table.insert(lua, code)
-				table.insert(lua, " do\n")
+				table.insert(lua, "\ndo ")
 
 				local innerLua, innerEndCodePosStart, innerEndCodePosEnd = parseTemplate(
 					page, path, template, codePosEnd+1, level+1, enableHtmlEncoding
@@ -374,13 +376,13 @@ do
 				end
 
 				for _, luaCode in ipairs(innerLua) do  table.insert(lua, luaCode)  end
-				table.insert(lua, "end\n")
+				table.insert(lua, "end ")
 
 				codePosEnd = innerEndCodePosEnd
 
 			-- repeat ... until expression
 			elseif code == "repeat" then
-				table.insert(lua, "repeat\n")
+				table.insert(lua, "repeat ")
 
 				local innerLua, innerEndCodePosStart, innerEndCodePosEnd = parseTemplate(
 					page, path, template, codePosEnd+1, level+1, enableHtmlEncoding
@@ -404,7 +406,7 @@ do
 
 			-- URL short form.
 			elseif code:find"^/" then
-				table.insert(lua, F("echo(url%q)\n", code))
+				table.insert(lua, F("echo(url%q)", code))
 
 			-- End of block.
 			elseif code == "end" or code:find"^until[ (]" or code == "else" or code:find"^elseif[ (]" then
@@ -420,6 +422,10 @@ do
 
 			----------------------------------------------------------------
 
+			if autoLock then
+				table.insert(lua, "lock()")
+			end
+
 			pos = codePosEnd+1
 		end
 
@@ -429,7 +435,7 @@ do
 
 		if pos <= #template then
 			local plainSegment = template:sub(pos)
-			local luaStatement = F("echoRaw(%q)\n", plainSegment) --:gsub("\\\n", "\\n")
+			local luaStatement = F("echoRaw(%q)", plainSegment) --:gsub("\\\n", "\\n")
 			table.insert(lua, luaStatement)
 		end
 
@@ -753,7 +759,13 @@ end
 function logprint(s, ...)
 	if select("#", ...) > 0 then  s = s:format(...)  end
 
-	printf("[%s]  %s", os.date"%Y-%m-%d %H:%M:%S", s)
+	printf("[%s] %s", os.date"%H:%M:%S", s)
+end
+
+function logprintOnce(s, ...)
+	if select("#", ...) > 0 then  s = s:format(...)  end
+
+	printfOnce("[%s] %s", os.date"%H:%M:%S", s)
 end
 
 function logVerbose(...)
@@ -767,7 +779,7 @@ end
 
 
 function insertLineNumberCode(t, ln)
-	table.insert(t, "-- @LINE")
+	table.insert(t, "\n-- @LINE")
 	table.insert(t, ln)
 	table.insert(t, "\n")
 end
@@ -811,17 +823,26 @@ end
 
 
 
-function toUrl(url)
-	if type(url) ~= "string" then
-		errorf(2, "Bad type of 'url' argument. (Got %s)", type(url))
+do
+	local URI_PERCENT_CODES_TO_NOT_ENCODE = {
+		["%2d"]="-",["%2e"]=".",["%7e"]="~",--["???"]="_",
+		["%21"]="!",["%23"]="#",["%24"]="$",["%26"]="&",["%27"]="'",["%28"]="(",["%29"]=")",["%2a"]="*",["%2b"]="+",
+		["%2c"]=",",["%2f"]="/",["%3a"]=":",["%3b"]=";",["%3d"]="=",["%3f"]="?",["%40"]="@",["%5b"]="[",["%5d"]="]",
+	}
+
+	function toUrl(url)
+		if type(url) ~= "string" then
+			errorf(2, "Bad type of 'url' argument. (Got %s)", type(url))
+		end
+
+		url = escapeUri(url)
+		url = url:gsub("%%[0-9a-f][0-9a-f]", URI_PERCENT_CODES_TO_NOT_ENCODE)
+
+		return url
 	end
 
-	url = escapeUri(url)
-	url = url:gsub("%%[0-9a-f][0-9a-f]", URI_PERCENT_CODES_TO_NOT_ENCODE)
-
-	return url
+	-- print(toUrl("http://www.example.com/some-path/File~With (Stuff_åäö).jpg?key=value&foo=bar#hash")) -- TEST
 end
--- print(toUrl("http://www.example.com/some-path/File~With (Stuff_åäö).jpg?key=value&foo=bar#hash")) -- TEST
 
 function toUrlAbsolute(url)
 	url = url:gsub("^/%f[^/]", site.baseUrl.v)
@@ -983,7 +1004,7 @@ function newDataFolderReader(path)
 				dataObj = newDataFolderReader(F("%s/%s", path, k))
 
 			else
-				printfOnce("WARNING: Bad data path '%s/%s'.", path, k)
+				logprintOnce("WARNING: Bad data path '%s/%s'.", path, k)
 				return nil
 			end
 
@@ -1025,7 +1046,7 @@ end
 
 
 
-function getProtectionWrapper(obj, objName, readonly)
+function getProtectionWrapper(obj, objName)
 	assertarg(1, obj,     "table")
 	assertarg(2, objName, "string")
 
@@ -1050,7 +1071,7 @@ function getProtectionWrapper(obj, objName, readonly)
 
 			if field == nil or k:find"^_" then
 				errorf(2, "'%s' is not a valid %s field.", tostring(k), objName)
-			elseif not field.s or readonly then
+			elseif not field.s or obj._readonly then
 				errorf(2, "Cannot update read-only field %s.%s", objName, k)
 			end
 
@@ -1116,10 +1137,11 @@ function generateFromTemplate(page, template, modTime)
 	if page._isGenerated then
 		errorf(2, "Page has already generated. (%s)", page._path)
 	end
-	if pagesGenerating[page._pathOut] then
-		errorf(2, "Recursive page generation detected. (%s)", page._path)
+	if page._isGenerating or pagesGenerating[page._pathOut] then
+		errorf(2, "Recursive page generation detected. You may have to call lock() in '%s'.", page._path)
 	end
 
+	page._isGenerating = true
 	pagesGenerating[page._pathOut] = true
 
 	local pathRel  = page._path
@@ -1144,9 +1166,12 @@ function generateFromTemplate(page, template, modTime)
 			(page.isDraft.v and not includeDrafts) or -- Is draft?
 			(datetimeToTime(page.publishDate:g()) > os.time()) -- Is in future?
 		then
-			outputFileSkippedPageCount = outputFileSkippedPageCount+1
-			pagesGenerating[page._pathOut] = nil
 			page._isSkipped = true
+			outputFileSkippedPageCount = outputFileSkippedPageCount+1
+
+			pagesGenerating[page._pathOut] = nil
+			page._isGenerating = false
+			page._readonly     = true
 			return
 		end
 
@@ -1159,12 +1184,16 @@ function generateFromTemplate(page, template, modTime)
 	assert(outStr)
 	writeOutputFile(page._category, page._pathOut, page.url.v, outStr, modTime)
 
-	pagesGenerating[page._pathOut] = nil
 	page._isGenerated = true
+
+	pagesGenerating[page._pathOut] = nil
+	page._isGenerating = false
+	page._readonly     = true
 end
 
 function generateFromTemplateFile(page)
-	if page._isSkipped then return end
+	if page._isSkipped then  return  end
+	if page._isGenerating and page._isLocked then  return  end -- Allowed recursion.
 
 	local path     = DIR_CONTENT.."/"..page._path
 	local template = assert(getFileContents(path))
@@ -1312,9 +1341,19 @@ end
 
 
 
-function encodeHtmlEntities(s)
-	s = s:gsub(HTML_ENTITY_PATTERN, HTML_ENTITIES)
-	return s
+do
+	local ENTITIES = {
+		["&"] = "&amp;",
+		["<"] = "&lt;",
+		[">"] = "&gt;",
+		['"'] = "&quot;",
+		["'"] = "&#39;",
+	}
+
+	function encodeHtmlEntities(s)
+		s = s:gsub("[&<>\"']", ENTITIES)
+		return s
+	end
 end
 
 
@@ -1612,11 +1651,15 @@ function newPage(pathRel)
 		or (permalinkRel == "" and "" or permalinkRel).."index.html"
 
 	local page; page = {
-		_category    = category,
-		_isGenerated = false,
-		_isSkipped   = false,
-		_path        = pathRel,
-		_pathOut     = pathRelOut,
+		_readonly = false,
+
+		_category     = category,
+		_isGenerating = false,
+		_isGenerated  = false,
+		_isSkipped    = false,
+		_isLocked     = false,
+		_path         = pathRel,
+		_pathOut      = pathRelOut,
 
 		isPage = {
 			v = isPage,
@@ -1673,7 +1716,7 @@ function newPage(pathRel)
 
 		aliases = {
 			v = {},
-			g = function(field)  return field.v  end,
+			g = function(field)  return page._readonly and {unpack(field.v)} or field.v  end,
 			s = function(field, aliases)  field.v = aliases  end,
 		},
 

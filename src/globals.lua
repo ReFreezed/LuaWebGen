@@ -10,18 +10,18 @@
 --=
 --============================================================]]
 
-_WEBGEN_VERSION = "0.13.0"
+_WEBGEN_VERSION = "0.14.0"
 
 
 
 -- Settings.
 
-DIR_CONTENT = "content"
-DIR_DATA    = "data"
-DIR_LAYOUTS = "layouts"
-DIR_LOGS    = "logs"
-DIR_OUTPUT  = "output"
-DIR_SCRIPTS = "scripts"
+DIR_CONTENT            = "content" -- @Incomplete: Make directories configurable.
+DIR_DATA               = "data"
+DIR_LAYOUTS            = "layouts"
+DIR_LOGS               = "logs"
+DIR_OUTPUT             = "output"
+DIR_SCRIPTS            = "scripts"
 
 AUTOBUILD_MIN_INTERVAL = 1.00
 
@@ -29,30 +29,15 @@ AUTOBUILD_MIN_INTERVAL = 1.00
 
 -- Constants.
 
-HTML_ENTITY_PATTERN = "[&<>\"']"
-HTML_ENTITIES = {
-	["&"] = "&amp;",
-	["<"] = "&lt;",
-	[">"] = "&gt;",
-	['"'] = "&quot;",
-	["'"] = "&#39;",
-}
-
-URI_PERCENT_CODES_TO_NOT_ENCODE = {
-	["%2d"]="-",["%2e"]=".",["%7e"]="~",--["???"]="_",
-	["%21"]="!",["%23"]="#",["%24"]="$",["%26"]="&",["%27"]="'",["%28"]="(",["%29"]=")",["%2a"]="*",["%2b"]="+",
-	["%2c"]=",",["%2f"]="/",["%3a"]=":",["%3b"]=";",["%3d"]="=",["%3f"]="?",["%40"]="@",["%5b"]="[",["%5d"]="]",
-}
-
 TEMPLATE_EXTENSION_SET = {["html"]=true, ["md"]=true, ["css"]=true}
 PAGE_EXTENSION_SET     = {["html"]=true, ["md"]=true}
 
-OUTPUT_CATEGORY_SET = {["page"]=true, ["otherTemplate"]=true, ["otherRaw"]=true}
+OUTPUT_CATEGORY_SET    = {["page"]=true, ["otherTemplate"]=true, ["otherRaw"]=true}
 
-DATA_FILE_EXTENSIONS = {"lua","toml","xml"}
-IMAGE_EXTENSIONS     = {"png","jpg","jpeg","gif"}
+DATA_FILE_EXTENSIONS   = {"lua","toml","xml"}
+IMAGE_EXTENSIONS       = {"png","jpg","jpeg","gif"}
 
-NOOP = function()end
+NOOP                   = function()end
 
 
 
@@ -102,6 +87,8 @@ _                        = nil -- Dummy.
 -- Site variables. These are reset in buildWebsite() (including _G.oncePrints).
 function resetSiteVariables()
 	site = {
+		_readonly = true,
+
 		title = {
 			v = "",
 			g = function(field) return field.v end,
@@ -133,6 +120,7 @@ function resetSiteVariables()
 	outputPathFormat           = "%s"
 	rewriteExcludes            = nil -- Init later.
 
+	autoLockPages              = false
 	noTrailingSlash            = false
 
 
