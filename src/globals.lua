@@ -10,7 +10,7 @@
 --=
 --============================================================]]
 
-_WEBGEN_VERSION = "0.12.0"
+_WEBGEN_VERSION = "0.13.0"
 
 
 
@@ -29,12 +29,13 @@ AUTOBUILD_MIN_INTERVAL = 1.00
 
 -- Constants.
 
-HTML_ENTITY_PATTERN = '[&<>"]'
+HTML_ENTITY_PATTERN = "[&<>\"']"
 HTML_ENTITIES = {
-	['&'] = "&amp;",
-	['<'] = "&lt;",
-	['>'] = "&gt;",
+	["&"] = "&amp;",
+	["<"] = "&lt;",
+	[">"] = "&gt;",
 	['"'] = "&quot;",
+	["'"] = "&#39;",
 }
 
 URI_PERCENT_CODES_TO_NOT_ENCODE = {
@@ -63,6 +64,7 @@ socket      = require"socket"
 
 escapeUri   = require"socket.url".escape
 
+dateLib     = require"date"
 markdownLib = require"markdown"
 parseToml   = require"toml".parse
 xmlLib      = require"pl.xml"

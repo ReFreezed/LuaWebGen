@@ -1,5 +1,6 @@
 {{
 page.title = 'First Post!'
+
 P.foo = "bar"
 }}
 

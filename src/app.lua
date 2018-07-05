@@ -45,15 +45,15 @@ if command == "new" then
 		local contents = formatTemplate(
 			[=[
 				{{
-				page.title       = :titleQuoted:
-				page.publishDate = ":date:"
+				page.title = :titleQuoted:
+				page.date  = ":date:"
 				}}
 
 				:content:
 			]=], {
 				titleQuoted = F("%q", title),
 				content     = "",
-				date        = os.date"%Y-%m-%d %H:%M:%S",
+				date        = getDatetime(),
 			}
 		)
 
@@ -279,16 +279,7 @@ scriptEnvironmentGlobals = {
 
 	pairs = function(t)
 		if isDataFolderReader(t) then
-			preloadData(t)
-
-			local keys = sortNatural(getKeys(t))
-			local i    = 0
-
-			return function()
-				i = i+1
-				local k = keys[i]
-				if k then  return k, t[k]  end
-			end
+			return scriptEnvironmentGlobals.pairsSorted(t)
 		end
 
 		return pairs(t)
@@ -320,12 +311,14 @@ scriptEnvironmentGlobals = {
 	-- Utility functions.
 	----------------------------------------------------------------
 
+	ceil           = math.ceil,
 	date           = os.date,
 	entities       = encodeHtmlEntities,
 	errorf         = errorf,
 	F              = F,
 	find           = itemWith,
 	findAll        = itemWithAll,
+	floor          = math.floor,
 	formatTemplate = formatTemplate,
 	generatorMeta  = generatorMeta,
 	getFilename    = getFilename,
@@ -333,9 +326,10 @@ scriptEnvironmentGlobals = {
 	indexOf        = indexOf,
 	isAny          = isAny,
 	markdown       = markdownToHtml,
-	max            = max,
-	min            = min,
+	max            = math.max,
+	min            = math.min,
 	newBuffer      = newStringBuffer,
+	prettyUrl      = toPrettyUrl,
 	printf         = printf,
 	printfOnce     = printfOnce,
 	printOnce      = printOnce,
@@ -344,7 +338,7 @@ scriptEnvironmentGlobals = {
 	sortNatural    = sortNatural,
 	split          = splitString,
 	toLua          = serializeLua,
-	toTime         = dateStringToTime,
+	toTime         = datetimeToTime,
 	trim           = trim,
 	trimNewlines   = trimNewlines,
 	url            = toUrl,
@@ -370,6 +364,12 @@ scriptEnvironmentGlobals = {
 	fileExists = function(sitePath)
 		local pathRel = sitePathToPath(sitePath)
 		return isFile(DIR_CONTENT.."/"..pathRel)
+	end,
+
+	fileExistsInOutput = function(sitePath, skipRewriting)
+		local pathRel       = sitePathToPath(sitePath)
+		local pathOutputRel = skipRewriting and pathRel or rewriteOutputPath(pathRel)
+		return isFile(DIR_OUTPUT.."/"..pathOutputRel)
 	end,
 
 	getExtension = function(genericPath)
@@ -444,6 +444,7 @@ scriptEnvironmentGlobals = {
 	-- 	return texts
 	-- end
 
+	-- html = thumb( imagePath, thumbWidth [, thumbHeight ] [, isLink=false ] )
 	thumb = function(sitePathImageRel, thumbW, thumbH, isLink)
 		if type(thumbH) == "boolean" then
 			thumbH, isLink = 0, thumbH
@@ -493,7 +494,7 @@ scriptEnvironmentGlobals = {
 		return F(
 			'<a href="%s">%s</a>',
 			encodeHtmlEntities(toUrl(url)),
-			encodeHtmlEntities(label or url:gsub("^https?://", ""):gsub("^www%.", ""):gsub("/+$", ""))
+			encodeHtmlEntities(label or toPrettyUrl(url))
 		)
 	end,
 
@@ -557,6 +558,34 @@ scriptEnvironmentGlobals = {
 		return sitePaths
 	end,
 
+	toDatetime = function(time)
+		assertarg(1, time, "number")
+		return getDatetime(time)
+	end,
+
+	now = function()
+		return getDatetime()
+	end,
+
+	getCompleteOutputPath = function(sitePath)
+		local pathRel = sitePathToPath(sitePath)
+		local pathOutputRel = rewriteOutputPath(pathRel)
+		return DIR_OUTPUT.."/"..pathOutputRel
+	end,
+
+	pairsSorted = function(t)
+		if isDataFolderReader(t) then  preloadData(t)  end
+
+		local keys = sortNatural(getKeys(t))
+		local i    = 0
+
+		return function()
+			i = i+1
+			local k = keys[i]
+			if k then  return k, t[k]  end
+		end
+	end,
+
 	-- Context functions.
 	----------------------------------------------------------------
 
@@ -575,6 +604,16 @@ scriptEnvironmentGlobals = {
 	echoRaw = function(s)
 		assertContext("template", "echoRaw")
 		table.insert(getContext"template".out, tostringForTemplates(s))
+	end,
+
+	echof = function(s, ...)
+		assertContext("template", "echof")
+		scriptEnvironmentGlobals.echo(s:format(...))
+	end,
+
+	echofRaw = function(s, ...)
+		assertContext("template", "echofRaw")
+		scriptEnvironmentGlobals.echoRaw(s:format(...))
 	end,
 
 	include = function(htmlFileBasename)
@@ -602,7 +641,7 @@ scriptEnvironmentGlobals = {
 			table.insert(pages, page)
 		end
 
-		return page
+		return getProtectionWrapper(page, "page")
 	end,
 
 	outputRaw = function(sitePathRel, contents)
@@ -611,6 +650,20 @@ scriptEnvironmentGlobals = {
 
 		local pathRel = sitePathToPath(sitePathRel)
 		writeOutputFile("otherRaw", pathRel, sitePathRel, contents)
+	end,
+
+	preserveRaw = function(sitePathRel)
+		assertContext("config", "preserveRaw")
+
+		local pathRel       = sitePathToPath(sitePathRel)
+		local pathOutputRel = rewriteOutputPath(pathRel)
+		local path          = DIR_OUTPUT.."/"..pathOutputRel
+
+		if not isFile(path) then
+			errorf(2, "File does not exist. (%s)", path)
+		end
+
+		preserveExistingOutputFile("otherRaw", pathRel, sitePathRel)
 	end,
 
 	isCurrentUrl = function(url)
@@ -642,9 +695,13 @@ scriptEnvironmentGlobals = {
 		end
 
 		table.sort(subpages, function(a, b)
-			if a.publishDate ~= b.publishDate then  return a.publishDate > b.publishDate  end
+			if a.publishDate() ~= b.publishDate() then  return a.publishDate() > b.publishDate()  end
 			return a._path < b._path
 		end)
+
+		for i, page in ipairs(subpages) do
+			subpages[i] = getProtectionWrapper(page, "page")
+		end
 
 		return subpages
 	end,
@@ -661,6 +718,70 @@ scriptEnvironmentGlobals = {
 		if not ok then
 			error("URLs were missing.", 2)
 		end
+	end,
+
+	-- Hacks. (These are not very robust!)
+	----------------------------------------------------------------
+
+	XXX_minimizeCss = function(s)
+		local oldLen = #s
+		local header = s:match"^/%*.-%*/" or ""
+
+		s = header..s
+			:sub(#header+1)
+			:gsub("/%*.-%*/", "")   -- Remove comments.
+			:gsub("\t+",      "")   -- Remove all tabs.
+			:gsub("\n +",     "\n") -- Remove space indentations.
+			:gsub("  +",      " ")  -- Remove extra spaces.
+			:gsub("\n\n+",    "\n") -- Remove empty lines.
+			:gsub("%b{}",     function(scope)  return (scope:gsub("\n", " "))  end) -- Compress rules to one line each.
+
+		if verbosePrint then
+			printf("[opti] %s  from %d  to %d  (diff=%d)", getFilename(path), oldLen, #s, oldLen-#s)
+		end
+
+		return s
+	end,
+
+	XXX_minimizeJavaScript = function(s)
+		local oldLen = #s
+		local header = s:match"^/%*.-%*/" or ""
+
+		s = header..s
+			:sub(#header+1)
+			:gsub("()/%*.-%*/", "")   -- Remove long comments.
+			:gsub("\n\t+",      "\n") -- Remove indentations.
+			:gsub("\n//[^\n]*", "\n") :gsub(" // [^\n]*", "") -- Remove all comment lines.
+			:gsub("\n\n+",      "\n") -- Remove empty lines.
+
+		if verbosePrint then
+			printf("[opti] %s  from %d  to %d  (diff=%d)", getFilename(path), oldLen, #s, oldLen-#s)
+		end
+
+		return s
+	end,
+
+	XXX_minimizeHtaccess = function(s)
+		local oldLen = #s
+
+		s = s
+			:gsub("^\t+",      "") -- Remove indentations.
+			:gsub("\n#[^\n]*", "\n") :gsub("^#[^\n]*", "") -- Remove all comments.
+			:gsub("\n\n+",     "\n") :gsub("^\n",      "") -- Remove empty lines.
+
+		if verbosePrint then
+			printf("[opti] %s  from %d  to %d  (diff=%d)", getFilename(path), oldLen, #s, oldLen-#s)
+		end
+
+		return s
+	end,
+
+	XXX_getMinimizingProcessors = function()
+		return {
+			["css"]      = scriptEnvironmentGlobals.XXX_minimizeCss,
+			["htaccess"] = scriptEnvironmentGlobals.XXX_minimizeHtaccess,
+			["js"]       = scriptEnvironmentGlobals.XXX_minimizeJavaScript,
+		}
 	end
 
 	----------------------------------------------------------------

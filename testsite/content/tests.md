@@ -146,12 +146,12 @@ Favorite fruit is neither apple nor banana. :(
 
 Dogs:
 {{fori dog in data.dogs}}
-- {{dog.name}} (age {{dog.age}})
+- {{i}}: {{dog.name}} (age {{dog.age}})
 {{end}}
 
 Cats:
 {{fori data.cats.cats}}
-- {{it.name}} (age {{it.age}})
+- {{i}}: {{it.name}} (age {{it.age}})
 {{end}}
 
 

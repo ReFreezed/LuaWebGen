@@ -10,10 +10,10 @@
 --=
 --==============================================================
 
-	assert, assertf, assertType, assertTable
+	assert, assertf, assertType, assertTable, assertarg
 	createDirectory, isDirectoryEmpty, removeEmptyDirectories
 	createThumbnail
-	dateStringToTime
+	datetimeToTime, getDatetime
 	encodeHtmlEntities
 	error, errorf, fileerror, errorInGeneratedCodeFromTemplate
 	F, formatBytes, formatTemplate
@@ -25,11 +25,13 @@
 	getLayoutTemplate
 	getLineNumber
 	getProtectionWrapper
+	getTimezone, getTimezoneOffsetString, getTimezoneOffset
 	gsub2
 	htaccessRewriteEscapeRegex, htaccessRewriteEscapeReplacement
 	indexOf, itemWith, itemWithAll
 	insertLineNumberCode
 	isAny
+	isArgs
 	isFile, isDirectory
 	isStringMatchingAnyPattern
 	markdownToHtml
@@ -50,7 +52,7 @@
 	storeArgs
 	toNormalPath, toWindowsPath
 	tostringForTemplates
-	toUrl, toUrlAbsolute, urlize
+	toUrl, toUrlAbsolute, urlize, toPrettyUrl
 	traverseDirectory, traverseFiles
 	trim, trimNewlines
 	unindent
@@ -216,7 +218,7 @@ do
 					end
 				end
 
-				table.insert(lua, "for _, ")
+				table.insert(lua, "for i, ")
 				table.insert(lua, foriItem or "it")
 				table.insert(lua, " in ipairs(")
 				table.insert(lua, foriArr)
@@ -514,7 +516,7 @@ function error(err, level)
 	_error(err, (level or 1)+1)
 end
 
--- errorf( [ level, ] formatString, ...)
+-- errorf( [ level=1, ] formatString, ...)
 function errorf(level, s, ...)
 	if type(level) == "number" then
 		error(s:format(...), level+1)
@@ -628,7 +630,7 @@ function preserveExistingOutputFile(category, pathRel, url)
 	assert(not writtenOutputUrls[url])
 
 	local path = DIR_OUTPUT.."/"..pathOutputRel
-	-- logVerbose("Preserving: %s", path)
+	logVerbose("Preserving: %s", path)
 
 	local dataLen, err = lfs.attributes(path, "size")
 	if not dataLen then
@@ -836,6 +838,14 @@ function urlize(text)
 	return text == "" and "-" or text
 end
 
+function toPrettyUrl(url)
+	return (url
+		:gsub("^https?://", "")
+		:gsub("^www%.", "")
+		:gsub("/+$", "")
+	)
+end
+
 
 
 function generatorMeta(hideVersion)
@@ -874,7 +884,19 @@ do
 
 		local proxySource = proxySources[t]
 		if proxySource then
-			return formatValue(proxySource, out, isDeep)
+			local fields = {}
+
+			for k, v in pairs(proxySource) do
+				if type(v) == "function" then
+					fields[k] = v()
+				elseif k:find"^_" then
+					-- Private/hidden.
+				else
+					fields[k] = v
+				end
+			end
+
+			return formatValue(fields, out, isDeep)
 		end
 
 		local keys = {}
@@ -1008,24 +1030,43 @@ end
 
 
 function getProtectionWrapper(obj, name)
+	assertarg(1, obj,  "table")
+	assertarg(2, name, "string")
+
 	local proxy = proxies[obj]
 	if proxy then  return proxy  end
 
 	proxy = setmetatable({}, {
 		__index = function(proxy, k)
 			local v = obj[k]
-			if v ~= nil then  return v  end
+			if v == nil or k:find"^_" then
+				errorf(2, "Tried to get non-existent %s field '%s'.", name, tostring(k))
+			end
 
-			errorf(2, "Tried to get non-existent %s field '%s'.", name, tostring(k))
+			if type(v) == "function" then
+				return v()
+			end
+
+			return v
 		end,
 
-		__newindex = function(proxy, k, v)
-			if obj[k] == nil then
+		__newindex = function(proxy, k, vNew)
+			local vOld = obj[k]
+
+			if vOld == nil or k:find"^_" then
 				errorf(2, "'%s' is not a valid %s field.", tostring(k), name)
-			elseif type(v) ~= type(obj[k]) then
-				errorf(2, "Expected %s for %s field '%s' but got %s (%s).", type(obj[k]), name, k, type(v), tostring(v))
+			elseif type(vOld) == "function" then
+				vOld = vOld()
+			end
+
+			if type(vNew) ~= type(vOld) then
+				errorf(2, "Expected %s for %s field '%s' but got %s (%s).", type(vOld), name, k, type(vNew), tostring(vNew))
+			end
+
+			if type(obj[k]) == "function" then
+				obj[k](vNew)
 			else
-				obj[k] = v
+				obj[k] = vNew
 			end
 		end,
 	})
@@ -1089,6 +1130,7 @@ function generateFromTemplate(page, template, modTime)
 	local filename = getFilename(pathRel)
 	local ext      = getExtension(filename)
 	local extLower = ext:lower()
+	assert(pathRel)
 
 	local outStr
 
@@ -1104,7 +1146,7 @@ function generateFromTemplate(page, template, modTime)
 	if page.isPage then
 		if
 			(page.isDraft and not includeDrafts) or -- Is draft?
-			(dateStringToTime(page.publishDate) > os.time()) -- Is in future?
+			(datetimeToTime(page.publishDate()) > os.time()) -- Is in future?
 		then
 			outputFileSkippedPageCount = outputFileSkippedPageCount+1
 			pagesGenerating[page._pathOut] = nil
@@ -1131,7 +1173,7 @@ function generateFromTemplateFile(page)
 	local modTime  = lfs.attributes(path, "modification")
 
 	if modTime then
-		page.publishDate = os.date("%Y-%m-%d %H:%M:%S", modTime) -- Default value.
+		page.date = getDatetime(modTime) -- Default value.
 	end
 
 	generateFromTemplate(page, template, modTime)
@@ -1213,6 +1255,39 @@ function assertTable(t, kType, vType, err, ...)
 	return t
 end
 
+-- value = assertarg( [ functionName=auto, ] argumentNumber, value, expectedValueType... [, depth=2 ] )
+do
+	local function _assertarg(fName, n, v, ...)
+		local vType       = type(v)
+		local varargCount = select("#", ...)
+		local lastArg     = select(varargCount, ...)
+		local hasDepthArg = (type(lastArg) == "number")
+		local typeCount   = varargCount+(hasDepthArg and -1 or 0)
+
+		for i = 1, typeCount do
+			if vType == select(i, ...) then  return v  end
+		end
+
+		local depth = 2+(hasDepthArg and lastArg or 2)
+
+		if not fName then
+			fName = debug.traceback("", depth-1):match": in function '(.-)'" or "?"
+		end
+
+		local expects = table.concat({...}, " or ", 1, typeCount)
+
+		error(("bad argument #%d to '%s' (%s expected, got %s)"):format(n, fName, expects, vType), depth)
+	end
+
+	function assertarg(fNameOrArgNum, ...)
+		if type(fNameOrArgNum) == "string" then
+			return _assertarg(fNameOrArgNum, ...)
+		else
+			return _assertarg(nil, fNameOrArgNum, ...)
+		end
+	end
+end
+
 
 
 function indexOf(t, v)
@@ -1287,7 +1362,7 @@ function getLayoutTemplate(page)
 	local path = F("%s/%s.html", DIR_LAYOUTS, page.layout)
 
 	local template = layoutTemplates[path]
-	if template then  return template  end
+	if template then  return template, path  end
 
 	local template, err = getFileContents(path)
 	if not template then
@@ -1319,21 +1394,23 @@ end
 
 
 
-function dateStringToTime(dateStr)
-	local year, month, day, hour, minute, second = dateStr:match"^(%d%d%d%d)%-(%d%d)%-(%d%d) (%d%d):(%d%d):(%d%d)$"
-	if not year then
-		errorf("Invalid date string '%s'. (Format must be 'YYYY-MM-DD hh:mm:ss')", dateStr)
-	end
+function datetimeToTime(datetime)
+	assertarg(1, datetime, "string")
 
-	local time = os.time{
-		year  = tonumber(year),
-		month = tonumber(month),
-		day   = tonumber(day),
-		hour  = tonumber(hour),
-		min   = tonumber(minute),
-		sec   = tonumber(second),
-	}
+	local date = dateLib(datetime)
+	local time = (date-dateLib.epoch()):spanseconds()
+
 	return time
+end
+
+-- datetime = getDatetime( [ time=now ] )
+function getDatetime(time)
+	assertarg(1, time, "number","nil")
+
+	local date     = dateLib(time or os.time()):tolocal()
+	local datetime = date:fmt"${iso}%z" :gsub("..$", ":%0") :gsub("%+00:00$", "Z")
+
+	return datetime
 end
 
 
@@ -1363,14 +1440,15 @@ function popContext(ctxName)
 	table.remove(contextStack)
 end
 
--- assertContext( contextName [, functionContext ] )
-function assertContext(ctxName, funcContext)
+-- assertContext( contextName [, functionContext, errorLevel=2 ] )
+function assertContext(ctxName, funcContext, errLevel)
 	local ctx = contextStack[#contextStack]
 	if not ctx or ctx._name ~= ctxName then
+		errLevel = (errLevel or 2)+1
 		if funcContext then
-			errorf(2, "[%s] Context is wrong. (Expected '%s', but is '%s')", funcContext, ctxName, ctx and ctx._name or "none")
+			errorf(errLevel, "[%s] Context is wrong. (Expected '%s', but is '%s')", funcContext, ctxName, ctx and ctx._name or "none")
 		else
-			errorf(2,      "Context is wrong. (Expected '%s', but is '%s')",              ctxName, ctx and ctx._name or "none")
+			errorf(errLevel,      "Context is wrong. (Expected '%s', but is '%s')",              ctxName, ctx and ctx._name or "none")
 		end
 	end
 end
@@ -1535,7 +1613,21 @@ function newPage(pathRel)
 		=  (not isPage and permalinkRel)
 		or (permalinkRel == "" and "" or permalinkRel).."index.html"
 
-	local page = {
+	local publishDate = ""
+	local page
+
+	local function getOrSetPublishDate(...)
+		if isArgs(...) then
+			assertContext("template", "publishDate", 3)
+			assertarg(1, ..., "string")
+			publishDate = ...
+
+		else
+			return publishDate ~= "" and publishDate or page.date
+		end
+	end
+
+	page = {
 		_category   = category,
 		_isGenerated= false,
 		_isSkipped  = false,
@@ -1550,7 +1642,8 @@ function newPage(pathRel)
 		title       = "",
 		content     = "",
 
-		publishDate = os.date("%Y-%m-%d %H:%M:%S", 0),
+		date        = getDatetime(0),
+		publishDate = getOrSetPublishDate, -- @Robustness: Use getters/setters for all fields.
 		isDraft     = false,
 		isSpecial   = not isPage,
 
@@ -1762,6 +1855,37 @@ end
 
 function htaccessRewriteEscapeReplacement(s)
 	return (s:gsub('[&%\\"]', "\\%0"))
+end
+
+
+
+-- Compute the difference in seconds between local time and UTC. (Normal time.)
+-- http://lua-users.org/wiki/TimeZone
+function getTimezone()
+	local now = os.time()
+	return os.difftime(now, os.time(os.date("!*t", now)))
+end
+
+-- Return a timezone string in ISO 8601:2000 standard form (+hhmm or -hhmm).
+function getTimezoneOffsetString(tz)
+	local h, m = math.modf(tz/3600)
+	return F("%+.4d", 100*h+60*m)
+end
+
+-- Return the timezone offset in seconds, as it was on the given time. (DST obeyed.)
+-- timezoneOffset = getTimezoneOffset( [ time=now ] )
+function getTimezoneOffset(time)
+	time = time or os.time()
+	local dateUtc   = os.date("!*t", time)
+	local dateLocal = os.date("*t",  time)
+	dateLocal.isdst = false -- This is the trick.
+	return os.difftime(os.time(dateLocal), os.time(dateUtc))
+end
+
+
+
+function isArgs(...)
+	return select("#", ...) > 0
 end
 
 
