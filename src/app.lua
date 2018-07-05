@@ -62,6 +62,8 @@ if command == "new" then
 			errorf("Item already exists: %s", path)
 		end
 
+		createDirectory(getDirectory(path))
+
 		local file = assert(io.open(path, "wb"))
 		file:write(contents)
 		file:close()
@@ -637,7 +639,7 @@ scriptEnvironmentGlobals = {
 		local page    = newPage(pathRel)
 		generateFromTemplate(page, template)
 
-		if page.isPage and not page._isSkipped then
+		if page.isPage.v and not page._isSkipped then
 			table.insert(pages, page)
 		end
 
@@ -668,12 +670,12 @@ scriptEnvironmentGlobals = {
 
 	isCurrentUrl = function(url)
 		assertContext("template", "isCurrentUrl")
-		return getContext().page.url == url
+		return getContext().page.url.v == url
 	end,
 
 	isCurrentUrlBelow = function(urlPrefix)
 		assertContext("template", "isCurrentUrl")
-		return getContext().page.url:sub(1, #urlPrefix) == urlPrefix
+		return getContext().page.url.v:sub(1, #urlPrefix) == urlPrefix
 	end,
 
 	subpages = function()
@@ -688,14 +690,17 @@ scriptEnvironmentGlobals = {
 				if not page._isGenerated then
 					generateFromTemplateFile(page)
 				end
-				if not (page._isSkipped or page.isSpecial) then
+				if not (page._isSkipped or page.isSpecial.v) then
 					table.insert(subpages, page)
 				end
 			end
 		end
 
 		table.sort(subpages, function(a, b)
-			if a.publishDate() ~= b.publishDate() then  return a.publishDate() > b.publishDate()  end
+			local aDatetime = a.publishDate:g()
+			local bDatetime = b.publishDate:g()
+			if aDatetime ~= bDatetime then  return aDatetime > bDatetime  end
+
 			return a._path < b._path
 		end)
 
@@ -830,50 +835,11 @@ scriptEnvironment = setmetatable({}, {
 
 local function buildWebsite()
 	local startTime = socket.gettime()
+
 	oncePrints = {}
+	resetSiteVariables()
 
-
-	site = {
-		title         = "",
-		baseUrl       = "/",
-		languageCode  = "",
-		defaultLayout = "page",
-
-		redirections  = nil,
-	}
-
-	ignoreFiles                = nil
-	ignoreFolders              = nil
-
-	fileProcessors             = nil
-
-	outputPathFormat           = "%s"
-	rewriteExcludes            = nil
-
-	noTrailingSlash            = false
-
-	pages                      = {}
-	pagesGenerating            = {}
-
-
-	contextStack               = {}
-	proxies                    = {}
-	proxySources               = {}
-	layoutTemplates            = {}
-	scriptFunctions            = {}
-
-	writtenOutputFiles         = {}
-	writtenOutputUrls          = {}
-	writtenRedirects           = {}
-	outputFileCount            = 0
-	outputFileCounts           = {}
-	outputFileByteCount        = 0
-	outputFilePreservedCount   = 0
-	outputFileSkippedPageCount = 0
-
-	thumbnailInfos             = {}
-
-	scriptEnvironmentGlobals.site = getProtectionWrapper(site, "site")
+	scriptEnvironmentGlobals.site = getProtectionWrapper(site, "site", true)
 	scriptEnvironmentGlobals.data = newDataFolderReader(DIR_DATA)
 
 
@@ -928,12 +894,12 @@ local function buildWebsite()
 		return get(kPath, default, assertTable, "number", vType, "config.%s must be an array of %s.", kPath, vType)
 	end
 
-	site.title             = getV("title",             "",     "string")
-	site.baseUrl           = getV("baseUrl",           "",     "string")
-	site.languageCode      = getV("languageCode",      "",     "string")
-	site.defaultLayout     = getV("defaultLayout",     "page", "string")
+	site.title.v           = getV("title",             "",     "string")
+	site.baseUrl.v         = getV("baseUrl",           "",     "string")
+	site.languageCode.v    = getV("languageCode",      "",     "string")
+	site.defaultLayout.v   = getV("defaultLayout",     "page", "string")
 
-	site.redirections      = getT("redirections",      {},     "string", "string")
+	site.redirections.v    = getT("redirections",      {},     "string", "string")
 
 	ignoreFiles            = getA("ignoreFiles",       {},     "string")
 	ignoreFolders          = getA("ignoreFolders",     {},     "string")
@@ -969,8 +935,8 @@ local function buildWebsite()
 
 	-- Fix details.
 
-	if not site.baseUrl:find"/$" then
-		site.baseUrl = site.baseUrl.."/" -- Note: Could result in simply "/".
+	if not site.baseUrl.v:find"/$" then
+		site.baseUrl.v = site.baseUrl.v.."/" -- Note: Could result in simply "/".
 	end
 
 
@@ -997,7 +963,7 @@ local function buildWebsite()
 
 		elseif TEMPLATE_EXTENSION_SET[extLower] then
 			local page = newPage(pathRel)
-			if page.isPage then
+			if page.isPage.v then
 				table.insert(pages, page)
 			else
 				generateFromTemplateFile(page)
@@ -1037,16 +1003,16 @@ local function buildWebsite()
 
 	-- Redirects.
 	for _, page in ipairs(pages) do
-		if page.isPage and not page._isSkipped then
+		if page.isPage.v and not page._isSkipped then
 			assert(page._isGenerated)
 
-			for _, aliasSlug in ipairs(page.aliases) do
-				generateRedirection(aliasSlug, page.permalink)
+			for _, aliasSlug in ipairs(page.aliases.v) do
+				generateRedirection(aliasSlug, page.permalink.v)
 			end
 		end
 	end
 
-	for slug, targetUrl in pairs(site.redirections) do
+	for slug, targetUrl in pairs(site.redirections.v) do
 		generateRedirection(slug, targetUrl)
 	end
 

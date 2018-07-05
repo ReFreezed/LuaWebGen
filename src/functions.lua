@@ -452,8 +452,8 @@ do
 		local ctx = pushContext("template")
 		ctx.page = page
 		ctx._scriptEnvironmentGlobals.page   = getProtectionWrapper(page, "page")
-		ctx._scriptEnvironmentGlobals.params = page.params
-		ctx._scriptEnvironmentGlobals.P      = page.params
+		ctx._scriptEnvironmentGlobals.params = page.params.v
+		ctx._scriptEnvironmentGlobals.P      = page.params.v
 		ctx.out = out
 		ctx.enableHtmlEncoding = enableHtmlEncoding
 
@@ -654,7 +654,7 @@ end
 
 function createDirectory(path)
 	if path:find"^/" or path:find"^%a:" then
-		errorf(2, "[Internal] Absolute paths are disabled. (%s)", path)
+		errorf(2, "[internal] Absolute paths are disabled. (%s)", path)
 	end
 	if path:find"//" then
 		errorf(2, "Path looks invalid: '%s'", path)
@@ -824,7 +824,7 @@ end
 -- print(toUrl("http://www.example.com/some-path/File~With (Stuff_åäö).jpg?key=value&foo=bar#hash")) -- TEST
 
 function toUrlAbsolute(url)
-	url = url:gsub("^/%f[^/]", site.baseUrl)
+	url = url:gsub("^/%f[^/]", site.baseUrl.v)
 	return toUrl(url)
 end
 
@@ -882,17 +882,13 @@ do
 			return
 		end
 
-		local proxySource = proxySources[t]
-		if proxySource then
+		local obj = protectionedObjects[t]
+		if obj then
 			local fields = {}
 
-			for k, v in pairs(proxySource) do
-				if type(v) == "function" then
-					fields[k] = v()
-				elseif k:find"^_" then
-					-- Private/hidden.
-				else
-					fields[k] = v
+			for k, field in pairs(obj) do
+				if not k:find"^_" then
+					fields[k] = (field.g or NOOP)(field)
 				end
 			end
 
@@ -1029,52 +1025,52 @@ end
 
 
 
-function getProtectionWrapper(obj, name)
-	assertarg(1, obj,  "table")
-	assertarg(2, name, "string")
+function getProtectionWrapper(obj, objName, readonly)
+	assertarg(1, obj,     "table")
+	assertarg(2, objName, "string")
 
-	local proxy = proxies[obj]
-	if proxy then  return proxy  end
+	local wrapper = protectionWrappers[obj]
+	if wrapper then  return wrapper  end
 
-	proxy = setmetatable({}, {
-		__index = function(proxy, k)
-			local v = obj[k]
-			if v == nil or k:find"^_" then
-				errorf(2, "Tried to get non-existent %s field '%s'.", name, tostring(k))
+	wrapper = setmetatable({}, {
+		__index = function(wrapper, k)
+			local field = obj[k]
+
+			if field == nil or k:find"^_" then
+				errorf(2, "Tried to get non-existent %s field '%s'.", objName, tostring(k))
+			elseif not field.g then
+				errorf(2, "[internal] No getter for %s.%s", objName, k)
 			end
 
-			if type(v) == "function" then
-				return v()
-			end
-
-			return v
+			return field:g()
 		end,
 
-		__newindex = function(proxy, k, vNew)
-			local vOld = obj[k]
+		__newindex = function(wrapper, k, vNew)
+			local field = obj[k]
 
-			if vOld == nil or k:find"^_" then
-				errorf(2, "'%s' is not a valid %s field.", tostring(k), name)
-			elseif type(vOld) == "function" then
-				vOld = vOld()
+			if field == nil or k:find"^_" then
+				errorf(2, "'%s' is not a valid %s field.", tostring(k), objName)
+			elseif not field.s or readonly then
+				errorf(2, "Cannot update read-only field %s.%s", objName, k)
 			end
+
+			local vOld = field.v
 
 			if type(vNew) ~= type(vOld) then
-				errorf(2, "Expected %s for %s field '%s' but got %s (%s).", type(vOld), name, k, type(vNew), tostring(vNew))
+				errorf(
+					2, "Expected %s for %s.%s, but got %s. (%s)",
+					type(vOld), objName, k, type(vNew), tostring(vNew)
+				)
 			end
 
-			if type(obj[k]) == "function" then
-				obj[k](vNew)
-			else
-				obj[k] = vNew
-			end
+			field:s(vNew)
 		end,
 	})
 
-	proxies[obj]        = proxy
-	proxySources[proxy] = obj
+	protectionWrappers[obj]      = wrapper
+	protectionedObjects[wrapper] = obj
 
-	return proxy
+	return wrapper
 end
 
 
@@ -1135,18 +1131,18 @@ function generateFromTemplate(page, template, modTime)
 	local outStr
 
 	if extLower == "md" then
-		page.content = parseMarkdownTemplate(page, pathRel, template)
+		page.content.v = parseMarkdownTemplate(page, pathRel, template)
 	elseif extLower == "html" then
-		page.content = parseHtmlTemplate(page, pathRel, template)
+		page.content.v = parseHtmlTemplate(page, pathRel, template)
 	else
-		assert(not page.isPage)
+		assert(not page.isPage.v)
 		outStr = parseOtherTemplate(page, pathRel, template)
 	end
 
-	if page.isPage then
+	if page.isPage.v then
 		if
-			(page.isDraft and not includeDrafts) or -- Is draft?
-			(datetimeToTime(page.publishDate()) > os.time()) -- Is in future?
+			(page.isDraft.v and not includeDrafts) or -- Is draft?
+			(datetimeToTime(page.publishDate:g()) > os.time()) -- Is in future?
 		then
 			outputFileSkippedPageCount = outputFileSkippedPageCount+1
 			pagesGenerating[page._pathOut] = nil
@@ -1158,8 +1154,10 @@ function generateFromTemplate(page, template, modTime)
 		outStr = parseHtmlTemplate(page, layoutPath, layoutTemplate)
 	end
 
+	page.content.v = ""
+
 	assert(outStr)
-	writeOutputFile(page._category, page._pathOut, page.url, outStr, modTime)
+	writeOutputFile(page._category, page._pathOut, page.url.v, outStr, modTime)
 
 	pagesGenerating[page._pathOut] = nil
 	page._isGenerated = true
@@ -1173,7 +1171,7 @@ function generateFromTemplateFile(page)
 	local modTime  = lfs.attributes(path, "modification")
 
 	if modTime then
-		page.date = getDatetime(modTime) -- Default value.
+		page.date.v = getDatetime(modTime) -- Default value.
 	end
 
 	generateFromTemplate(page, template, modTime)
@@ -1359,14 +1357,14 @@ end
 
 -- template, path = getLayoutTemplate( page )
 function getLayoutTemplate(page)
-	local path = F("%s/%s.html", DIR_LAYOUTS, page.layout)
+	local path = F("%s/%s.html", DIR_LAYOUTS, page.layout.v)
 
 	local template = layoutTemplates[path]
 	if template then  return template, path  end
 
 	local template, err = getFileContents(path)
 	if not template then
-		errorf("%s: Could not load layout '%s'. (%s)", page._path, page.layout, err)
+		errorf("%s: Could not load layout '%s'. (%s)", page._path, page.layout.v, err)
 	end
 
 	layoutTemplates[path] = template
@@ -1613,49 +1611,91 @@ function newPage(pathRel)
 		=  (not isPage and permalinkRel)
 		or (permalinkRel == "" and "" or permalinkRel).."index.html"
 
-	local publishDate = ""
-	local page
+	local page; page = {
+		_category    = category,
+		_isGenerated = false,
+		_isSkipped   = false,
+		_path        = pathRel,
+		_pathOut     = pathRelOut,
 
-	local function getOrSetPublishDate(...)
-		if isArgs(...) then
-			assertContext("template", "publishDate", 3)
-			assertarg(1, ..., "string")
-			publishDate = ...
+		isPage = {
+			v = isPage,
+			g = function(field)  return field.v  end,
+		},
+		isIndex = {
+			v = isIndex,
+			g = function(field)  return field.v  end,
+		},
+		isHome = {
+			v = isHome,
+			g = function(field)  return field.v  end,
+		},
 
-		else
-			return publishDate ~= "" and publishDate or page.date
-		end
-	end
+		layout = {
+			v = site.defaultLayout.v,
+			g = function(field)  return field.v  end,
+			s = function(field, layoutName)  field.v = layoutName  end,
+		},
+		title = {
+			v = "",
+			g = function(field)  return field.v  end,
+			s = function(field, title)  field.v = title  end,
+		},
+		content = {
+			v = "",
+			g = function(field)  return field.v  end,
+		},
 
-	page = {
-		_category   = category,
-		_isGenerated= false,
-		_isSkipped  = false,
-		_path       = pathRel,
-		_pathOut    = pathRelOut,
+		date = {
+			v = getDatetime(0),
+			g = function(field)  return field.v  end,
+			s = function(field, datetime)  field.v = datetime  end,
+		},
+		publishDate = {
+			v = "",
+			g = function(field)  return field.v ~= "" and field.v or page.date.v  end,
+			s = function(field, datetime)
+				assertContext("template", "publishDate", 3)
+				assertarg(1, datetime, "string")
+				field.v = datetime
+			end,
+		},
+		isDraft = {
+			v = false,
+			g = function(field)  return field.v  end,
+			s = function(field, state)  field.v = state  end,
+		},
+		isSpecial = {
+			v = not isPage,
+			g = function(field)  return field.v  end,
+			s = function(field, state)  field.v = state  end,
+		},
 
-		isPage      = isPage,
-		isIndex     = isIndex,
-		isHome      = isHome,
+		aliases = {
+			v = {},
+			g = function(field)  return field.v  end,
+			s = function(field, aliases)  field.v = aliases  end,
+		},
 
-		layout      = site.defaultLayout,
-		title       = "",
-		content     = "",
+		url = {
+			v = "/"..permalinkRel,
+			g = function(field)  return field.v  end,
+		},
+		permalink = {
+			v = site.baseUrl.v..(noTrailingSlash and permalinkRel:gsub("/$", "") or permalinkRel),
+			g = function(field)  return field.v  end,
+		},
+		rssLink = {
+			v = "", -- @Incomplete @Doc
+			g = function(field)  return field.v  end,
+		},
 
-		date        = getDatetime(0),
-		publishDate = getOrSetPublishDate, -- @Robustness: Use getters/setters for all fields.
-		isDraft     = false,
-		isSpecial   = not isPage,
-
-		aliases     = {},
-
-		url         = "/"..permalinkRel,
-		permalink   = site.baseUrl..(noTrailingSlash and permalinkRel:gsub("/$", "") or permalinkRel),
-		rssLink     = "", -- @Incomplete @Doc
-
-		params      = {},
+		params = {
+			v = {},
+			g = function(field)  return field.v  end,
+		},
 	}
-	-- print(pathRel, (not isPage and " " or isHome and "H" or isIndex and "I" or "P"), page.permalink) -- DEBUG
+	-- print(pathRel, (not isPage and " " or isHome and "H" or isIndex and "I" or "P"), page.permalink.v) -- DEBUG
 
 	return page
 end

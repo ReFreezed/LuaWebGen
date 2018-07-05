@@ -90,6 +90,9 @@ scriptEnvironmentGlobals = nil
 
 dataReaderPaths          = setmetatable({}, {__mode="k"})
 dataIsPreloaded          = setmetatable({}, {__mode="k"})
+protectionWrappers       = setmetatable({}, {__mode="kv"})
+protectionedObjects      = setmetatable({}, {__mode="kv"})
+
 oncePrints               = {}
 
 _                        = nil -- Dummy.
@@ -97,36 +100,65 @@ _                        = nil -- Dummy.
 
 
 -- Site variables. These are reset in buildWebsite() (including _G.oncePrints).
-site                       = nil
+function resetSiteVariables()
+	site = {
+		title = {
+			v = "",
+			g = function(field) return field.v end,
+		},
+		baseUrl = {
+			v = "/",
+			g = function(field) return field.v end,
+		},
+		languageCode = {
+			v = "",
+			g = function(field) return field.v end,
+		},
+		defaultLayout = {
+			v = "page",
+			g = function(field) return field.v end,
+		},
 
-pages                      = nil
-pagesGenerating            = nil
+		redirections = {
+			v = nil, -- k=slug, v=targetUrl. Init later.
+			g = function(field) return field.v end,
+		},
+	}
 
-contextStack               = nil
-proxies                    = nil
-proxySources               = nil
-layoutTemplates            = nil
-scriptFunctions            = nil
+	ignoreFiles                = nil -- Array. Init later.
+	ignoreFolders              = nil -- Array. Init later.
 
-ignoreFiles                = nil
-ignoreFolders              = nil
+	fileProcessors             = nil -- k=extension, v=function(data, sitePath). Init later.
 
-fileProcessors             = nil
+	outputPathFormat           = "%s"
+	rewriteExcludes            = nil -- Init later.
 
-outputPathFormat           = "%s"
-rewriteExcludes            = nil
+	noTrailingSlash            = false
 
-noTrailingSlash            = false
 
-writtenOutputFiles         = nil
-writtenOutputUrls          = nil
-writtenRedirects           = nil
-outputFileCount            = 0
-outputFileCounts           = nil
-outputFileByteCount        = 0
-outputFilePreservedCount   = 0
-outputFileSkippedPageCount = 0
+	contextStack               = {} -- Array.
+	layoutTemplates            = {} -- k=path, v=template.
+	scriptFunctions            = {} -- k=scriptName, v=function(...).
 
-thumbnailInfos             = nil
+	pages                      = {} -- Array.
+	pagesGenerating            = {} -- Set of 'pathRelOut'.
+
+	writtenOutputFiles         = {} -- Set and array of 'pathOutputRel'.
+	writtenOutputUrls          = {} -- Set of 'url'.
+	writtenRedirects           = {} -- Set of 'slug'.
+	outputFileCount            = 0
+	outputFileCounts           = {} -- k=category, v=count.
+	outputFileByteCount        = 0
+	outputFilePreservedCount   = 0 -- This should only count raw files. Maybe rename the variable?
+	outputFileSkippedPageCount = 0
+
+	thumbnailInfos             = {}
+	--[[
+	table.insert(writtenOutputFiles, pathOutputRel)
+	writtenOutputFiles[pathOutputRel] = true
+	]]
+end
+
+resetSiteVariables()
 
 

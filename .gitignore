@@ -1,5 +1,5 @@
 /*.sublime-*
 /CreateExe.cmd
+/exe.lua
 /TODO.txt
-/webgen.lua
 /wiki/

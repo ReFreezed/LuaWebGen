@@ -1,5 +1,6 @@
 {{
 page.title = 'Some "tests"<hr>'
+
 P.foo = "bar"
 }}
 
