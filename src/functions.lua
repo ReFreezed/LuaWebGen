@@ -10,12 +10,13 @@
 --=
 --==============================================================
 
-	assert, assertf, assertType, assertTable, assertarg
+	assertf, assertType, assertTable, assertarg
+	cleanupPath
 	createDirectory, isDirectoryEmpty, removeEmptyDirectories
 	createThumbnail
 	datetimeToTime, getDatetime
 	encodeHtmlEntities
-	error, errorf, fileerror, errorInGeneratedCodeFromTemplate
+	errorf, fileerror, errorInGeneratedCodeFromTemplate
 	F, formatBytes, formatTemplate
 	generateFromTemplate, generateFromTemplateFile, generateRedirection
 	generatorMeta
@@ -27,9 +28,11 @@
 	getProtectionWrapper
 	getTimezone, getTimezoneOffsetString, getTimezoneOffset
 	gsub2
+	handleError, isErrorObject
 	htaccessRewriteEscapeRegex, htaccessRewriteEscapeReplacement
 	indexOf, itemWith, itemWithAll
 	insertLineNumberCode
+	ipairsr, iprev
 	isAny
 	isArgs
 	isFile, isDirectory
@@ -38,9 +41,9 @@
 	newDataFolderReader, isDataFolderReader, preloadData
 	newPage
 	newStringBuilder
+	pack
 	parseMarkdownTemplate, parseHtmlTemplate, parseOtherTemplate
 	pathToSitePath, sitePathToPath
-	pcall
 	print, printOnce, printf, printfOnce, log, logprint, logprintOnce, logVerbose
 	pushContext, popContext, assertContext, getContext
 	removeItem
@@ -49,7 +52,6 @@
 	serializeLua
 	sortNatural
 	splitString
-	storeArgs
 	toNormalPath, toWindowsPath
 	tostringForTemplates
 	toUrl, toUrlAbsolute, urlize, toPrettyUrl
@@ -448,7 +450,8 @@ do
 
 		local out = {}
 
-		local chunk, err = loadstring(luaCode)
+		local fullPath = F("%s/%s/%s", lfs.currentdir(), DIR_CONTENT, path)
+		local chunk, err = loadstring(luaCode, fullPath)
 		if not chunk then
 			errorInGeneratedCodeFromTemplate(path, luaCode, err)
 		end
@@ -463,7 +466,7 @@ do
 		ctx.out = out
 		ctx.enableHtmlEncoding = enableHtmlEncoding
 
-		local ok, err = pcall(chunk)
+		local ok, err = xpcall(chunk, handleError)
 
 		popContext("template")
 
@@ -513,15 +516,6 @@ end
 
 
 
--- error( errorMessage [, level=1 ] )
-function error(err, level)
-	log(debug.traceback("Error: "..tostring(err)))
-
-	if logFile then  logFile:flush()  end
-
-	_error(err, (level or 1)+1)
-end
-
 -- errorf( [ level=1, ] formatString, ...)
 function errorf(level, s, ...)
 	if type(level) == "number" then
@@ -544,25 +538,40 @@ function fileerror(path, contents, pos, s, ...)
 end
 
 function errorInGeneratedCodeFromTemplate(path, genCode, errInGenCode)
-	local lnInGenCode, err
-	if type(errInGenCode) == "string" then
-		lnInGenCode, err = errInGenCode:match'^%[string ".-"%]:(%d+): (.+)'
+	local fullPath = F("%s/%s/%s", cleanupPath(lfs.currentdir()), DIR_CONTENT, path)
+
+	local function fixLineNumber(s, fullPath, genCode)
+		if s:sub(1, #fullPath+1) ~= fullPath..":" then
+			return s, false
+		end
+
+		local lnInGenCode  = tonumber(s:match":(%d+):")
+		local lnInTemplate = 0
+
+		for line in genCode:gmatch"([^\n]*)\n?" do
+			lnInGenCode  = lnInGenCode-1
+			lnInTemplate = tonumber(line:match"^%-%- @LINE(%d+)$") or lnInTemplate
+
+			if lnInGenCode <= 1 then  break  end
+		end
+
+		s = s:gsub(":(%d+):", ":"..lnInTemplate..":", 1)
+		return s, true
 	end
 
-	local lnInTemplate = 0
+	errInGenCode.message = fixLineNumber(errInGenCode.message, fullPath, genCode)
 
-	if not lnInGenCode then
-		err = tostring(errInGenCode)
+	local didFix
+	for _, i in ipairsr(errInGenCode.stringLines) do
+		errInGenCode.stack[i], didFix = fixLineNumber(errInGenCode.stack[i], fullPath, genCode)
 
-	else
-		for line in genCode:gmatch"([^\n]*)\n?" do
-			lnInGenCode = lnInGenCode-1
-			lnInTemplate = tonumber(line:match"^%-%- @LINE(%d+)$") or lnInTemplate
-			if lnInGenCode <= 1 then  break  end
+		if didFix then
+			-- Prevent fixing line numbers more than once.
+			table.remove(errInGenCode.stringLines, i)
 		end
 	end
 
-	fileerror(path, nil, lnInTemplate, "%s", err)
+	error(errInGenCode)
 end
 
 
@@ -1252,13 +1261,6 @@ end
 
 
 
-function assert(...)
-	if not select(1, ...) then
-		error(select(2, ...) or "assertion failed!", 2)
-	end
-	return ...
-end
-
 function assertf(v, err, ...)
 	if not v then
 		if select("#", ...) > 0 then  err = err:format(...)  end
@@ -1364,31 +1366,7 @@ end
 
 
 
-function pcall(...)
-	local savedAssert = assert
-	local savedError  = error
-	local savedPcall  = pcall
-
-	assert = _assert
-	error  = _error
-	pcall  = _pcall
-
-	local args = storeArgs(_pcall(...))
-
-	assert = savedAssert
-	error  = savedError
-	pcall  = savedPcall
-
-	if not args[1] then
-		return false, args[2]
-	else
-		return unpack(args, 1, args.n)
-	end
-end
-
-
-
-function storeArgs(...)
+function pack(...)
 	return {n=select("#", ...), ...}
 end
 
@@ -1969,6 +1947,113 @@ end
 
 function isArgs(...)
 	return select("#", ...) > 0
+end
+
+
+
+do
+	local errMt = {
+		__tostring = function(err)
+			return
+				err.stack[1]
+				and F(
+					"ERROR: %s\nstack traceback:\n\t%s\n",
+					err.message, table.concat(err.stack, "\n\t")
+				)
+				or F("ERROR: %s\n", err.message)
+		end,
+	}
+
+	function handleError(err)
+		if isErrorObject(err) then  return err  end
+
+		local message     = tostring(err)
+		local stack       = {}
+		local stringLines = {}
+
+		local didFixMessage = false
+
+		for i = 1, math.huge do
+			if i > ERROR_TRACEBACK_LINES then
+				stack[i] = "(...)"
+				-- table.insert(stack, "(...)")
+				break
+			end
+
+			local info = debug.getinfo(1+i, "nSl")
+			if not info then  break  end
+
+			local isStr      = info.short_src:find"^%[string \"" ~= nil
+			local sourceName = cleanupPath(isStr and info.source or info.short_src)
+
+			if isStr then
+				table.insert(stringLines, i)
+
+				if not didFixMessage and message:sub(1, #info.short_src) == info.short_src then
+					message = sourceName..message:sub(#info.short_src+1)
+					didFixMessage = true
+				end
+			end
+
+			local b = newStringBuilder()
+			b("%s:", sourceName)
+
+			if info.currentline > 0 then  b("%d:", info.currentline)  end
+
+			if info.name then
+				b(" in function '%s'", info.name)
+			elseif info.what == "main" then
+				b(" in main chunk")
+			elseif info.what == "C" or info.what == "tail" then
+				b(" ?")
+			else
+				b(" in function <%s:%d>", getFilename(sourceName), info.linedefined)
+			end
+
+			stack[i] = b()
+			-- table.insert(stack, b())
+		end
+
+		while stack[#stack] == "[C]: ?" do
+			stack[#stack] = nil
+		end
+
+		if not didFixMessage then
+			message = message:gsub("^.-:%d+: ", cleanupPath)
+		end
+
+		err = setmetatable({message=message, stack=stack, stringLines=stringLines}, errMt)
+		return err
+	end
+
+	function isErrorObject(v)
+		return type(v) == "table" and getmetatable(v) == errMt
+	end
+end
+
+
+
+function cleanupPath(someKindOfPath)
+	local path = toNormalPath(someKindOfPath)
+
+	local count
+	repeat
+		path, count = path:gsub("/[^/]+/%.%./", "/", 1) -- Not completely fool proof!
+	until count == 0
+
+	return path
+end
+
+
+
+function ipairsr(t)
+	return iprev, t, #t+1
+end
+
+function iprev(t, i)
+	i = i-1
+	local v = t[i]
+	if v ~= nil then  return i, v  end
 end
 
 

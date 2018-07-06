@@ -37,4 +37,18 @@ require"globals"
 require"functions"
 
 _G.args = {...}
-require"app"
+
+local ok, err = xpcall(
+	function()
+		require"app"
+	end,
+	handleError
+)
+
+if not ok then
+	logprint(tostring(err))
+
+	if logFile then  logFile:close()  end
+
+	os.exit(1) -- Error.
+end

@@ -10,7 +10,7 @@
 --=
 --============================================================]]
 
-_WEBGEN_VERSION = "0.14.0"
+_WEBGEN_VERSION = "0.15.0"
 
 
 
@@ -24,6 +24,8 @@ DIR_OUTPUT             = "output"
 DIR_SCRIPTS            = "scripts"
 
 AUTOBUILD_MIN_INTERVAL = 1.00
+
+ERROR_TRACEBACK_LINES  = 25
 
 
 
