@@ -37,7 +37,7 @@
 	markdownToHtml
 	newDataFolderReader, isDataFolderReader, preloadData
 	newPage
-	newStringBuffer
+	newStringBuilder
 	parseMarkdownTemplate, parseHtmlTemplate, parseOtherTemplate
 	pathToSitePath, sitePathToPath
 	pcall
@@ -1611,14 +1611,14 @@ end
 
 
 
-function newStringBuffer()
-	local buffer = {}
+function newStringBuilder()
+	local strings = {}
 
 	return function(...)
-		if select("#", ...) == 0 then  return table.concat(buffer)  end
+		if select("#", ...) == 0 then  return table.concat(strings)  end
 
 		local s = select("#", ...) == 1 and assertType(..., "string") or F(...)
-		table.insert(buffer, s)
+		table.insert(strings, s)
 	end
 end
 

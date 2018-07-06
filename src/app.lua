@@ -315,40 +315,40 @@ scriptEnvironmentGlobals = {
 	-- Utility functions.
 	----------------------------------------------------------------
 
-	ceil           = math.ceil,
-	date           = os.date,
-	entities       = encodeHtmlEntities,
-	errorf         = errorf,
-	F              = F,
-	find           = itemWith,
-	findAll        = itemWithAll,
-	floor          = math.floor,
-	formatTemplate = formatTemplate,
-	generatorMeta  = generatorMeta,
-	getFilename    = getFilename,
-	getKeys        = getKeys,
-	indexOf        = indexOf,
-	isAny          = isAny,
-	markdown       = markdownToHtml,
-	max            = math.max,
-	min            = math.min,
-	newBuffer      = newStringBuffer,
-	prettyUrl      = toPrettyUrl,
-	printf         = printf,
-	printfOnce     = printfOnce,
-	printOnce      = printOnce,
-	removeItem     = removeItem,
-	round          = round,
-	sortNatural    = sortNatural,
-	split          = splitString,
-	toLua          = serializeLua,
-	toTime         = datetimeToTime,
-	trim           = trim,
-	trimNewlines   = trimNewlines,
-	url            = toUrl,
-	urlAbs         = toUrlAbsolute,
-	urlExists      = urlExists,
-	urlize         = urlize,
+	ceil             = math.ceil,
+	date             = os.date,
+	entities         = encodeHtmlEntities,
+	errorf           = errorf,
+	F                = F,
+	find             = itemWith,
+	findAll          = itemWithAll,
+	floor            = math.floor,
+	formatTemplate   = formatTemplate,
+	generatorMeta    = generatorMeta,
+	getFilename      = getFilename,
+	getKeys          = getKeys,
+	indexOf          = indexOf,
+	isAny            = isAny,
+	markdown         = markdownToHtml,
+	max              = math.max,
+	min              = math.min,
+	newStringBuilder = newStringBuilder, newBuffer = newStringBuilder,
+	prettyUrl        = toPrettyUrl,
+	printf           = printf,
+	printfOnce       = printfOnce,
+	printOnce        = printOnce,
+	removeItem       = removeItem,
+	round            = round,
+	sortNatural      = sortNatural,
+	split            = splitString,
+	toLua            = serializeLua,
+	toTime           = datetimeToTime,
+	trim             = trim,
+	trimNewlines     = trimNewlines,
+	url              = toUrl,
+	urlAbs           = toUrlAbsolute,
+	urlExists        = urlExists,
+	urlize           = urlize,
 
 	chooseExistingFile = function(sitePathWithoutExt, exts)
 		local pathWithoutExt = sitePathToPath(sitePathWithoutExt)
@@ -457,7 +457,7 @@ scriptEnvironmentGlobals = {
 		local pathImageRel = sitePathToPath(sitePathImageRel)
 		local thumbInfo = createThumbnail(pathImageRel, thumbW, thumbH, 2)
 
-		local b = newStringBuffer()
+		local b = newStringBuilder()
 		if isLink then  b('<a href="%s" target="_blank">', toUrl("/"..pathImageRel))  end
 		b('<img src="%s" width="%d" height="%d" alt="">', toUrl("/"..thumbInfo.path), thumbInfo.width, thumbInfo.height)
 		if isLink then  b('</a>')  end
@@ -1032,7 +1032,7 @@ local function buildWebsite()
 		local contents = getFileContents(DIR_CONTENT.."/.htaccess") or ""
 
 		if htaccessRedirect and next(writtenRedirects) then
-			local b = newStringBuffer()
+			local b = newStringBuilder()
 			b("<IfModule mod_rewrite.c>\n")
 			b("\tRewriteEngine On\n")
 
