@@ -10,7 +10,7 @@
 --=
 --============================================================]]
 
-_WEBGEN_VERSION = "0.15.0"
+_WEBGEN_VERSION = "0.16.0"
 
 
 
@@ -109,7 +109,7 @@ function resetSiteVariables()
 		},
 
 		redirections = {
-			v = nil, -- k=slug, v=targetUrl. Init later.
+			v = nil, -- k=url, v=targetUrl. Init later.
 			g = function(field) return field.v end,
 		},
 	}
@@ -135,7 +135,8 @@ function resetSiteVariables()
 
 	writtenOutputFiles         = {} -- Set and array of 'pathOutputRel'.
 	writtenOutputUrls          = {} -- Set of 'url'.
-	writtenRedirects           = {} -- Set of 'slug'.
+	writtenRedirects           = {} -- k=url, v=targetUrl.
+	unwrittenRedirects         = {} -- k=url, v=targetUrl.
 	outputFileCount            = 0
 	outputFileCounts           = {} -- k=category, v=count.
 	outputFileByteCount        = 0
@@ -143,10 +144,6 @@ function resetSiteVariables()
 	outputFileSkippedPageCount = 0
 
 	thumbnailInfos             = {}
-	--[[
-	table.insert(writtenOutputFiles, pathOutputRel)
-	writtenOutputFiles[pathOutputRel] = true
-	]]
 end
 
 resetSiteVariables()

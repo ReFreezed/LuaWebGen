@@ -283,7 +283,7 @@ scriptEnvironmentGlobals = {
 
 	pairs = function(t)
 		if isDataFolderReader(t) then
-			return scriptEnvironmentGlobals.pairsSorted(t)
+			return pairsSorted(preloadData(t))
 		end
 
 		return pairs(t)
@@ -579,16 +579,7 @@ scriptEnvironmentGlobals = {
 	end,
 
 	pairsSorted = function(t)
-		if isDataFolderReader(t) then  preloadData(t)  end
-
-		local keys = sortNatural(getKeys(t))
-		local i    = 0
-
-		return function()
-			i = i+1
-			local k = keys[i]
-			if k then  return k, t[k]  end
-		end
+		return pairsSorted(isDataFolderReader(t) and preloadData(t) or t)
 	end,
 
 	validateUrls = function(urls)
@@ -781,7 +772,7 @@ scriptEnvironmentGlobals = {
 		local oldLen = #s
 
 		s = s
-			:gsub("^\t+",      "") -- Remove indentations.
+			:gsub("\n\t+",     "\n") -- Remove indentations.
 			:gsub("\n#[^\n]*", "\n") :gsub("^#[^\n]*", "") -- Remove all comments.
 			:gsub("\n\n+",     "\n") :gsub("^\n",      "") -- Remove empty lines.
 
@@ -917,14 +908,13 @@ local function buildWebsite()
 
 	fileProcessors         = getT("processors",        {},     "string", "function")
 
-	local htaccessRedirect = getV("htaccess.redirect", false,  "boolean")
+	local htaRedirect      = getV("htaccess.redirect", false,  "boolean")
+	local htaWww           = getV("htaccess.www",      nil,    "boolean")
+	local htaErrors        = getT("htaccess.errors",   {},     "number", "string")
+	local htaPrettyUrlDir  = getV("htaccess.XXX_prettyUrlDirectory", "", "string")
+	local htaDenyAccess    = getA("htaccess.XXX_denyDirectAccess", {}, "string")
 	local htaccess         = getT("htaccess",          nil,    "string")
 	local handleHtaccess   = htaccess ~= nil
-	--[[
-	local handleHtaccess   = getV("htaccess",          false,  "boolean")
-	local htaccessWww      = getV("htaccessWww",       nil,    "boolean")
-	local htaccessErrors   = getT("htaccessErrors",    {},     "number", "string")
-	--]]
 
 	outputPathFormat       = get("rewriteOutputPath", "%s", NOOP)
 	assert(isAny(type(outputPathFormat), "string","function"), "config.rewriteOutputPath must be a string or a function.")
@@ -1018,55 +1008,152 @@ local function buildWebsite()
 		if page.isPage.v and not page._isSkipped then
 			assert(page._isGenerated)
 
-			for _, aliasSlug in ipairs(page.aliases.v) do
-				generateRedirection(aliasSlug, page.permalink.v)
+			for _, url in ipairs(page.aliases.v) do
+				generateRedirection(url, page.permalink.v)
 			end
 		end
 	end
 
-	for slug, targetUrl in pairs(site.redirections.v) do
-		generateRedirection(slug, targetUrl)
+	for url, targetUrl in pairs(site.redirections.v) do
+		generateRedirection(url, targetUrl)
 	end
 
 	-- Htaccess.
 	if handleHtaccess then
 		local contents = getFileContents(DIR_CONTENT.."/.htaccess") or ""
 
-		if htaccessRedirect and next(writtenRedirects) then
-			local b = newStringBuilder()
-			b("<IfModule mod_rewrite.c>\n")
-			b("\tRewriteEngine On\n")
+		-- Rewriting.
+		--------------------------------
 
-			for _, slug in ipairs(sortNatural(getKeys(writtenRedirects))) do
-				local targetUrl = writtenRedirects[slug]
+		local escapeTestStr = htaccessRewriteEscapeTestString
+		local escapeCondPat = htaccessRewriteEscapeCondPattern
+		local escapeRuleSub = htaccessRewriteEscapeRuleSubstitution
 
-				b('\tRewriteCond %%{REQUEST_URI} "^%s$"\n', htaccessRewriteEscapeRegex(slug))
-				b('\tRewriteRule .* "%s" [R=301,L]\n', htaccessRewriteEscapeReplacement(targetUrl))
+		local b = newStringBuilder()
 
-				--[[ Rewrite examples.  @Incomplete: Queries.
+		b("<IfModule mod_rewrite.c>\n")
+		b("\tRewriteEngine On\n")
+		b("\n")
 
-				# from /dogs/index.php
-				# to   /dogs
-				RewriteCond  %{REQUEST_URI}   ^/dogs/index\.php$
-				RewriteRule  .*               /dogs  [R=301,L]
+		-- https://www.askapache.com/htaccess/http-https-rewriterule-redirect/#comment-3198820729
+		b("\t# Determine protocol.\n")
+		b("\tRewriteCond %{HTTPS}s (?:^on(s)$|)\n")
+		b("\tRewriteRule ^ - [env=protocol:http%1]\n")
+		b("\n")
 
-				# from /dogs/info.php?p=mr_bark
-				# to   /dogs/mr-bark
-				RewriteCond  %{REQUEST_URI}   ^/dogs/info\.php$
-				RewriteCond  %{QUERY_STRING}  ^p=mr_bark$
-				RewriteRule  .*               /dogs/mr-bark?  [R=301,L]
-				]]
+		local rewriteStartIndex = #b+1
+
+		if htaWww ~= nil then
+			if htaWww then
+				b("\t# Add www.\n")
+				b("\tRewriteCond %{HTTP_HOST} !^www\\. [NC]\n")
+				b("\tRewriteRule .* %{ENV:protocol}://www.%{HTTP_HOST}%{REQUEST_URI} [R=301,L]\n")
+			else
+				b("\t# Remove www.\n")
+				b("\tRewriteCond %{HTTP_HOST} ^www\\.(.*)\n")
+				b("\tRewriteRule .* %{ENV:protocol}://%1%{REQUEST_URI} [R=301,L]\n")
+			end
+			b("\n")
+		end
+
+		if htaRedirect and (next(writtenRedirects) or next(unwrittenRedirects)) then
+			b("\t# Redirect moved resources.\n")
+
+			for url, targetUrl in pairsSorted(writtenRedirects) do
+				b('\tRewriteCond %%{REQUEST_URI} "=%s"\n', url)
+				b('\tRewriteRule .* "%s" [R=301,L]\n', escapeRuleSub(targetUrl))
+			end
+
+			for url, targetUrl in pairsSorted(unwrittenRedirects) do
+				local slug, query = url:match"^(.-)%?(.*)$"
+				if not slug then  slug = url  end
+
+				b('\tRewriteCond %%{REQUEST_URI} "=%s"\n', slug)
+
+				if query then
+					b('\tRewriteCond %%{QUERY_STRING} "=%s"\n', query)
+				end
+
+				b(
+					'\tRewriteRule .* "%s%s" [R=301,L]\n',
+					escapeRuleSub(targetUrl),
+					(not query or targetUrl:find("?", 1, true)) and "" or "?"
+				)
+			end
+
+			b("\n")
+		end
+
+		if noTrailingSlash then
+			b("\t# Remove trailing slash.\n")
+			b("\tRewriteCond %{REQUEST_FILENAME} !-d\n")
+			b("\tRewriteCond %{REQUEST_URI} ./$\n")
+			b("\tRewriteRule (.*)/$ /$1 [R=301,L]\n")
+			b("\n")
+		end
+
+		if htaDenyAccess[1] then
+			b("\t# Deny direct access to some directories.\n")
+			b("\tRewriteCond %{ENV:REDIRECT_STATUS} ^$\n")
+
+			for i, urlPrefix in ipairs(htaDenyAccess) do
+				b(
+					'\tRewriteCond %%{REQUEST_URI} "^%s"%s\n',
+					escapeCondPat(urlPrefix),
+					htaDenyAccess[i+1] and " [OR]" or ""
+				)
+			end
+
+			b("\tRewriteRule ^ - [R=404,L]\n")
+			b("\n")
+		end
+
+		if htaPrettyUrlDir ~= "" then
+			b('\t# Point to "%s" directory.\n', htaPrettyUrlDir)
+			b("\tRewriteCond %{REQUEST_FILENAME} !-f\n")
+			b('\tRewriteCond "%%{DOCUMENT_ROOT}/%s/%%{REQUEST_URI}" -f\n', escapeTestStr(htaPrettyUrlDir))
+			b('\tRewriteRule (.*) "/%s/$1" [L]\n', escapeRuleSub(htaPrettyUrlDir))
+			b("\n")
+
+			b("\tRewriteCond %{REQUEST_FILENAME} !-f\n")
+			b("\tRewriteCond %{REQUEST_URI} !^/$\n")
+			b('\tRewriteCond "%%{DOCUMENT_ROOT}/%s/%%{REQUEST_URI}/" -d\n', escapeTestStr(htaPrettyUrlDir))
+			b('\tRewriteRule (.*) "/%s/$1/" [L]\n', escapeRuleSub(htaPrettyUrlDir))
+			b("\n")
+		end
+
+		if b[rewriteStartIndex] then
+			if b[#b] == "\n" then
+				b[#b] = nil
 			end
 
 			b("</IfModule>\n")
+
 			local directives = b()
 
 			local count
-			contents, count = gsub2(contents, "# *:webgen%.redirections: *\n", directives)
+			contents, count = gsub2(contents, "# *:webgen%.rewriting: *\n", directives)
 			if count == 0 then
 				contents = F("%s\n%s", contents, directives)
 			end
 		end
+
+		-- Error documents.
+		--------------------------------
+
+		if next(htaErrors) then
+			local b = newStringBuilder()
+
+			for errCode, target in pairsSorted(htaErrors) do
+				-- The target may be a URL or HTML code.
+				b('ErrorDocument %d %s\n', errCode, target)
+			end
+			b("\n")
+
+			contents = F("%s\n%s", contents, b())
+		end
+
+		--------------------------------
 
 		writeOutputFile("otherRaw", ".htaccess", "/.htaccess", contents)
 	end

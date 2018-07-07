@@ -1,7 +1,7 @@
 # Testing LuaWebGen's interference with existing .htaccess file.
 
-ErrorDocument 404 "<html><body>Error 404: Not found!</body></html>
+ErrorDocument 404 "<html><head><title>Error 404</title></head><body>Error 404: Not found!</body></html>
 
-# :webgen.redirections:
+# :webgen.rewriting:
 
-ErrorDocument 403 "<html><body>Error 403: Forbidden!</body></html>
+ErrorDocument 403 "<html><head><title>Error 403</title></head><body>Error 403: Forbidden!</body></html>

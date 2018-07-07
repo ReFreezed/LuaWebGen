@@ -1,7 +1,7 @@
 # LuaWebGen
-![](https://img.shields.io/badge/beta-0.15-green.svg)
+![](https://img.shields.io/badge/version-0.16-green.svg)
 
-Static website generator in Lua 5.1. Somewhat inspired by [Hugo](https://gohugo.io/). Currently in **beta**.
+Static website generator in Lua 5.1. Somewhat inspired by [Hugo](https://gohugo.io/).
 
 Webpages are generated using HTML and markdown *templates* with embedded Lua code. CSS files can also include code.
 

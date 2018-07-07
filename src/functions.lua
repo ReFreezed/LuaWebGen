@@ -29,7 +29,7 @@
 	getTimezone, getTimezoneOffsetString, getTimezoneOffset
 	gsub2
 	handleError, isErrorObject
-	htaccessRewriteEscapeRegex, htaccessRewriteEscapeReplacement
+	htaccessRewriteEscapeTestString, htaccessRewriteEscapeCondPattern, htaccessRewriteEscapeRuleSubstitution
 	indexOf, itemWith, itemWithAll
 	insertLineNumberCode
 	ipairsr, iprev
@@ -42,6 +42,7 @@
 	newPage
 	newStringBuilder
 	pack
+	pairsSorted
 	parseMarkdownTemplate, parseHtmlTemplate, parseOtherTemplate
 	pathToSitePath, sitePathToPath
 	print, printOnce, printf, printfOnce, log, logprint, logprintOnce, logVerbose
@@ -1032,7 +1033,7 @@ function isDataFolderReader(t)
 end
 
 function preloadData(dataFolderReader)
-	if dataIsPreloaded[dataFolderReader] then  return  end
+	if dataIsPreloaded[dataFolderReader] then  return dataFolderReader  end
 
 	for name in lfs.dir(dataReaderPaths[dataFolderReader]) do
 		local path     = dataReaderPaths[dataFolderReader].."/"..name
@@ -1051,6 +1052,7 @@ function preloadData(dataFolderReader)
 	end
 
 	dataIsPreloaded[dataFolderReader] = true
+	return dataFolderReader
 end
 
 
@@ -1215,24 +1217,32 @@ function generateFromTemplateFile(page)
 	generateFromTemplate(page, template, modTime)
 end
 
-function generateRedirection(slug, targetUrl)
-	assertType(slug, "string")
-	assertType(targetUrl, "string")
+function generateRedirection(url, targetUrl)
+	assertarg(1, url,       "string")
+	assertarg(2, targetUrl, "string")
 
-	if not slug:find"^/" then
-		errorf(2, "URL slugs must begin with a '/'. (%s)", slug)
-	end
-	if slug:find"?" then
-		errorf(2, "Queries are not supported in redirections yet. (%s)", slug) -- @Incomplete
+	if not url:find"^/" then
+		errorf(2, "Redirection URLs must begin with a '/'. (%s)", url)
 	end
 
-	if writtenRedirects[slug] == targetUrl then
-		errorf(2, "Duplicate redirect from '%s' to '%s'.", slug, targetUrl)
-	elseif writtenRedirects[slug] then
-		errorf(2, "Duplicate redirect from '%s' (to different targets).", slug)
+	if url:find"?" or not url:find"/$" then
+		if unwrittenRedirects[url] == targetUrl then
+			errorf(2, "Duplicate redirect from '%s' to '%s'.", url, targetUrl)
+		elseif unwrittenRedirects[url] then
+			errorf(2, "Duplicate redirect from '%s' (to different targets).", url)
+		end
+
+		unwrittenRedirects[url] = targetUrl
+		return
 	end
 
-	local pathRel  = (slug:gsub("/$", "").."/index.html"):gsub("^/", "")
+	if writtenRedirects[url] == targetUrl then
+		errorf(2, "Duplicate redirect from '%s' to '%s'.", url, targetUrl)
+	elseif writtenRedirects[url] then
+		errorf(2, "Duplicate redirect from '%s' (to different targets).", url)
+	end
+
+	local pathRel  = url:gsub("/?$", "/index.html", 1):gsub("^/", "")
 	local contents = formatTemplate(
 		[=[
 			<!DOCTYPE html>
@@ -1250,13 +1260,13 @@ function generateRedirection(slug, targetUrl)
 				</body>
 			</html>
 		]=], {
-			url        =               encodeHtmlEntities(targetUrl) ,
-			urlPercent = toUrlAbsolute(encodeHtmlEntities(targetUrl)),
+			url        = encodeHtmlEntities(              targetUrl ),
+			urlPercent = encodeHtmlEntities(toUrlAbsolute(targetUrl)),
 		}
 	)
 
-	writeOutputFile("page", pathRel, slug, contents)
-	writtenRedirects[slug] = targetUrl
+	writeOutputFile("page", pathRel, url, contents)
+	writtenRedirects[url] = targetUrl
 end
 
 
@@ -1589,14 +1599,20 @@ end
 
 
 
-function newStringBuilder()
-	local strings = {}
+-- builder = newStringBuilder( )
+do
+	local mt = {
+		__call = function(b, ...)
+			local len = select("#", ...)
+			if len == 0 then  return table.concat(b)  end
 
-	return function(...)
-		if select("#", ...) == 0 then  return table.concat(strings)  end
+			local s = len == 1 and tostring(...) or F(...)
+			table.insert(b, s)
+		end,
+	}
 
-		local s = select("#", ...) == 1 and assertType(..., "string") or F(...)
-		table.insert(strings, s)
+	function newStringBuilder()
+		return setmetatable({}, mt)
 	end
 end
 
@@ -1619,7 +1635,7 @@ function newPage(pathRel)
 
 	local permalinkRel = (
 		not isPage and pathRel
-		or isHome and ""
+		or isHome  and ""
 		or isIndex and pathRel:sub(1, -#filename-1)
 		or pathRel:sub(1, -#ext-2).."/"
 	)
@@ -1903,19 +1919,27 @@ end
 
 
 
--- string = htaccessRewriteEscapeRegex( string [, isWhole=false ] )
-function htaccessRewriteEscapeRegex(s, isWhole)
-	if isWhole and s == "-" then  return "\\-"  end
-
-	s = s:gsub('[.+*?^$()[%]\\"]', "\\%0")
-
-	if isWhole then  s = s:gsub("^!", "\\!")  end
+-- string = htaccessRewriteEscapeTestString( string )
+function htaccessRewriteEscapeTestString(s)
+	s = s:gsub('[$%%\\"]', "\\%0")
 
 	return s
 end
 
-function htaccessRewriteEscapeReplacement(s)
-	return (s:gsub('[&%\\"]', "\\%0"))
+-- string = htaccessRewriteEscapeCondPattern( string [, isWhole=false ] )
+function htaccessRewriteEscapeCondPattern(s, isWhole)
+	s = s:gsub('[$%%\\".+*?^()[%]]', "\\%0")
+
+	if isWhole then  s = s:gsub("^[!=<>]", "\\%0")  end
+
+	return s
+end
+
+-- string = htaccessRewriteEscapeRuleSubstitution( string [, isWhole=false ] )
+function htaccessRewriteEscapeRuleSubstitution(s, isWhole)
+	if isWhole and s == "-" then  return "\\-"  end
+
+	return (s:gsub('[$%%\\"]', "\\%0"))
 end
 
 
@@ -2054,6 +2078,19 @@ function iprev(t, i)
 	i = i-1
 	local v = t[i]
 	if v ~= nil then  return i, v  end
+end
+
+
+
+function pairsSorted(t)
+	local keys = sortNatural(getKeys(t))
+	local i    = 0
+
+	return function()
+		i = i+1
+		local k = keys[i]
+		if k ~= nil then  return k, t[k]  end
+	end
 end
 
 
