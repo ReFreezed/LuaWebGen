@@ -1,3 +1,7 @@
+#!/bin/sh
+_=[[
+exec lua "$0" "$@"
+]]
 --[[============================================================
 --=
 --=  LuaWebGen - static website generator in Lua!

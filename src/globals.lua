@@ -10,7 +10,7 @@
 --=
 --============================================================]]
 
-_WEBGEN_VERSION = "0.16.0"
+_WEBGEN_VERSION = "0.17.0"
 
 
 
@@ -96,7 +96,7 @@ function resetSiteVariables()
 			g = function(field) return field.v end,
 		},
 		baseUrl = {
-			v = "/",
+			v = "",
 			g = function(field) return field.v end,
 		},
 		languageCode = {
@@ -118,6 +118,8 @@ function resetSiteVariables()
 	ignoreFolders              = nil -- Array. Init later.
 
 	fileProcessors             = nil -- k=extension, v=function(data, sitePath). Init later.
+
+	htaErrors                  = nil -- k=httpStatusCode, v=document. Init later.
 
 	outputPathFormat           = "%s"
 	rewriteExcludes            = nil -- Init later.

@@ -102,15 +102,16 @@ if command == "new" then
 			local contents = formatTemplate(
 				[=[
 					return {
-						title         = :titleQuoted:,
-						baseUrl       = "http://example.com/",
+						title         = :title:,
+						baseUrl       = "http://:host:/",
 						languageCode  = "en",
 
 						ignoreFiles   = {"%.tmp$"},
 						ignoreFolders = {"^%."},
 					}
 				]=], {
-					titleQuoted = F("%q", title),
+					title = F("%q", title),
+					host  = title:find"^[%w.]+%.%a+$" and title:lower() or "example.com",
 				}
 			)
 
@@ -842,23 +843,21 @@ local function buildWebsite()
 	resetSiteVariables()
 
 	scriptEnvironmentGlobals.site = getProtectionWrapper(site, "site")
-	scriptEnvironmentGlobals.data = newDataFolderReader(DIR_DATA)
+	scriptEnvironmentGlobals.data = newDataFolderReader(DIR_DATA, true)
 
 
 
 	-- Read config.
 	----------------------------------------------------------------
 
-	local config
-
 	if not isFile"config.lua" then
-		config = {}
-	else
-		local chunk = assert(loadfile"config.lua")
-		setfenv(chunk, scriptEnvironment)
-		config = chunk()
-		assertTable(config, nil, nil, "config.lua must return a table.")
+		error(makeErrorf("%s:0: %s", toNormalPath(lfs.currentdir()), "Missing config.lua"))
 	end
+
+	local chunk = assert(loadfile"config.lua")
+	setfenv(chunk, scriptEnvironment)
+	local config = chunk()
+	assertTable(config, nil, nil, "config.lua must return a table.")
 
 	local function get(kPath, default, assertFunc, ...)
 		local v = config
@@ -909,8 +908,9 @@ local function buildWebsite()
 	fileProcessors         = getT("processors",        {},     "string", "function")
 
 	local htaRedirect      = getV("htaccess.redirect", false,  "boolean")
-	local htaWww           = getV("htaccess.www",      nil,    "boolean")
-	local htaErrors        = getT("htaccess.errors",   {},     "number", "string")
+	local htaWww           = getV("htaccess.www",      false,  "boolean")
+	htaErrors              = getT("htaccess.errors",   {},     "number", "string")
+	local htaNoIndexes     = getV("htaccess.noIndexes",false,  "boolean")
 	local htaPrettyUrlDir  = getV("htaccess.XXX_prettyUrlDirectory", "", "string")
 	local htaDenyAccess    = getA("htaccess.XXX_denyDirectAccess", {}, "string")
 	local htaccess         = getT("htaccess",          nil,    "string")
@@ -935,10 +935,27 @@ local function buildWebsite()
 	end
 
 
-	-- Fix details.
+	-- Validate baseUrl.
+	local parsedUrl = socket.url.parse(site.baseUrl.v)
 
-	if not site.baseUrl.v:find"/$" then
-		site.baseUrl.v = site.baseUrl.v.."/" -- Note: Could result in simply "/".
+	if site.baseUrl.v == "" then
+		errorf("config.baseUrl is missing or empty.", site.baseUrl.v)
+
+	elseif not parsedUrl.host then
+		errorf("Missing host in config.baseUrl (%s)", site.baseUrl.v)
+
+	elseif not parsedUrl.scheme then
+		errorf("Missing scheme in config.baseUrl (%s)", site.baseUrl.v)
+	elseif not isAny(parsedUrl.scheme, "http", "https") then
+		errorf("Invalid scheme in config.baseUrl (Expected http or https, got '%s')", parsedUrl.scheme)
+
+	elseif not (parsedUrl.path or ""):find"/$" then
+		errorf("config.baseUrl must end with a '/'. (%s)", site.baseUrl.v)
+
+	elseif parsedUrl.query then
+		errorf("config.baseUrl Cannot contain a query. (%s)", site.baseUrl.v)
+	elseif parsedUrl.fragment then
+		errorf("config.baseUrl Cannot contain a fragment. (%s)", site.baseUrl.v)
 	end
 
 
@@ -1022,6 +1039,24 @@ local function buildWebsite()
 	if handleHtaccess then
 		local contents = getFileContents(DIR_CONTENT.."/.htaccess") or ""
 
+		-- Non-rewriting.
+		--------------------------------
+
+		if htaNoIndexes then
+			contents = contents.."\nOptions -Indexes\n"
+		end
+
+		if next(htaErrors) then
+			local b = newStringBuilder()
+
+			for errCode, target in pairsSorted(htaErrors) do
+				-- The target may be a URL or HTML code.
+				b('ErrorDocument %d %s\n', errCode, target)
+			end
+
+			contents = F("%s\n%s", contents, b())
+		end
+
 		-- Rewriting.
 		--------------------------------
 
@@ -1032,26 +1067,22 @@ local function buildWebsite()
 		local b = newStringBuilder()
 
 		b("<IfModule mod_rewrite.c>\n")
+		b("\tOptions +FollowSymLinks\n") -- Required for rewriting to work in .htaccess files!
 		b("\tRewriteEngine On\n")
-		b("\n")
-
-		-- https://www.askapache.com/htaccess/http-https-rewriterule-redirect/#comment-3198820729
-		b("\t# Determine protocol.\n")
-		b("\tRewriteCond %{HTTPS}s (?:^on(s)$|)\n")
-		b("\tRewriteRule ^ - [env=protocol:http%1]\n")
 		b("\n")
 
 		local rewriteStartIndex = #b+1
 
-		if htaWww ~= nil then
-			if htaWww then
+		if htaWww then
+			local protocol, theRest = site.baseUrl.v:match"^(https?)://(.+)"
+			if theRest:find"^www%." then
 				b("\t# Add www.\n")
 				b("\tRewriteCond %{HTTP_HOST} !^www\\. [NC]\n")
-				b("\tRewriteRule .* %{ENV:protocol}://www.%{HTTP_HOST}%{REQUEST_URI} [R=301,L]\n")
+				b('\tRewriteRule .* %s://www.%%{HTTP_HOST}%%{REQUEST_URI} [R=301,L]\n', protocol)
 			else
 				b("\t# Remove www.\n")
 				b("\tRewriteCond %{HTTP_HOST} ^www\\.(.*)\n")
-				b("\tRewriteRule .* %{ENV:protocol}://%1%{REQUEST_URI} [R=301,L]\n")
+				b('\tRewriteRule .* %s://%%1%%{REQUEST_URI} [R=301,L]\n', protocol)
 			end
 			b("\n")
 		end
@@ -1060,11 +1091,19 @@ local function buildWebsite()
 			b("\t# Redirect moved resources.\n")
 
 			for url, targetUrl in pairsSorted(writtenRedirects) do
+				if targetUrl:sub(1, #site.baseUrl.v) == site.baseUrl.v then
+					targetUrl = targetUrl:sub(#site.baseUrl.v) -- Note: We keep the initial '/'.
+				end
+
 				b('\tRewriteCond %%{REQUEST_URI} "=%s"\n', url)
 				b('\tRewriteRule .* "%s" [R=301,L]\n', escapeRuleSub(targetUrl))
 			end
 
 			for url, targetUrl in pairsSorted(unwrittenRedirects) do
+				if targetUrl:sub(1, #site.baseUrl.v) == site.baseUrl.v then
+					targetUrl = targetUrl:sub(#site.baseUrl.v) -- Note: We keep the initial '/'.
+				end
+
 				local slug, query = url:match"^(.-)%?(.*)$"
 				if not slug then  slug = url  end
 
@@ -1112,13 +1151,13 @@ local function buildWebsite()
 			b('\t# Point to "%s" directory.\n', htaPrettyUrlDir)
 			b("\tRewriteCond %{REQUEST_FILENAME} !-f\n")
 			b('\tRewriteCond "%%{DOCUMENT_ROOT}/%s/%%{REQUEST_URI}" -f\n', escapeTestStr(htaPrettyUrlDir))
-			b('\tRewriteRule (.*) "/%s/$1" [L]\n', escapeRuleSub(htaPrettyUrlDir))
+			b('\tRewriteRule .* "/%s/$0" [L]\n', escapeRuleSub(htaPrettyUrlDir))
 			b("\n")
 
 			b("\tRewriteCond %{REQUEST_FILENAME} !-f\n")
 			b("\tRewriteCond %{REQUEST_URI} !^/$\n")
 			b('\tRewriteCond "%%{DOCUMENT_ROOT}/%s/%%{REQUEST_URI}/" -d\n', escapeTestStr(htaPrettyUrlDir))
-			b('\tRewriteRule (.*) "/%s/$1/" [L]\n', escapeRuleSub(htaPrettyUrlDir))
+			b('\tRewriteRule .* "/%s/$0/" [L]\n', escapeRuleSub(htaPrettyUrlDir))
 			b("\n")
 		end
 
@@ -1138,25 +1177,10 @@ local function buildWebsite()
 			end
 		end
 
-		-- Error documents.
-		--------------------------------
-
-		if next(htaErrors) then
-			local b = newStringBuilder()
-
-			for errCode, target in pairsSorted(htaErrors) do
-				-- The target may be a URL or HTML code.
-				b('ErrorDocument %d %s\n', errCode, target)
-			end
-			b("\n")
-
-			contents = F("%s\n%s", contents, b())
-		end
-
 		--------------------------------
 
 		writeOutputFile("otherRaw", ".htaccess", "/.htaccess", contents)
-	end
+	end -- handleHtaccess
 
 	if onValidate then
 		pushContext("validation")

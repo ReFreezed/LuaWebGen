@@ -11,6 +11,7 @@
 --==============================================================
 
 	assertf, assertType, assertTable, assertarg
+	attributeWith, attributeWithAny
 	cleanupPath
 	createDirectory, isDirectoryEmpty, removeEmptyDirectories
 	createThumbnail
@@ -28,7 +29,7 @@
 	getProtectionWrapper
 	getTimezone, getTimezoneOffsetString, getTimezoneOffset
 	gsub2
-	handleError, isErrorObject
+	handleError, makeError, makeErrorf, isErrorObject
 	htaccessRewriteEscapeTestString, htaccessRewriteEscapeCondPattern, htaccessRewriteEscapeRuleSubstitution
 	indexOf, itemWith, itemWithAll
 	insertLineNumberCode
@@ -974,11 +975,20 @@ end
 
 
 
-function newDataFolderReader(path)
+-- dataFolderReader = newDataFolderReader( path [, isTop=false ] )
+function newDataFolderReader(path, checkDirExistance)
 	local dataFolderReader = {}
 
 	setmetatable(dataFolderReader, {
 		__index = function(dataFolderReader, k)
+			if checkDirExistance then
+				checkDirExistance = false
+
+				if not isDirectory(path) then
+					errorf(2, "No data directory.")
+				end
+			end
+
 			local dataObj
 
 			if type(k) ~= "string" then
@@ -1618,123 +1628,141 @@ end
 
 
 
-function newPage(pathRel)
-	assertType(pathRel, "string")
+do
+	local function removeIndexFilename(pathRel)
+		local sitePath = pathToSitePath(pathRel) :gsub("/index%.%w+$", "/")
+		return sitePathToPath(sitePath)
+	end
 
-	local filename = getFilename(pathRel)
-	local ext      = getExtension(filename)
-	local extLower = ext:lower()
+	function newPage(pathRel)
+		assertType(pathRel, "string")
 
-	assert(TEMPLATE_EXTENSION_SET[extLower], extLower)
+		local filename = getFilename(pathRel)
+		local ext      = getExtension(filename)
+		local extLower = ext:lower()
 
-	local isPage  = PAGE_EXTENSION_SET[extLower] or false
-	local isIndex = isPage  and getBasename(filename) == "index"
-	local isHome  = isIndex and pathRel == filename
+		assert(TEMPLATE_EXTENSION_SET[extLower], extLower)
 
-	local category = isPage and "page" or "otherTemplate"
+		local isPage  = PAGE_EXTENSION_SET[extLower] or false
+		local isIndex = isPage  and getBasename(filename) == "index"
+		local isHome  = isIndex and pathRel == filename
 
-	local permalinkRel = (
-		not isPage and pathRel
-		or isHome  and ""
-		or isIndex and pathRel:sub(1, -#filename-1)
-		or pathRel:sub(1, -#ext-2).."/"
-	)
+		local category = isPage and "page" or "otherTemplate"
 
-	local pathRelOut
-		=  (not isPage and permalinkRel)
-		or (permalinkRel == "" and "" or permalinkRel).."index.html"
+		local permalinkRel = (
+			not isPage and pathRel
+			or isHome  and ""
+			or isIndex and pathRel:sub(1, -#filename-1)
+			or pathRel:sub(1, -#ext-2).."/"
+		)
 
-	local page; page = {
-		_readonly = false,
+		local pathRelOut
+			=  (not isPage and permalinkRel)
+			or (permalinkRel == "" and "" or permalinkRel).."index.html"
 
-		_category     = category,
-		_isGenerating = false,
-		_isGenerated  = false,
-		_isSkipped    = false,
-		_isLocked     = false,
-		_path         = pathRel,
-		_pathOut      = pathRelOut,
+		local isSpecial =
+			not isPage
+			or attributeWithAny(
+				htaErrors,
+				"/"..permalinkRel,
+				"/"..pathRelOut,
+				"/"..rewriteOutputPath(pathRelOut),
+				"/"..removeIndexFilename(rewriteOutputPath(pathRelOut))
+			) ~= nil
 
-		isPage = {
-			v = isPage,
-			g = function(field)  return field.v  end,
-		},
-		isIndex = {
-			v = isIndex,
-			g = function(field)  return field.v  end,
-		},
-		isHome = {
-			v = isHome,
-			g = function(field)  return field.v  end,
-		},
+		local page; page = {
+			_readonly = false,
 
-		layout = {
-			v = site.defaultLayout.v,
-			g = function(field)  return field.v  end,
-			s = function(field, layoutName)  field.v = layoutName  end,
-		},
-		title = {
-			v = "",
-			g = function(field)  return field.v  end,
-			s = function(field, title)  field.v = title  end,
-		},
-		content = {
-			v = "",
-			g = function(field)  return field.v  end,
-		},
+			_category     = category,
+			_isGenerating = false,
+			_isGenerated  = false,
+			_isSkipped    = false,
+			_isLocked     = false,
+			_path         = pathRel,
+			_pathOut      = pathRelOut,
 
-		date = {
-			v = getDatetime(0),
-			g = function(field)  return field.v  end,
-			s = function(field, datetime)  field.v = datetime  end,
-		},
-		publishDate = {
-			v = "",
-			g = function(field)  return field.v ~= "" and field.v or page.date.v  end,
-			s = function(field, datetime)
-				assertContext("template", "publishDate", 3)
-				assertarg(1, datetime, "string")
-				field.v = datetime
-			end,
-		},
-		isDraft = {
-			v = false,
-			g = function(field)  return field.v  end,
-			s = function(field, state)  field.v = state  end,
-		},
-		isSpecial = {
-			v = not isPage,
-			g = function(field)  return field.v  end,
-			s = function(field, state)  field.v = state  end,
-		},
+			isPage = {
+				v = isPage,
+				g = function(field)  return field.v  end,
+			},
+			isIndex = {
+				v = isIndex,
+				g = function(field)  return field.v  end,
+			},
+			isHome = {
+				v = isHome,
+				g = function(field)  return field.v  end,
+			},
 
-		aliases = {
-			v = {},
-			g = function(field)  return page._readonly and {unpack(field.v)} or field.v  end,
-			s = function(field, aliases)  field.v = aliases  end,
-		},
+			layout = {
+				v = site.defaultLayout.v,
+				g = function(field)  return field.v  end,
+				s = function(field, layoutName)  field.v = layoutName  end,
+			},
+			title = {
+				v = "",
+				g = function(field)  return field.v  end,
+				s = function(field, title)  field.v = title  end,
+			},
+			content = {
+				v = "",
+				g = function(field)  return field.v  end,
+			},
 
-		url = {
-			v = "/"..permalinkRel,
-			g = function(field)  return field.v  end,
-		},
-		permalink = {
-			v = site.baseUrl.v..(noTrailingSlash and permalinkRel:gsub("/$", "") or permalinkRel),
-			g = function(field)  return field.v  end,
-		},
-		rssLink = {
-			v = "", -- @Incomplete @Doc
-			g = function(field)  return field.v  end,
-		},
+			date = {
+				v = getDatetime(0),
+				g = function(field)  return field.v  end,
+				s = function(field, datetime)  field.v = datetime  end,
+			},
+			publishDate = {
+				v = "",
+				g = function(field)  return field.v ~= "" and field.v or page.date.v  end,
+				s = function(field, datetime)
+					assertContext("template", "publishDate", 3)
+					assertarg(1, datetime, "string")
+					field.v = datetime
+				end,
+			},
+			isDraft = {
+				v = false,
+				g = function(field)  return field.v  end,
+				s = function(field, state)  field.v = state  end,
+			},
+			isSpecial = {
+				v = isSpecial,
+				g = function(field)  return field.v  end,
+				s = function(field, state)  field.v = state  end,
+			},
 
-		params = {
-			v = {},
-			g = function(field)  return field.v  end,
-		},
-	}
-	-- print(pathRel, (not isPage and " " or isHome and "H" or isIndex and "I" or "P"), page.permalink.v) -- DEBUG
+			aliases = {
+				v = {},
+				g = function(field)  return page._readonly and {unpack(field.v)} or field.v  end,
+				s = function(field, aliases)  field.v = aliases  end,
+			},
 
-	return page
+			url = {
+				v = "/"..permalinkRel,
+				g = function(field)  return field.v  end,
+			},
+			permalink = {
+				v = site.baseUrl.v..(noTrailingSlash and permalinkRel:gsub("/$", "") or permalinkRel),
+				g = function(field)  return field.v  end,
+			},
+			rssLink = {
+				v = "", -- @Incomplete @Doc
+				g = function(field)  return field.v  end,
+			},
+
+			params = {
+				v = {},
+				g = function(field)  return field.v  end,
+			},
+		}
+		-- print(pathRel, (not isPage and " " or isHome and "H" or isIndex and "I" or "P"), page.permalink.v)
+
+		return page
+	end
+
 end
 
 
@@ -1989,22 +2017,27 @@ do
 	}
 
 	function handleError(err)
-		if isErrorObject(err) then  return err  end
+		return isErrorObject(err) and err or makeError(tostring(err), 2)
+	end
 
-		local message     = tostring(err)
+	function makeError(message, level)
+		assertarg(1, message, "string")
+		assertarg(2, level,   "number","nil")
+
+		level = (level or 1)
+
 		local stack       = {}
 		local stringLines = {}
 
 		local didFixMessage = false
 
 		for i = 1, math.huge do
-			if i > ERROR_TRACEBACK_LINES then
-				stack[i] = "(...)"
-				-- table.insert(stack, "(...)")
+			if stack[ERROR_TRACEBACK_LINES] then
+				table.insert(stack, "(...)")
 				break
 			end
 
-			local info = debug.getinfo(1+i, "nSl")
+			local info = debug.getinfo(level+i, "nSl")
 			if not info then  break  end
 
 			local isStr      = info.short_src:find"^%[string \"" ~= nil
@@ -2034,8 +2067,7 @@ do
 				b(" in function <%s:%d>", getFilename(sourceName), info.linedefined)
 			end
 
-			stack[i] = b()
-			-- table.insert(stack, b())
+			table.insert(stack, b())
 		end
 
 		while stack[#stack] == "[C]: ?" do
@@ -2046,8 +2078,16 @@ do
 			message = message:gsub("^.-:%d+: ", cleanupPath)
 		end
 
-		err = setmetatable({message=message, stack=stack, stringLines=stringLines}, errMt)
+		local err = setmetatable({message=message, stack=stack, stringLines=stringLines}, errMt)
 		return err
+	end
+
+	function makeErrorf(level, s, ...)
+		if type(level) == "number" then
+			return makeError(s:format(...), level+1)
+		else
+			return makeError(level:format(s, ...), 2)
+		end
 	end
 
 	function isErrorObject(v)
@@ -2091,6 +2131,22 @@ function pairsSorted(t)
 		local k = keys[i]
 		if k ~= nil then  return k, t[k]  end
 	end
+end
+
+
+
+function attributeWith(t, v)
+	for k, item in pairs(t) do
+		if item == v then  return k  end
+	end
+	return nil
+end
+
+function attributeWithAny(t, ...)
+	for k, item in pairs(t) do
+		if isAny(item, ...) then  return k  end
+	end
+	return nil
 end
 
 
