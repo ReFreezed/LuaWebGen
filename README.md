@@ -1,7 +1,8 @@
-# LuaWebGen
-![](https://img.shields.io/badge/version-0.17-green.svg)
+<h1 style="text-align: center;"><img src="logo.png" width="200" height="200" alt="LuaWebGen" title="LuaWebGen"></h1>
 
-Static website generator in Lua 5.1. Somewhat inspired by [Hugo](https://gohugo.io/).
+<p style="text-align: center;"><img src="https://img.shields.io/badge/version-0.17-green.svg" alt="version 0.17"></p>
+
+**LuaWebGen** - static website generator, powered by Lua. Somewhat inspired by [Hugo](https://gohugo.io/).
 
 Webpages are generated using HTML and markdown *templates* with embedded Lua code. CSS files can also include code.
 
@@ -32,21 +33,24 @@ A blog post, `my-first-post.md`:
 
 ```markdown
 {{
-page.title = "My First Blog Post!"
-local foo = "bar"
+page.title = "The First!"
+local foot = "not hand"
 }}
 
 Lorem ipsum dolor sit amet, consectetur adipiscing elit.
 Duis nec justo mollis, varius nulla sed, commodo nibh.
 
+Foot is {{foot}}<br>
 1 + 2 * 3 = {{1+2*3}}<br>
-foo is {{foo}}
+Current year is {{os.date"%Y"}}
 
-# List of Cats
+## List of Cats
 
 {{for i, cat in ipairs(data.myCats)}}
 - Cat {{i}} is named {{cat.name}}.
 {{end}}
+
+![Cute cat]({{ getCatImageUrl() }})
 ```
 
 Page template, `page.html`:
@@ -89,8 +93,8 @@ LuaWebGen expects this folder hierarchy:
 ```
 site-root/
     content/           -- All website content, including pages, images, CSS and JavaScript files.
-        index.html|md  -- Homepage/root index page (good to have one).
-    data/              -- Optional data folder. Can contain .lua and .toml files.
+        index.html|md  -- Homepage/root index page.
+    data/              -- Optional data folder. Can contain Lua, TOML and XML files.
     layouts/           -- All HTML layout templates.
         page.html      -- Default page template.
     logs/              -- Automatically created log file folder.

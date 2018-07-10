@@ -1,5 +1,7 @@
+/local/
+/wiki/
+
 /*.sublime-*
 /CreateExe.cmd
 /exe.lua
 /TODO.txt
-/wiki/
