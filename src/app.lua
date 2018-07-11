@@ -637,7 +637,7 @@ scriptEnvironmentGlobals = {
 			errorf(2, "Could not read file '%s': %s", path, err)
 		end
 
-		local html = parseHtmlTemplate(getContext().page, path, template)
+		local html = parseTemplate(getContext().page, path, template, "html")
 		return html
 	end,
 
@@ -660,7 +660,7 @@ scriptEnvironmentGlobals = {
 		assertType(contents, "string", "The contents must be a string.")
 
 		local pathRel = sitePathToPath(sitePathRel)
-		writeOutputFile("otherRaw", pathRel, sitePathRel, contents)
+		writeOutputFile("raw", pathRel, sitePathRel, contents)
 	end,
 
 	preserveRaw = function(sitePathRel)
@@ -674,7 +674,7 @@ scriptEnvironmentGlobals = {
 			errorf(2, "File does not exist. (%s)", path)
 		end
 
-		preserveExistingOutputFile("otherRaw", pathRel, sitePathRel)
+		preserveExistingOutputFile("raw", pathRel, sitePathRel)
 	end,
 
 	isCurrentUrl = function(url)
@@ -895,36 +895,36 @@ local function buildWebsite()
 		return get(kPath, default, assertTable, "number", vType, "config.%s must be an array of %s.", kPath, vType)
 	end
 
-	site.title.v           = getV("title",             "",     "string")
-	site.baseUrl.v         = getV("baseUrl",           "",     "string")
-	site.languageCode.v    = getV("languageCode",      "",     "string")
-	site.defaultLayout.v   = getV("defaultLayout",     "page", "string")
+	site.title.v           = getV("title",             "",                    "string")
+	site.baseUrl.v         = getV("baseUrl",           "",                    "string")
+	site.languageCode.v    = getV("languageCode",      "",                    "string")
+	site.defaultLayout.v   = getV("defaultLayout",     "page",                "string")
 
-	site.redirections.v    = getT("redirections",      {},     "string", "string")
+	site.redirections.v    = getT("redirections",      site.redirections.v,   "string", "string")
 
-	ignoreFiles            = getA("ignoreFiles",       {},     "string")
-	ignoreFolders          = getA("ignoreFolders",     {},     "string")
+	ignoreFiles            = getA("ignoreFiles",       ignoreFiles,           "string")
+	ignoreFolders          = getA("ignoreFolders",     ignoreFolders,         "string")
 
-	fileProcessors         = getT("processors",        {},     "string", "function")
+	fileTypes              = getT("types",             fileTypes,             "string", "string")
+	fileProcessors         = getT("processors",        fileProcessors,        "string", "function")
 
-	local htaRedirect      = getV("htaccess.redirect", false,  "boolean")
-	local htaWww           = getV("htaccess.www",      false,  "boolean")
-	htaErrors              = getT("htaccess.errors",   {},     "number", "string")
-	local htaNoIndexes     = getV("htaccess.noIndexes",false,  "boolean")
-	local htaPrettyUrlDir  = getV("htaccess.XXX_prettyUrlDirectory", "", "string")
-	local htaDenyAccess    = getA("htaccess.XXX_denyDirectAccess", {}, "string")
-	local htaccess         = getT("htaccess",          nil,    "string")
+	local htaRedirect      = getV("htaccess.redirect", false,                 "boolean")
+	local htaWww           = getV("htaccess.www",      false,                 "boolean")
+	htaErrors              = getT("htaccess.errors",   htaErrors,             "number", "string")
+	local htaNoIndexes     = getV("htaccess.noIndexes",false,                 "boolean")
+	local htaPrettyUrlDir  = getV("htaccess.XXX_prettyUrlDirectory", "",      "string")
+	local htaDenyAccess    = getA("htaccess.XXX_denyDirectAccess",   {},      "string")
+	local htaccess         = getT("htaccess",          nil,                   "string")
 	local handleHtaccess   = htaccess ~= nil
 
 	outputPathFormat       = get("rewriteOutputPath", "%s", NOOP)
-	assert(isAny(type(outputPathFormat), "string","function"), "config.rewriteOutputPath must be a string or a function.")
-	rewriteExcludes        = getA("rewriteExcludes",   {},     "string")
+	rewriteExcludes        = getA("rewriteExcludes",   rewriteExcludes,       "string")
 
-	local onBefore         = getV("before",            nil,    "function")
-	local onAfter          = getV("after",             nil,    "function")
-	local onValidate       = getV("validate",          nil,    "function")
+	local onBefore         = getV("before",            nil,                   "function")
+	local onAfter          = getV("after",             nil,                   "function")
+	local onValidate       = getV("validate",          nil,                   "function")
 
-	autoLockPages          = getV("autoLockPages",     false,  "boolean")
+	autoLockPages          = getV("autoLockPages",     false,                 "boolean")
 	noTrailingSlash        = getV("removeTrailingSlashFromPermalinks", false, "boolean")
 
 	for k in pairs(config) do
@@ -935,7 +935,25 @@ local function buildWebsite()
 	end
 
 
-	-- Validate baseUrl.
+	assert(isAny(type(outputPathFormat), "string","function"), "config.rewriteOutputPath must be a string or a function.")
+
+	-- Validate config.types
+	for ext, fileType in pairs(fileTypes) do
+		if ext ~= ext:lower() then
+			errorf("File extensions must be lower case: config.types[\"%s\"]", ext)
+		elseif not FILE_TYPE_SET[fileType] then
+			errorf("Invalid generator file type '%s'.", fileType)
+		end
+	end
+
+	-- Validate config.processors
+	for ext in pairs(fileProcessors) do
+		if ext ~= ext:lower() then
+			errorf("File extensions must be lower case: config.processors[\"%s\"]", ext)
+		end
+	end
+
+	-- Validate config.baseUrl
 	local parsedUrl = socket.url.parse(site.baseUrl.v)
 
 	if site.baseUrl.v == "" then
@@ -980,13 +998,11 @@ local function buildWebsite()
 		if isStringMatchingAnyPattern(filename, ignoreFiles) then
 			-- Ignore.
 
-		elseif TEMPLATE_EXTENSION_SET[extLower] then
-			local page = newPage(pathRel)
-			if page.isPage.v then
-				table.insert(pages, page)
-			else
-				generateFromTemplateFile(page)
-			end
+		elseif fileTypes[extLower] == "othertemplate" then
+			generateFromTemplateFile(newPage(pathRel))
+
+		elseif fileTypes[extLower] then
+			table.insert(pages, newPage(pathRel)) -- Generate later.
 
 		elseif not (handleHtaccess and pathRel == ".htaccess") then
 			local modTime = lfs.attributes(path, "modification")
@@ -1000,11 +1016,14 @@ local function buildWebsite()
 				or  nil
 
 			if modTime and modTime == oldModTime then
-				preserveExistingOutputFile("otherRaw", pathRel, pathRel)
+				preserveExistingOutputFile("raw", pathRel, pathRel)
 			else
 				local contents = assert(getFileContents(path))
-				writeOutputFile("otherRaw", pathRel, "/"..pathRel, contents, modTime)
+				writeOutputFile("raw", pathRel, "/"..pathRel, contents, modTime)
 			end
+
+		else
+			-- Ignore file.
 		end
 	end)
 
@@ -1179,7 +1198,7 @@ local function buildWebsite()
 
 		--------------------------------
 
-		writeOutputFile("otherRaw", ".htaccess", "/.htaccess", contents)
+		writeOutputFile("raw", ".htaccess", "/.htaccess", contents)
 	end -- handleHtaccess
 
 	if onValidate then
@@ -1212,10 +1231,10 @@ local function buildWebsite()
 	printf(("-"):rep(64))
 	printf("Files: %d", outputFileCount)
 	printf("    Pages:           %d  (Skipped: %d)", outputFileCounts["page"], outputFileSkippedPageCount)
-	printf("    OtherTemplates:  %d", outputFileCounts["otherTemplate"])
+	printf("    OtherTemplates:  %d", outputFileCounts["template"])
 	printf("    OtherFiles:      %d  (Preserved: %d, %.1f%%)",
-		outputFileCounts["otherRaw"], outputFilePreservedCount,
-		outputFileCounts["otherRaw"] == 0 and 100 or outputFilePreservedCount/outputFileCounts["otherRaw"]*100
+		outputFileCounts["raw"], outputFilePreservedCount,
+		outputFileCounts["raw"] == 0 and 100 or outputFilePreservedCount/outputFileCounts["raw"]*100
 	)
 	printf("TotalSize: %s", formatBytes(outputFileByteCount))
 	printf("Time: %.2f seconds", endTime-startTime)

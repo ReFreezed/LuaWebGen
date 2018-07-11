@@ -10,7 +10,7 @@
 --=
 --============================================================]]
 
-_WEBGEN_VERSION = "0.17.0"
+_WEBGEN_VERSION = "0.18.0"
 
 
 
@@ -31,10 +31,8 @@ ERROR_TRACEBACK_LINES  = 25
 
 -- Constants.
 
-TEMPLATE_EXTENSION_SET = {["html"]=true, ["md"]=true, ["css"]=true}
-PAGE_EXTENSION_SET     = {["html"]=true, ["md"]=true}
-
-OUTPUT_CATEGORY_SET    = {["page"]=true, ["otherTemplate"]=true, ["otherRaw"]=true}
+FILE_TYPE_SET          = {["markdown"]=true, ["html"]=true, ["othertemplate"]=true}
+OUTPUT_CATEGORY_SET    = {["page"]=true, ["template"]=true, ["raw"]=true}
 
 DATA_FILE_EXTENSIONS   = {"lua","toml","xml"}
 IMAGE_EXTENSIONS       = {"png","jpg","jpeg","gif"}
@@ -109,20 +107,21 @@ function resetSiteVariables()
 		},
 
 		redirections = {
-			v = nil, -- k=url, v=targetUrl. Init later.
+			v = {}, -- k=url, v=targetUrl.
 			g = function(field) return field.v end,
 		},
 	}
 
-	ignoreFiles                = nil -- Array. Init later.
-	ignoreFolders              = nil -- Array. Init later.
+	ignoreFiles                = {} -- Array.
+	ignoreFolders              = {} -- Array.
 
-	fileProcessors             = nil -- k=extension, v=function(data, sitePath). Init later.
+	fileTypes                  = {["md"]="markdown", ["html"]="html", ["css"]="othertemplate"}
+	fileProcessors             = {} -- k=extension, v=function(data, sitePath).
 
-	htaErrors                  = nil -- k=httpStatusCode, v=document. Init later.
+	htaErrors                  = {} -- k=httpStatusCode, v=document.
 
 	outputPathFormat           = "%s"
-	rewriteExcludes            = nil -- Init later.
+	rewriteExcludes            = {} -- Array of pathPat.
 
 	autoLockPages              = false
 	noTrailingSlash            = false
@@ -142,7 +141,7 @@ function resetSiteVariables()
 	outputFileCount            = 0
 	outputFileCounts           = {} -- k=category, v=count.
 	outputFileByteCount        = 0
-	outputFilePreservedCount   = 0 -- This should only count raw files. Maybe rename the variable?
+	outputFilePreservedCount   = 0  -- This should only count raw files. Maybe rename the variable?
 	outputFileSkippedPageCount = 0
 
 	thumbnailInfos             = {}

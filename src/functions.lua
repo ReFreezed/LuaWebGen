@@ -44,7 +44,7 @@
 	newStringBuilder
 	pack
 	pairsSorted
-	parseMarkdownTemplate, parseHtmlTemplate, parseOtherTemplate
+	parseTemplate
 	pathToSitePath, sitePathToPath
 	print, printOnce, printf, printfOnce, log, logprint, logprintOnce, logVerbose
 	pushContext, popContext, assertContext, getContext
@@ -151,7 +151,7 @@ do
 		return true
 	end
 
-	local function parseTemplate(page, path, template, pos, level, enableHtmlEncoding)
+	local function _parseTemplate(page, path, template, pos, level, enableHtmlEncoding)
 
 		--= Generate Lua.
 		--==============================================================
@@ -230,7 +230,7 @@ do
 				table.insert(lua, foriArr)
 				table.insert(lua, "\n) do ")
 
-				local innerLua, innerEndCodePosStart, innerEndCodePosEnd = parseTemplate(
+				local innerLua, innerEndCodePosStart, innerEndCodePosEnd = _parseTemplate(
 					page, path, template, codePosEnd+1, level+1, enableHtmlEncoding
 				)
 				local innerEndCode = trim(template:sub(innerEndCodePosStart+2, innerEndCodePosEnd-2))
@@ -271,7 +271,7 @@ do
 					table.insert(lua, "\ndo ")
 				end
 
-				local innerLua, innerEndCodePosStart, innerEndCodePosEnd = parseTemplate(
+				local innerLua, innerEndCodePosStart, innerEndCodePosEnd = _parseTemplate(
 					page, path, template, codePosEnd+1, level+1, enableHtmlEncoding
 				)
 				local innerEndCode = trim(template:sub(innerEndCodePosStart+2, innerEndCodePosEnd-2))
@@ -293,7 +293,7 @@ do
 			elseif code == "do" then
 				table.insert(lua, "do ")
 
-				local innerLua, innerEndCodePosStart, innerEndCodePosEnd = parseTemplate(
+				local innerLua, innerEndCodePosStart, innerEndCodePosEnd = _parseTemplate(
 					page, path, template, codePosEnd+1, level+1, enableHtmlEncoding
 				)
 				local innerEndCode = trim(template:sub(innerEndCodePosStart+2, innerEndCodePosEnd-2))
@@ -316,7 +316,7 @@ do
 				table.insert(lua, code)
 				table.insert(lua, "\nthen ")
 
-				local innerLua, innerEndCodePosStart, innerEndCodePosEnd = parseTemplate(
+				local innerLua, innerEndCodePosStart, innerEndCodePosEnd = _parseTemplate(
 					page, path, template, codePosEnd+1, level+1, enableHtmlEncoding
 				)
 				local innerEndCode = trim(template:sub(innerEndCodePosStart+2, innerEndCodePosEnd-2))
@@ -328,7 +328,7 @@ do
 					table.insert(lua, innerEndCode)
 					table.insert(lua, "\nthen ")
 
-					innerLua, innerEndCodePosStart, innerEndCodePosEnd = parseTemplate(
+					innerLua, innerEndCodePosStart, innerEndCodePosEnd = _parseTemplate(
 						page, path, template, innerEndCodePosEnd+1, level+1, enableHtmlEncoding
 					)
 					innerEndCode = trim(template:sub(innerEndCodePosStart+2, innerEndCodePosEnd-2))
@@ -340,7 +340,7 @@ do
 				if innerEndCode == "else" then
 					table.insert(lua, "else ")
 
-					innerLua, innerEndCodePosStart, innerEndCodePosEnd = parseTemplate(
+					innerLua, innerEndCodePosStart, innerEndCodePosEnd = _parseTemplate(
 						page, path, template, innerEndCodePosEnd+1, level+1, enableHtmlEncoding
 					)
 					innerEndCode = trim(template:sub(innerEndCodePosStart+2, innerEndCodePosEnd-2))
@@ -366,7 +366,7 @@ do
 				table.insert(lua, code)
 				table.insert(lua, "\ndo ")
 
-				local innerLua, innerEndCodePosStart, innerEndCodePosEnd = parseTemplate(
+				local innerLua, innerEndCodePosStart, innerEndCodePosEnd = _parseTemplate(
 					page, path, template, codePosEnd+1, level+1, enableHtmlEncoding
 				)
 				local innerEndCode = trim(template:sub(innerEndCodePosStart+2, innerEndCodePosEnd-2))
@@ -388,7 +388,7 @@ do
 			elseif code == "repeat" then
 				table.insert(lua, "repeat ")
 
-				local innerLua, innerEndCodePosStart, innerEndCodePosEnd = parseTemplate(
+				local innerLua, innerEndCodePosStart, innerEndCodePosEnd = _parseTemplate(
 					page, path, template, codePosEnd+1, level+1, enableHtmlEncoding
 				)
 				local innerEndCode = trim(template:sub(innerEndCodePosStart+2, innerEndCodePosEnd-2))
@@ -485,31 +485,28 @@ do
 		return out
 	end
 
-	function parseMarkdownTemplate(page, path, template)
-		local md = parseTemplate(page, path, template, 1, 1, true)
+	-- contents = parseTemplate( page, path, template [, fileType=fromPage ] )
+	function parseTemplate(page, path, template, fileType)
+		fileType = (fileType or fileTypes[page._extension])
 
-		local html = markdownToHtml(md)
-		html = trimNewlines(html).."\n" -- :Beautify
+		local contents
 
-		-- print("-- HTML --") print(html) print("-- /HTML --")
+		if fileType == "markdown" then
+			contents = _parseTemplate(page, path, template, 1, 1, true)
+			contents = markdownToHtml(contents)
+			contents = trimNewlines(contents).."\n" -- :Beautify
+			-- print("-- HTML --") print(contents) print("-- /HTML --")
 
-		return html
-	end
+		elseif fileType == "html" then
+			contents = _parseTemplate(page, path, template, 1, 1, true)
+			contents = trimNewlines(contents).."\n" -- :Beautify
+			-- print("-- HTML --") print(contents) print("-- /HTML --")
 
-	function parseHtmlTemplate(page, path, template)
-		local html = parseTemplate(page, path, template, 1, 1, true)
-		html = trimNewlines(html).."\n" -- :Beautify
-
-		-- print("-- HTML --") print(html) print("-- /HTML --")
-
-		return html
-	end
-
-	function parseOtherTemplate(page, path, template)
-		local contents = parseTemplate(page, path, template, 1, 1, false)
-		contents = trimNewlines(contents).."\n" -- :Beautify
-
-		-- print("-- CONTENTS --") print(contents) print("-- /CONTENTS --")
+		else
+			contents = _parseTemplate(page, path, template, 1, 1, false)
+			contents = trimNewlines(contents).."\n" -- :Beautify
+			-- print("-- CONTENTS --") print(contents) print("-- /CONTENTS --")
+		end
 
 		return contents
 	end
@@ -1159,7 +1156,7 @@ function generateFromTemplate(page, template, modTime)
 		errorf(2, "Page has already generated. (%s)", page._path)
 	end
 	if page._isGenerating or pagesGenerating[page._pathOut] then
-		errorf(2, "Recursive page generation detected. You may have to call lock() in '%s'.", page._path)
+		errorf(2, "Recursive page generation detected. You may want to call lock() in '%s'.", page._path)
 	end
 
 	page._isGenerating = true
@@ -1173,16 +1170,9 @@ function generateFromTemplate(page, template, modTime)
 
 	local outStr
 
-	if extLower == "md" then
-		page.content.v = parseMarkdownTemplate(page, pathRel, template)
-	elseif extLower == "html" then
-		page.content.v = parseHtmlTemplate(page, pathRel, template)
-	else
-		assert(not page.isPage.v)
-		outStr = parseOtherTemplate(page, pathRel, template)
-	end
-
 	if page.isPage.v then
+		page.content.v = parseTemplate(page, pathRel, template)
+
 		if
 			(page.isDraft.v and not includeDrafts) or -- Is draft?
 			(datetimeToTime(page.publishDate:g()) > os.time()) -- Is in future?
@@ -1197,14 +1187,15 @@ function generateFromTemplate(page, template, modTime)
 		end
 
 		local layoutTemplate, layoutPath = getLayoutTemplate(page)
-		outStr = parseHtmlTemplate(page, layoutPath, layoutTemplate)
+		outStr = parseTemplate(page, layoutPath, layoutTemplate, "html")
+
+		page.content.v = "" -- Free up memory, as we don't need this anymore.
+
+	else
+		outStr = parseTemplate(page, pathRel, template)
 	end
 
-	page.content.v = ""
-
-	assert(outStr)
 	writeOutputFile(page._category, page._pathOut, page.url.v, outStr, modTime)
-
 	page._isGenerated = true
 
 	pagesGenerating[page._pathOut] = nil
@@ -1572,7 +1563,7 @@ do
 
 		if modTimeImage and modTimeImage == modTimeThumb and not ignoreModificationTimes then
 			-- @Note: This will bypass any file processor for JPG files. Not sure if OK. 2018-06-30
-			preserveExistingOutputFile("otherRaw", pathThumbRel, "/"..pathThumbRel)
+			preserveExistingOutputFile("raw", pathThumbRel, "/"..pathThumbRel)
 
 		else
 			local scale = math.min(imageW/thumbW, imageH/thumbH)
@@ -1592,7 +1583,7 @@ do
 
 			local imageCreatorMethod = "jpegStr"--assert(imageCreatorMethods[extLower], extLower)
 			local contents = thumb[imageCreatorMethod](thumb, 75)
-			writeOutputFile("otherRaw", pathThumbRel, "/"..pathThumbRel, contents, modTimeImage)
+			writeOutputFile("raw", pathThumbRel, "/"..pathThumbRel, contents, modTimeImage)
 		end
 
 		thumbnailInfos[id] = thumbInfo
@@ -1641,13 +1632,15 @@ do
 		local ext      = getExtension(filename)
 		local extLower = ext:lower()
 
-		assert(TEMPLATE_EXTENSION_SET[extLower], extLower)
+		if not fileTypes[extLower] then
+			errorf("Invalid template extension '%s'. You may want to specify config.types[\"%s\"].", extLower, extLower)
+		end
 
-		local isPage  = PAGE_EXTENSION_SET[extLower] or false
+		local isPage  = isAny(fileTypes[extLower], "markdown", "html")
 		local isIndex = isPage  and getBasename(filename) == "index"
 		local isHome  = isIndex and pathRel == filename
 
-		local category = isPage and "page" or "otherTemplate"
+		local category = isPage and "page" or "template"
 
 		local permalinkRel = (
 			not isPage and pathRel
@@ -1680,6 +1673,7 @@ do
 			_isLocked     = false,
 			_path         = pathRel,
 			_pathOut      = pathRelOut,
+			_extension    = extLower,
 
 			isPage = {
 				v = isPage,
