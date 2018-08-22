@@ -54,9 +54,6 @@ markdownLib = require"markdown"
 parseToml   = require"toml".parse
 xmlLib      = require"pl.xml"
 
-_assert     = assert
-_error      = error
-_pcall      = pcall
 _print      = print
 
 

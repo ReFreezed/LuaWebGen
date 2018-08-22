@@ -46,13 +46,14 @@
 	pairsSorted
 	parseTemplate
 	pathToSitePath, sitePathToPath
-	print, printOnce, printf, printfOnce, log, logprint, logprintOnce, logVerbose
+	print, printOnce, printf, printfOnce, log, logprint, logprintOnce, logVerbose, printobj
 	pushContext, popContext, assertContext, getContext
 	removeItem
 	rewriteOutputPath
 	round
 	serializeLua
-	sortNatural
+	sort
+	sortNatural, compareNatural
 	splitString
 	toNormalPath, toWindowsPath
 	tostringForTemplates
@@ -784,6 +785,72 @@ function logVerbose(...)
 	end
 end
 
+-- printobj( ... )
+-- Note: Does not write to log.
+do
+	local out = io.stdout
+
+	local _tostring = tostring
+	local function tostring(v)
+		return (_tostring(v):gsub('^table: ', ''))
+	end
+
+	local function compareKeys(a, b)
+		return compareNatural(tostring(a), tostring(b))
+	end
+
+	local function _printobj(v, tables)
+		local vType = type(v)
+
+		if vType == "table" then
+			if tables[v] then
+				out:write(tostring(v), " ")
+				return
+			end
+
+			out:write(tostring(v), "{ ")
+			tables[v] = true
+
+			local indices = {}
+			for i = 1, #v do  indices[i] = true  end
+
+			for _, k in ipairs(sort(getKeys(v), compareKeys)) do
+				if not indices[k] then
+					out:write(tostring(k), "=")
+					_printobj(v[k], tables)
+				end
+			end
+
+			for i = 1, #v do
+				out:write(i, "=")
+				_printobj(v[i], tables)
+			end
+
+			out:write("} ")
+
+		elseif vType == "number" then
+			out:write(F("%g ", v))
+
+		elseif vType == "string" then
+			out:write('"', v:gsub("%z", "\\0"):gsub("\n", "\\n"), '" ')
+
+		else
+			out:write(tostring(v), " ")
+		end
+
+	end
+
+	function printobj(...)
+		for i = 1, select("#", ...) do
+			if i > 1 then  out:write("\t")  end
+
+			_printobj(select(i, ...), {})
+		end
+		out:write("\n")
+	end
+
+end
+
 
 
 function insertLineNumberCode(t, ln)
@@ -954,17 +1021,17 @@ do
 	local function pad(numStr)
 		return ("%03d%s"):format(#numStr, numStr)
 	end
-	local function compare(a, b)
+	function compareNatural(a, b)
 		return (tostringForTemplates(a):gsub("%d+", pad) < tostringForTemplates(b):gsub("%d+", pad))
 	end
 
 	function sortNatural(t, k)
 		if k then
 			table.sort(t, function(a, b)
-				return compare(a[k], b[k])
+				return compareNatural(a[k], b[k])
 			end)
 		else
-			table.sort(t, compare)
+			table.sort(t, compareNatural)
 		end
 		return t
 	end
@@ -1780,7 +1847,7 @@ end
 -- Return any data as a Lua code string.
 -- luaString = serializeLua( value )
 do
-	local SIMPLE_TYPES = {["boolean"]=true,["nil"]=true,["number"]=true,}
+	local SIMPLE_TYPES = {["boolean"]=true,["nil"]=true,["number"]=true}
 	local KEYWORDS = {
 		["and"]=true,["break"]=true,["do"]=true,["else"]=true,["elseif"]=true,
 		["end"]=true,["false"]=true,["for"]=true,["function"]=true,["if"]=true,
@@ -2141,6 +2208,13 @@ function attributeWithAny(t, ...)
 		if isAny(item, ...) then  return k  end
 	end
 	return nil
+end
+
+
+
+function sort(t, ...)
+	table.sort(t, ...)
+	return t
 end
 
 
