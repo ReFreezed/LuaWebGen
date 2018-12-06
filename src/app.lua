@@ -450,21 +450,22 @@ scriptEnvironmentGlobals = {
 	-- 	return texts
 	-- end
 
-	-- html = thumb( imagePath, thumbWidth [, thumbHeight ] [, isLink=false ] )
+	-- html, thumbUrl, thumbWidth, thumbHeight = thumb( imagePath, thumbWidth [, thumbHeight ] [, isLink=false ] )
 	thumb = function(sitePathImageRel, thumbW, thumbH, isLink)
 		if type(thumbH) == "boolean" then
 			thumbH, isLink = 0, thumbH
 		end
 
 		local pathImageRel = sitePathToPath(sitePathImageRel)
-		local thumbInfo = createThumbnail(pathImageRel, thumbW, thumbH, 2)
+		local thumbInfo    = createThumbnail(pathImageRel, thumbW, thumbH, 2)
+		local thumbUrl     = toUrl("/"..thumbInfo.path)
 
 		local b = newStringBuilder()
 		if isLink then  b('<a href="%s" target="_blank">', toUrl("/"..pathImageRel))  end
-		b('<img src="%s" width="%d" height="%d" alt="">', toUrl("/"..thumbInfo.path), thumbInfo.width, thumbInfo.height)
+		b('<img src="%s" width="%d" height="%d" alt="">', encodeHtmlEntities(thumbUrl), thumbInfo.width, thumbInfo.height)
 		if isLink then  b('</a>')  end
 
-		return b()
+		return b(), thumbUrl, thumbInfo.width, thumbInfo.height
 	end,
 
 	cssPrefix = function(prop, v)
