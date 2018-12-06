@@ -1,6 +1,6 @@
 <h1 align="center"><img src="logo.png" width="200" height="200" alt="LuaWebGen" title="LuaWebGen"></h1>
 
-<p align="center"><img src="https://img.shields.io/badge/version-0.18-green.svg" alt="version 0.18"></p>
+<p align="center"><img src="https://img.shields.io/badge/version-0.19-green.svg" alt="version 0.19"></p>
 
 **LuaWebGen** - static website generator, powered by Lua. Somewhat inspired by [Hugo](https://gohugo.io/).
 
