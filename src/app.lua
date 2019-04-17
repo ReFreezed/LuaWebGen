@@ -508,6 +508,8 @@ scriptEnvironmentGlobals = {
 	-- html = img( url [, alt="", title ] )
 	-- html = img( url [, alt="", useAltAsTitle ] )
 	img = function(url, alt, title)
+		-- @Incomplete: Do we want to add 'width' and 'height' attributes here if the URL looks like a local image path?
+		-- Maybe we want a separate function for that, like imgLocal()? Not sure...
 		if title then
 			return F(
 				'<img src="%s" alt="%s" title="%s">',
@@ -596,6 +598,10 @@ scriptEnvironmentGlobals = {
 		if not ok then
 			error("URLs were missing.", 2)
 		end
+	end,
+
+	getImageDimensions = function(sitePath)
+		return getImageDimensions(sitePathToPath(sitePath))
 	end,
 
 	-- Context functions.

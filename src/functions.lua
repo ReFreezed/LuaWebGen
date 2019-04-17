@@ -38,6 +38,7 @@
 	isArgs
 	isFile, isDirectory
 	isStringMatchingAnyPattern
+	loadImage, getImageDimensions
 	markdownToHtml
 	newDataFolderReader, isDataFolderReader, preloadData
 	newPage
@@ -1558,12 +1559,6 @@ end
 
 -- thumbnailInfo = createThumbnail( imagePathRelative, thumbWidth [, thumbHeight, errorLevel=1 )
 do
-	local imageLoaders = {
-		["png"]  = gd.createFromPng,
-		["jpg"]  = gd.createFromJpeg,
-		["jpeg"] = gd.createFromJpeg,
-		["gif"]  = gd.createFromGif,
-	}
 	local imageCreatorMethods = {
 		["png"]  = "pngStr",
 		["jpg"]  = "jpegStr",
@@ -1592,15 +1587,10 @@ do
 		local folder    = pathImageRel:sub(1, #pathImageRel-#filename) -- Ending in "/".
 		local pathImage = DIR_CONTENT.."/"..pathImageRel
 
-		if not isFile(pathImage) then
-			errorf(errLevel, "File does not exist: %s", pathImage)
+		local image, err = loadImage(pathImageRel)
+		if not image then
+			error(err, errLevel)
 		end
-
-		local loadImage = imageLoaders[extLower]
-			or errorf(errLevel, "Unknown image file format '%'.", extLower)
-
-		local image = loadImage(pathImage)
-			or errorf(errLevel, "Could not load image '%s'. Maybe the image is corrupted?", pathImage)
 
 		local imageW, imageH = image:sizeXY()
 		assert(imageW > 0)
@@ -2215,6 +2205,46 @@ end
 function sort(t, ...)
 	table.sort(t, ...)
 	return t
+end
+
+
+
+do
+	local imageLoaders = {
+		["png"]  = gd.createFromPng,
+		["jpg"]  = gd.createFromJpeg,
+		["jpeg"] = gd.createFromJpeg,
+		["gif"]  = gd.createFromGif,
+	}
+
+	function loadImage(pathImageRel)
+		local filename  = getFilename(pathImageRel)
+		local extLower  = getExtension(filename):lower()
+		local pathImage = DIR_CONTENT.."/"..pathImageRel
+
+		if not isFile(pathImage) then
+			return F("File does not exist: %s", pathImage)
+		end
+
+		local imageLoader = imageLoaders[extLower]
+		if not imageLoader then
+			return F("Unknown image file format '%'.", extLower)
+		end
+
+		local image = imageLoader(pathImage)
+		if not image then
+			return F("Could not load image '%s'. Maybe the image is corrupted?", pathImage)
+		end
+
+		return image
+	end
+end
+
+function getImageDimensions(pathImageRel)
+	local image, err = loadImage(pathImageRel)
+	if not image then  return nil, err  end
+
+	return image:sizeXY()
 end
 
 
