@@ -9,7 +9,7 @@ exec lua "$0" "$@"
 --=
 --=  MIT License
 --=
---=  Copyright © 2018 Marcus 'ReFreezed' Thunström
+--=  Copyright © 2018-2021 Marcus 'ReFreezed' Thunström
 --=
 --=  Permission is hereby granted, free of charge, to any person obtaining a copy
 --=  of this software and associated documentation files (the "Software"), to deal
@@ -31,8 +31,8 @@ exec lua "$0" "$@"
 --=
 --============================================================]]
 
-local folder = debug.getinfo(1, "S").source :gsub("^@", "") :gsub("[^/\\]+$", "")
-package.path = folder.."src/?.lua;"..folder.."lib/?.lua;"..package.path
+local dir    = debug.getinfo(1, "S").source :gsub("^@", "") :gsub("[^/\\]+$", "")
+package.path = dir .. "src/?.lua;" .. dir .. "lib/?.lua;" .. package.path
 
 math.randomseed(os.time())
 math.random() -- Gotta kickstart the randomness.
@@ -40,7 +40,7 @@ math.random() -- Gotta kickstart the randomness.
 require"globals"
 require"functions"
 
-_G.args = {...}
+_G.args = arg
 
 local ok, err = xpcall(
 	function()

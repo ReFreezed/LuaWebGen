@@ -10,6 +10,9 @@
 --=
 --============================================================]]
 
+io.stdout:setvbuf("no")
+io.stderr:setvbuf("no")
+
 
 
 -- Parse arguments.
@@ -21,7 +24,7 @@ local command = args[i] or error("[arg] Missing command.")
 i = i+1
 
 _G.ignoreModificationTimes = false
-_G.autobuild = false
+_G.autobuild               = false
 
 ----------------------------------------------------------------
 
@@ -176,10 +179,10 @@ elseif command == "build" then
 		local arg = args[i]
 
 		if arg == "--force" or arg == "-f" then
-			ignoreModificationTimes = true
+			_G.ignoreModificationTimes = true
 
 		elseif arg == "--autobuild" or arg == "-a" then
-			autobuild = true
+			_G.autobuild = true
 
 		elseif arg == "--drafts" or arg == "-d" then
 			includeDrafts = true
@@ -243,7 +246,7 @@ end
 --==============================================================
 
 scriptEnvironmentGlobals = {
-	_WEBGEN_VERSION      = _WEBGEN_VERSION,
+	_WEBGEN_VERSION      = WEBGEN_VERSION,
 	DATA_FILE_EXTENSIONS = DATA_FILE_EXTENSIONS,
 	IMAGE_EXTENSIONS     = IMAGE_EXTENSIONS,
 
@@ -302,7 +305,7 @@ scriptEnvironmentGlobals = {
 
 	-- Lua libraries.
 	lfs            = lfs,
-	socket         = socket,
+	socket         = socket, -- May be nil.
 
 	-- Site objects. (Create at site generation.)
 	site           = nil,
@@ -844,7 +847,7 @@ scriptEnvironment = setmetatable({}, {
 --==============================================================
 
 local function buildWebsite()
-	local startTime = socket.gettime()
+	local startTime = getTimeBetter()
 
 	oncePrints = {}
 	resetSiteVariables()
@@ -961,7 +964,7 @@ local function buildWebsite()
 	end
 
 	-- Validate config.baseUrl
-	local parsedUrl = socket.url.parse(site.baseUrl.v)
+	local parsedUrl = require"url".parse(site.baseUrl.v)
 
 	if site.baseUrl.v == "" then
 		errorf("config.baseUrl is missing or empty.", site.baseUrl.v)
@@ -1233,7 +1236,7 @@ local function buildWebsite()
 		logprint("Error: Context stack is not empty after generation. (Depth is %d)", #contextStack)
 	end
 
-	local endTime = socket.gettime()
+	local endTime = getTimeBetter()
 
 	printf(("-"):rep(64))
 	printf("Files: %d", outputFileCount)
@@ -1260,7 +1263,7 @@ if autobuild then
 	local lastDirTree = nil
 
 	while true do
-		socket.sleep(AUTOBUILD_MIN_INTERVAL)
+		sleep(AUTOBUILD_MIN_INTERVAL)
 
 		local dirTree = {}
 		local somethingChanged = false

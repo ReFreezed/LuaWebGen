@@ -10,79 +10,75 @@
 --=
 --============================================================]]
 
-_WEBGEN_VERSION = "0.18.0"
+_G.WEBGEN_VERSION = "0.19.0"
 
 
 
 -- Settings.
 
-DIR_CONTENT            = "content" -- @Incomplete: Make directories configurable.
-DIR_DATA               = "data"
-DIR_LAYOUTS            = "layouts"
-DIR_LOGS               = "logs"
-DIR_OUTPUT             = "output"
-DIR_SCRIPTS            = "scripts"
+_G.DIR_CONTENT = "content" -- @Incomplete: Make directories configurable.
+_G.DIR_DATA    = "data"
+_G.DIR_LAYOUTS = "layouts"
+_G.DIR_LOGS    = "logs"
+_G.DIR_OUTPUT  = "output"
+_G.DIR_SCRIPTS = "scripts"
 
-AUTOBUILD_MIN_INTERVAL = 1.00
-
-ERROR_TRACEBACK_LINES  = 25
+_G.AUTOBUILD_MIN_INTERVAL = 1.00
 
 
 
 -- Constants.
 
-FILE_TYPE_SET          = {["markdown"]=true, ["html"]=true, ["othertemplate"]=true}
-OUTPUT_CATEGORY_SET    = {["page"]=true, ["template"]=true, ["raw"]=true}
+_G.FILE_TYPE_SET       = {["markdown"]=true, ["html"]=true, ["othertemplate"]=true}
+_G.OUTPUT_CATEGORY_SET = {["page"]=true, ["template"]=true, ["raw"]=true}
 
-DATA_FILE_EXTENSIONS   = {"lua","toml","xml"}
-IMAGE_EXTENSIONS       = {"png","jpg","jpeg","gif"}
+_G.DATA_FILE_EXTENSIONS = {"lua","toml","xml"}
+_G.IMAGE_EXTENSIONS     = {"png","jpg","jpeg","gif"}
 
-NOOP                   = function()end
+_G.NOOP = function()end
 
 
 
 -- Modules.
 
-gd          = require"gd"
-lfs         = require"lfs"
-socket      = require"socket"
+_G.lfs = require"lfs"
 
-escapeUri   = require"socket.url".escape
+_G.gd     = pcall(require, "gd")     and require"gd"     or nil
+_G.socket = pcall(require, "socket") and require"socket" or nil
 
-dateLib     = require"date"
-markdownLib = require"markdown"
-parseToml   = require"toml".parse
-xmlLib      = require"pl.xml"
-
-_print      = print
+_G.dateLib     = require"date"
+_G.markdownLib = require"markdown"
+_G.tomlLib     = require"toml"
+_G.urlLib      = require"url"
+_G.xmlLib      = require"pl.xml"
 
 
 
 -- Misc variables.
 
-logFile                  = nil
-logPath                  = ""
-logBuffer                = {}
+_G.logFile   = nil
+_G.logPath   = ""
+_G.logBuffer = {}
 
-includeDrafts            = false
-verbosePrint             = false
+_G.includeDrafts = false
+_G.verbosePrint  = false
 
-scriptEnvironment        = nil
-scriptEnvironmentGlobals = nil
+_G.scriptEnvironment        = nil
+_G.scriptEnvironmentGlobals = nil
 
-dataReaderPaths          = setmetatable({}, {__mode="k"})
-dataIsPreloaded          = setmetatable({}, {__mode="k"})
-protectionWrappers       = setmetatable({}, {__mode="kv"})
-protectionedObjects      = setmetatable({}, {__mode="kv"})
+_G.dataReaderPaths     = setmetatable({}, {__mode="k"})
+_G.dataIsPreloaded     = setmetatable({}, {__mode="k"})
+_G.protectionWrappers  = setmetatable({}, {__mode="kv"})
+_G.protectionedObjects = setmetatable({}, {__mode="kv"})
 
-oncePrints               = {}
+_G.oncePrints = {}
 
-_                        = nil -- Dummy.
+_G._ = nil -- Dummy.
 
 
 
 -- Site variables. These are reset in buildWebsite() (including _G.oncePrints).
-function resetSiteVariables()
+function _G.resetSiteVariables()
 	site = {
 		_readonly = true,
 

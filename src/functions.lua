@@ -27,6 +27,7 @@
 	getLayoutTemplate
 	getLineNumber
 	getProtectionWrapper
+	getTimeBetter, sleep
 	getTimezone, getTimezoneOffsetString, getTimezoneOffset
 	gsub2
 	handleError, makeError, makeErrorf, isErrorObject
@@ -47,7 +48,7 @@
 	pairsSorted
 	parseTemplate
 	pathToSitePath, sitePathToPath
-	print, printOnce, printf, printfOnce, log, logprint, logprintOnce, logVerbose, printobj
+	print, _print, printOnce, printf, printfOnce, log, logprint, logprintOnce, logVerbose, printobj
 	pushContext, popContext, assertContext, getContext
 	removeItem
 	rewriteOutputPath
@@ -69,7 +70,7 @@
 
 
 
-function traverseDirectory(dirPath, ignoreFolders, cb, _pathRelStart)
+function _G.traverseDirectory(dirPath, ignoreFolders, cb, _pathRelStart)
 	_pathRelStart = _pathRelStart or #dirPath+2
 
 	for name in lfs.dir(dirPath) do
@@ -97,7 +98,7 @@ function traverseDirectory(dirPath, ignoreFolders, cb, _pathRelStart)
 
 end
 
-function traverseFiles(dirPath, ignoreFolders, cb, _pathRelStart)
+function _G.traverseFiles(dirPath, ignoreFolders, cb, _pathRelStart)
 	_pathRelStart = _pathRelStart or #dirPath+2
 
 	for name in lfs.dir(dirPath) do
@@ -124,7 +125,7 @@ end
 
 
 
-function isStringMatchingAnyPattern(s, patterns)
+function _G.isStringMatchingAnyPattern(s, patterns)
 	for _, pat in ipairs(patterns) do
 		if s:find(pat) then  return true  end
 	end
@@ -133,7 +134,7 @@ end
 
 
 
-function getFileContents(path)
+function _G.getFileContents(path)
 	local file, err = io.open(path, "rb")
 	if not file then  return nil, err  end
 
@@ -488,7 +489,7 @@ do
 	end
 
 	-- contents = parseTemplate( page, path, template [, fileType=fromPage ] )
-	function parseTemplate(page, path, template, fileType)
+	function _G.parseTemplate(page, path, template, fileType)
 		fileType = (fileType or fileTypes[page._extension])
 
 		local contents
@@ -518,29 +519,27 @@ end
 
 
 -- errorf( [ level=1, ] formatString, ...)
-function errorf(level, s, ...)
+function _G.errorf(level, s, ...)
 	if type(level) == "number" then
-		error(s:format(...), level+1)
+		error(F(s, ...), level+1)
 	else
-		error(level:format(s, ...), 2)
+		error(F(level, s, ...), 2)
 	end
 end
 
 -- fileerror( path, contents, position,   formatString, ... )
 -- fileerror( path, nil,      lineNumber, formatString, ... )
-function fileerror(path, contents, pos, s, ...)
+function _G.fileerror(path, contents, pos, s, ...)
 	local ln = contents and getLineNumber(contents, pos) or pos
 	if type(s) ~= "string" then
-		s = ("%s:%d: %s"):format(path, ln, tostring(s))
+		s = F("%s:%d: %s", path, ln, tostring(s))
 	else
-		s = ("%s:%d: "..s):format(path, ln, ...)
+		s = F("%s:%d: "..s, path, ln, ...)
 	end
 	error(s, 2)
 end
 
-function errorInGeneratedCodeFromTemplate(path, genCode, errInGenCode)
-	local fullPath = F("%s/%s/%s", cleanupPath(lfs.currentdir()), DIR_CONTENT, path)
-
+do
 	local function fixLineNumber(s, fullPath, genCode)
 		if s:sub(1, #fullPath+1) ~= fullPath..":" then
 			return s, false
@@ -560,24 +559,28 @@ function errorInGeneratedCodeFromTemplate(path, genCode, errInGenCode)
 		return s, true
 	end
 
-	errInGenCode.message = fixLineNumber(errInGenCode.message, fullPath, genCode)
+	function _G.errorInGeneratedCodeFromTemplate(path, genCode, errInGenCode)
+		local fullPath = F("%s/%s/%s", cleanupPath(lfs.currentdir()), DIR_CONTENT, path)
 
-	local didFix
-	for _, i in ipairsr(errInGenCode.stringLines) do
-		errInGenCode.stack[i], didFix = fixLineNumber(errInGenCode.stack[i], fullPath, genCode)
+		errInGenCode.message = fixLineNumber(errInGenCode.message, fullPath, genCode)
 
-		if didFix then
-			-- Prevent fixing line numbers more than once.
-			table.remove(errInGenCode.stringLines, i)
+		local didFix
+		for _, i in ipairsr(errInGenCode.stringLines) do
+			errInGenCode.stack[i], didFix = fixLineNumber(errInGenCode.stack[i], fullPath, genCode)
+
+			if didFix then
+				-- Prevent fixing line numbers more than once.
+				table.remove(errInGenCode.stringLines, i)
+			end
 		end
-	end
 
-	error(errInGenCode)
+		error(errInGenCode)
+	end
 end
 
 
 
-function getLineNumber(s, pos)
+function _G.getLineNumber(s, pos)
 	local lineCount = 1
 	for posCurrent in s:gmatch"()\n" do
 		if posCurrent < pos then
@@ -592,7 +595,7 @@ end
 
 
 -- writeOutputFile( category, pathRelative, url, dataString [ modificationTime ] )
-function writeOutputFile(category, pathRel, url, data, modTime)
+function _G.writeOutputFile(category, pathRel, url, data, modTime)
 	local pathOutputRel = rewriteOutputPath(pathRel)
 	if writtenOutputFiles[pathOutputRel] then
 		errorf("Duplicate output file '%s'.", pathOutputRel)
@@ -622,7 +625,7 @@ function writeOutputFile(category, pathRel, url, data, modTime)
 	if modTime then
 		local ok, err = lfs.touch(path, modTime)
 		if not ok then
-			logprint("Error: Could not update modification time for '%s': %s", path, err)
+			logprint("Error: Could not update modification time for '%s'. (%s)", path, err)
 		end
 	end
 
@@ -638,7 +641,7 @@ function writeOutputFile(category, pathRel, url, data, modTime)
 end
 
 -- preserveExistingOutputFile( category, pathRelative, url )
-function preserveExistingOutputFile(category, pathRel, url)
+function _G.preserveExistingOutputFile(category, pathRel, url)
 	local pathOutputRel = rewriteOutputPath(pathRel)
 	if writtenOutputFiles[pathOutputRel] then
 		errorf("Duplicate output file '%s'.", pathOutputRel)
@@ -668,7 +671,7 @@ end
 
 
 
-function createDirectory(path)
+function _G.createDirectory(path)
 	if path:find"^/" or path:find"^%a:" then
 		errorf(2, "[internal] Absolute paths are disabled. (%s)", path)
 	end
@@ -686,14 +689,14 @@ function createDirectory(path)
 	end
 end
 
-function isDirectoryEmpty(dirPath)
+function _G.isDirectoryEmpty(dirPath)
 	for name in lfs.dir(dirPath) do
 		if name ~= "." and name ~= ".." then  return false  end
 	end
 	return true
 end
 
-function removeEmptyDirectories(dirPath)
+function _G.removeEmptyDirectories(dirPath)
 	for name in lfs.dir(dirPath) do
 		local path = dirPath.."/"..name
 
@@ -713,7 +716,9 @@ end
 do
 	local values = {}
 
-	function print(...)
+	_G._print = print
+
+	function _G.print(...)
 		_print(...)
 
 		local argCount = select("#", ...)
@@ -724,7 +729,7 @@ do
 		log(table.concat(values, "\t", 1, argCount))
 	end
 
-	function printOnce(...)
+	function _G.printOnce(...)
 		local argCount = select("#", ...)
 		for i = 1, argCount do
 			values[i] = tostring(select(i, ...))
@@ -740,18 +745,18 @@ do
 	end
 end
 
-function printf(s, ...)
-	print(s:format(...))
+function _G.printf(s, ...)
+	print(F(s, ...))
 end
 
-function printfOnce(s, ...)
-	printOnce(s:format(...))
+function _G.printfOnce(s, ...)
+	printOnce(F(s, ...))
 end
 
 -- log( string )
 -- log( formatString, ... )
-function log(s, ...)
-	if select("#", ...) > 0 then  s = s:format(...)  end
+function _G.log(s, ...)
+	if select("#", ...) > 0 then  s = F(s, ...)  end
 
 	if not logFile then
 		table.insert(logBuffer, s)
@@ -766,19 +771,19 @@ function log(s, ...)
 	logFile:write(s, "\n")
 end
 
-function logprint(s, ...)
-	if select("#", ...) > 0 then  s = s:format(...)  end
+function _G.logprint(s, ...)
+	if select("#", ...) > 0 then  s = F(s, ...)  end
 
 	printf("[%s] %s", os.date"%H:%M:%S", s)
 end
 
-function logprintOnce(s, ...)
-	if select("#", ...) > 0 then  s = s:format(...)  end
+function _G.logprintOnce(s, ...)
+	if select("#", ...) > 0 then  s = F(s, ...)  end
 
 	printfOnce("[%s] %s", os.date"%H:%M:%S", s)
 end
 
-function logVerbose(...)
+function _G.logVerbose(...)
 	if verbosePrint then
 		logprint(...)
 	else
@@ -841,7 +846,7 @@ do
 
 	end
 
-	function printobj(...)
+	function _G.printobj(...)
 		for i = 1, select("#", ...) do
 			if i > 1 then  out:write("\t")  end
 
@@ -854,7 +859,7 @@ end
 
 
 
-function insertLineNumberCode(t, ln)
+function _G.insertLineNumberCode(t, ln)
 	table.insert(t, "\n-- @LINE")
 	table.insert(t, ln)
 	table.insert(t, "\n")
@@ -862,19 +867,19 @@ end
 
 
 
-function isFile(path)
+function _G.isFile(path)
 	return lfs.attributes(path, "mode") == "file"
 end
 
-function isDirectory(path)
+function _G.isDirectory(path)
 	return lfs.attributes(path, "mode") == "directory"
 end
 
 
 
-F = string.format
+_G.F = string.format
 
-function formatBytes(n)
+function _G.formatBytes(n)
 	if n > (1024*1024*1024)/100 then
 		return F("%.2f GB", n/(1024*1024*1024))
 	elseif n > (1024*1024)/100 then
@@ -885,7 +890,7 @@ function formatBytes(n)
 	return F("%d bytes", n)
 end
 
-function formatTemplate(s, values)
+function _G.formatTemplate(s, values)
 	s = s:gsub(":([%a_][%w_]*):", function(k)
 		if values[k] == nil then
 			logprint("[formatTemplate] WARNING: No value for ':%s:'.", k)
@@ -906,12 +911,12 @@ do
 		["%2c"]=",",["%2f"]="/",["%3a"]=":",["%3b"]=";",["%3d"]="=",["%3f"]="?",["%40"]="@",["%5b"]="[",["%5d"]="]",
 	}
 
-	function toUrl(url)
+	function _G.toUrl(url)
 		if type(url) ~= "string" then
 			errorf(2, "Bad type of 'url' argument. (Got %s)", type(url))
 		end
 
-		url = escapeUri(url)
+		url = urlLib.escape(url)
 		url = url:gsub("%%[0-9a-f][0-9a-f]", URI_PERCENT_CODES_TO_NOT_ENCODE)
 
 		return url
@@ -920,12 +925,12 @@ do
 	-- print(toUrl("http://www.example.com/some-path/File~With (Stuff_åäö).jpg?key=value&foo=bar#hash")) -- TEST
 end
 
-function toUrlAbsolute(url)
+function _G.toUrlAbsolute(url)
 	url = url:gsub("^/%f[^/]", site.baseUrl.v)
 	return toUrl(url)
 end
 
-function urlize(text)
+function _G.urlize(text)
 	text = text
 		:lower()
 		:gsub("[%p ]+", "-")
@@ -935,7 +940,7 @@ function urlize(text)
 	return text == "" and "-" or text
 end
 
-function toPrettyUrl(url)
+function _G.toPrettyUrl(url)
 	return (url
 		:gsub("^https?://", "")
 		:gsub("^www%.", "")
@@ -945,21 +950,21 @@ end
 
 
 
-function generatorMeta(hideVersion)
+function _G.generatorMeta(hideVersion)
 	return
 		hideVersion
 		and '<meta name="generator" content="LuaWebGen">'
-		or  '<meta name="generator" content="LuaWebGen '.._WEBGEN_VERSION..'">'
+		or  '<meta name="generator" content="LuaWebGen '..WEBGEN_VERSION..'">'
 end
 
 
 
-function trim(s)
+function _G.trim(s)
 	s = s :gsub("^%s+", "") :gsub("%s+$", "")
 	return s
 end
 
-function trimNewlines(s)
+function _G.trimNewlines(s)
 	s = s :gsub("^\n+", "") :gsub("\n+$", "")
 	return s
 end
@@ -1008,7 +1013,7 @@ do
 		table.insert(out, "}")
 	end
 
-	function tostringForTemplates(v)
+	function _G.tostringForTemplates(v)
 		local out = {}
 		formatValue(v, out, false)
 		return table.concat(out)
@@ -1020,13 +1025,13 @@ end
 -- array = sortNatural( array [, attribute ] )
 do
 	local function pad(numStr)
-		return ("%03d%s"):format(#numStr, numStr)
+		return F("%03d%s", #numStr, numStr)
 	end
-	function compareNatural(a, b)
+	function _G.compareNatural(a, b)
 		return (tostringForTemplates(a):gsub("%d+", pad) < tostringForTemplates(b):gsub("%d+", pad))
 	end
 
-	function sortNatural(t, k)
+	function _G.sortNatural(t, k)
 		if k then
 			table.sort(t, function(a, b)
 				return compareNatural(a[k], b[k])
@@ -1041,7 +1046,7 @@ end
 
 
 -- dataFolderReader = newDataFolderReader( path [, isTop=false ] )
-function newDataFolderReader(path, checkDirExistance)
+function _G.newDataFolderReader(path, checkDirExistance)
 	local dataFolderReader = {}
 
 	setmetatable(dataFolderReader, {
@@ -1078,12 +1083,12 @@ function newDataFolderReader(path, checkDirExistance)
 			elseif isFile(F("%s/%s.toml", path, k)) then
 				local filePath = F("%s/%s.toml", path, k)
 				local contents = assert(getFileContents(filePath))
-				dataObj = assert(parseToml(contents))
+				dataObj        = assert(tomlLib.parse(contents))
 
 			elseif isFile(F("%s/%s.xml", path, k)) then
 				local filePath = F("%s/%s.xml", path, k)
 				local contents = assert(getFileContents(filePath))
-				dataObj = assert(xmlLib.parse(contents, false))
+				dataObj        = assert(xmlLib.parse(contents, false))
 
 			elseif isDirectory(F("%s/%s", path, k)) then
 				dataObj = newDataFolderReader(F("%s/%s", path, k))
@@ -1103,11 +1108,11 @@ function newDataFolderReader(path, checkDirExistance)
 	return dataFolderReader
 end
 
-function isDataFolderReader(t)
+function _G.isDataFolderReader(t)
 	return dataReaderPaths[t] ~= nil
 end
 
-function preloadData(dataFolderReader)
+function _G.preloadData(dataFolderReader)
 	if dataIsPreloaded[dataFolderReader] then  return dataFolderReader  end
 
 	for name in lfs.dir(dataReaderPaths[dataFolderReader]) do
@@ -1132,7 +1137,7 @@ end
 
 
 
-function getProtectionWrapper(obj, objName)
+function _G.getProtectionWrapper(obj, objName)
 	assertarg(1, obj,     "table")
 	assertarg(2, objName, "string")
 
@@ -1182,31 +1187,31 @@ end
 
 
 
-function toNormalPath(osPath)
+function _G.toNormalPath(osPath)
 	local path = osPath:gsub("\\", "/")
 	return path
 end
 
-function toWindowsPath(path)
+function _G.toWindowsPath(path)
 	local winPath = path:gsub("/", "\\")
 	return winPath
 end
 
 
 
-function getDirectory(genericPath)
+function _G.getDirectory(genericPath)
 	return (genericPath:gsub("/?[^/]+$", ""))
 end
 
-function getFilename(genericPath)
+function _G.getFilename(genericPath)
 	return genericPath:match"[^/]+$"
 end
 
-function getExtension(filename)
+function _G.getExtension(filename)
 	return filename:match"%.([^.]+)$" or ""
 end
 
-function getBasename(filename)
+function _G.getBasename(filename)
 	local ext = getExtension(filename)
 	if ext == "" then  return filename  end
 
@@ -1216,7 +1221,7 @@ end
 
 
 -- generateFromTemplate( page, template [, modificationTime ] )
-function generateFromTemplate(page, template, modTime)
+function _G.generateFromTemplate(page, template, modTime)
 	assert(type(page) == "table")
 	assert(type(template) == "string")
 
@@ -1271,7 +1276,7 @@ function generateFromTemplate(page, template, modTime)
 	page._readonly     = true
 end
 
-function generateFromTemplateFile(page)
+function _G.generateFromTemplateFile(page)
 	if page._isSkipped then  return  end
 	if page._isGenerating and page._isLocked then  return  end -- Allowed recursion.
 
@@ -1286,7 +1291,7 @@ function generateFromTemplateFile(page)
 	generateFromTemplate(page, template, modTime)
 end
 
-function generateRedirection(url, targetUrl)
+function _G.generateRedirection(url, targetUrl)
 	assertarg(1, url,       "string")
 	assertarg(2, targetUrl, "string")
 
@@ -1340,21 +1345,21 @@ end
 
 
 
-function assertf(v, err, ...)
+function _G.assertf(v, err, ...)
 	if not v then
-		if select("#", ...) > 0 then  err = err:format(...)  end
+		if select("#", ...) > 0 then  err = F(err, ...)  end
 		assert(false, err)
 	end
 	return v
 end
 
-function assertType(v, vType, err, ...)
+function _G.assertType(v, vType, err, ...)
 	assertf(type(v) == vType, err, ...)
 	return v
 end
 
 -- value = assertTable( value [, fieldKeyType, fieldValueType, errorMessage, ... ] )
-function assertTable(t, kType, vType, err, ...)
+function _G.assertTable(t, kType, vType, err, ...)
 	assertType(t, "table", err, ...)
 	for k, v in pairs(t) do
 		if kType then  assertType(k, kType, err, ...)  end
@@ -1384,10 +1389,10 @@ do
 
 		local expects = table.concat({...}, " or ", 1, typeCount)
 
-		error(("bad argument #%d to '%s' (%s expected, got %s)"):format(n, fName, expects, vType), depth)
+		errorf(depth, "bad argument #%d to '%s' (%s expected, got %s)", n, fName, expects, vType)
 	end
 
-	function assertarg(fNameOrArgNum, ...)
+	function _G.assertarg(fNameOrArgNum, ...)
 		if type(fNameOrArgNum) == "string" then
 			return _assertarg(fNameOrArgNum, ...)
 		else
@@ -1398,21 +1403,21 @@ end
 
 
 
-function indexOf(t, v)
+function _G.indexOf(t, v)
 	for i, item in ipairs(t) do
 		if item == v then  return i  end
 	end
 	return nil
 end
 
-function itemWith(t, k, v)
+function _G.itemWith(t, k, v)
 	for i, item in ipairs(t) do
 		if item[k] == v then  return item, i  end
 	end
 	return nil
 end
 
-function itemWithAll(t, k, v)
+function _G.itemWithAll(t, k, v)
 	local items = {}
 	for _, item in ipairs(t) do
 		if item[k] == v then  table.insert(items, item)  end
@@ -1431,28 +1436,27 @@ do
 		["'"] = "&#39;",
 	}
 
-	function encodeHtmlEntities(s)
-		s = s:gsub("[&<>\"']", ENTITIES)
-		return s
+	function _G.encodeHtmlEntities(s)
+		return (s:gsub("[&<>\"']", ENTITIES))
 	end
 end
 
 
 
-function markdownToHtml(md)
+function _G.markdownToHtml(md)
 	return markdownLib(md)
 end
 
 
 
-function pack(...)
+function _G.pack(...)
 	return {n=select("#", ...), ...}
 end
 
 
 
 -- template, path = getLayoutTemplate( page )
-function getLayoutTemplate(page)
+function _G.getLayoutTemplate(page)
 	local path = F("%s/%s.html", DIR_LAYOUTS, page.layout.v)
 
 	local template = layoutTemplates[path]
@@ -1470,7 +1474,7 @@ end
 
 
 -- parts = splitString( string, separatorPattern [, startIndex=1, plain=false ] )
-function splitString(s, sep, i, plain)
+function _G.splitString(s, sep, i, plain)
 	i = i or 1
 	local parts = {}
 
@@ -1488,7 +1492,7 @@ end
 
 
 
-function datetimeToTime(datetime)
+function _G.datetimeToTime(datetime)
 	assertarg(1, datetime, "string")
 
 	local date = dateLib(datetime)
@@ -1498,7 +1502,7 @@ function datetimeToTime(datetime)
 end
 
 -- datetime = getDatetime( [ time=now ] )
-function getDatetime(time)
+function _G.getDatetime(time)
 	assertarg(1, time, "number","nil")
 
 	local date     = dateLib(time or os.time()):tolocal()
@@ -1509,7 +1513,7 @@ end
 
 
 
-function unindent(s)
+function _G.unindent(s)
 	local indent = s:match"^\t+"
 	if indent then
 		s = s
@@ -1523,19 +1527,19 @@ end
 
 
 
-function pushContext(ctxName)
+function _G.pushContext(ctxName)
 	local ctx = {_name=ctxName, _scriptEnvironmentGlobals={}}
 	table.insert(contextStack, ctx)
 	return ctx
 end
 
-function popContext(ctxName)
+function _G.popContext(ctxName)
 	assertContext(ctxName)
 	table.remove(contextStack)
 end
 
 -- assertContext( contextName [, functionContext, errorLevel=2 ] )
-function assertContext(ctxName, funcContext, errLevel)
+function _G.assertContext(ctxName, funcContext, errLevel)
 	local ctx = contextStack[#contextStack]
 	if not ctx or ctx._name ~= ctxName then
 		errLevel = (errLevel or 2)+1
@@ -1548,7 +1552,7 @@ function assertContext(ctxName, funcContext, errLevel)
 end
 
 -- context = getContext( [ contextName ] )
-function getContext(ctxName)
+function _G.getContext(ctxName)
 	if ctxName then  assertContext(ctxName)  end
 
 	local ctx = contextStack[#contextStack] or error("There is no context.")
@@ -1566,12 +1570,14 @@ do
 		["gif"]  = "gifStr",
 	}
 
-	function createThumbnail(pathImageRel, thumbW, thumbH, errLevel)
+	function _G.createThumbnail(pathImageRel, thumbW, thumbH, errLevel)
 		thumbW   = thumbW or 0
 		thumbH   = thumbH or 0
 		errLevel = (errLevel or 1)+1
 
-		if thumbW == 0 and thumbH == 0 then
+		if not gd then
+			error("GD library is not installed.", errLevel)
+		elseif thumbW == 0 and thumbH == 0 then
 			error("Thumbnail images must have at least a width or a height.", errLevel)
 		end
 
@@ -1651,8 +1657,8 @@ end
 
 
 
-function round(n)
-	return math.floor(n+0.5)
+function _G.round(n)
+	return math.floor(n+.5)
 end
 
 
@@ -1661,15 +1667,15 @@ end
 do
 	local mt = {
 		__call = function(b, ...)
-			local len = select("#", ...)
-			if len == 0 then  return table.concat(b)  end
+			local argCount = select("#", ...)
+			if argCount == 0 then  return table.concat(b)  end
 
-			local s = len == 1 and tostring(...) or F(...)
+			local s = (argCount == 1) and tostring(...) or F(...)
 			table.insert(b, s)
 		end,
 	}
 
-	function newStringBuilder()
+	function _G.newStringBuilder()
 		return setmetatable({}, mt)
 	end
 end
@@ -1682,7 +1688,7 @@ do
 		return sitePathToPath(sitePath)
 	end
 
-	function newPage(pathRel)
+	function _G.newPage(pathRel)
 		assertType(pathRel, "string")
 
 		local filename = getFilename(pathRel)
@@ -1818,14 +1824,14 @@ end
 
 
 
-function pathToSitePath(pathRel)
+function _G.pathToSitePath(pathRel)
 	if pathRel:find"^/" then
 		errorf(2, "Path is not valid: %s", pathRel)
 	end
 	return "/"..pathRel
 end
 
-function sitePathToPath(sitePath)
+function _G.sitePathToPath(sitePath)
 	if not sitePath:find"^/" then
 		errorf(2, "Path is not a valid site path - they must start with '/': %s", sitePath)
 	end
@@ -1908,7 +1914,7 @@ do
 		return out
 	end
 
-	function serializeLua(data)
+	function _G.serializeLua(data)
 		return (table.concat(_serializeLua({}, data)))
 	end
 
@@ -1916,7 +1922,7 @@ end
 
 
 
-function getKeys(t)
+function _G.getKeys(t)
 	local keys = {}
 	for k in pairs(t) do  table.insert(keys, k)  end
 	return keys
@@ -1924,7 +1930,7 @@ end
 
 
 
-function urlExists(url)
+function _G.urlExists(url)
 	if not url:find"^/" then
 		errorf(2, "Local URLs must begin with a '/'. (%s)", url)
 	end
@@ -1936,7 +1942,7 @@ end
 
 -- bool = isAny( valueToCompare, value1, ... )
 -- bool = isAny( valueToCompare, arrayOfValues )
-function isAny(v, ...)
+function _G.isAny(v, ...)
 	local len = select("#", ...)
 
 	if len == 1 and type(...) == "table" then
@@ -1955,7 +1961,7 @@ end
 
 
 
-function rewriteOutputPath(pathRel)
+function _G.rewriteOutputPath(pathRel)
 	local sitePath = pathToSitePath(pathRel)
 
 	for _, pat in ipairs(rewriteExcludes) do
@@ -1974,14 +1980,14 @@ function rewriteOutputPath(pathRel)
 		return (sitePathToPath(sitePathNew))
 
 	else
-		return (sitePathToPath(outputPathFormat:format(sitePath)))
+		return (sitePathToPath(F(outputPathFormat, sitePath)))
 	end
 end
 
 
 
 -- removeItem( array, value1, ... )
-function removeItem(t, ...)
+function _G.removeItem(t, ...)
 	for i = 1, select("#", ...) do
 		local iToRemove = indexOf(t, select(i, ...))
 
@@ -1992,21 +1998,21 @@ end
 
 
 -- Same as string.gsub(), but "%" has no meaning in the replacement.
-function gsub2(s, pat, repl, ...)
+function _G.gsub2(s, pat, repl, ...)
 	return s:gsub(pat, repl:gsub("%%", "%%%%"), ...)
 end
 
 
 
 -- string = htaccessRewriteEscapeTestString( string )
-function htaccessRewriteEscapeTestString(s)
+function _G.htaccessRewriteEscapeTestString(s)
 	s = s:gsub('[$%%\\"]', "\\%0")
 
 	return s
 end
 
 -- string = htaccessRewriteEscapeCondPattern( string [, isWhole=false ] )
-function htaccessRewriteEscapeCondPattern(s, isWhole)
+function _G.htaccessRewriteEscapeCondPattern(s, isWhole)
 	s = s:gsub('[$%%\\".+*?^()[%]]', "\\%0")
 
 	if isWhole then  s = s:gsub("^[!=<>]", "\\%0")  end
@@ -2015,7 +2021,7 @@ function htaccessRewriteEscapeCondPattern(s, isWhole)
 end
 
 -- string = htaccessRewriteEscapeRuleSubstitution( string [, isWhole=false ] )
-function htaccessRewriteEscapeRuleSubstitution(s, isWhole)
+function _G.htaccessRewriteEscapeRuleSubstitution(s, isWhole)
 	if isWhole and s == "-" then  return "\\-"  end
 
 	return (s:gsub('[$%%\\"]', "\\%0"))
@@ -2025,20 +2031,20 @@ end
 
 -- Compute the difference in seconds between local time and UTC. (Normal time.)
 -- http://lua-users.org/wiki/TimeZone
-function getTimezone()
+function _G.getTimezone()
 	local now = os.time()
 	return os.difftime(now, os.time(os.date("!*t", now)))
 end
 
 -- Return a timezone string in ISO 8601:2000 standard form (+hhmm or -hhmm).
-function getTimezoneOffsetString(tz)
+function _G.getTimezoneOffsetString(tz)
 	local h, m = math.modf(tz/3600)
 	return F("%+.4d", 100*h+60*m)
 end
 
 -- Return the timezone offset in seconds, as it was on the given time. (DST obeyed.)
 -- timezoneOffset = getTimezoneOffset( [ time=now ] )
-function getTimezoneOffset(time)
+function _G.getTimezoneOffset(time)
 	time = time or os.time()
 	local dateUtc   = os.date("!*t", time)
 	local dateLocal = os.date("*t",  time)
@@ -2048,7 +2054,7 @@ end
 
 
 
-function isArgs(...)
+function _G.isArgs(...)
 	return select("#", ...) > 0
 end
 
@@ -2067,11 +2073,11 @@ do
 		end,
 	}
 
-	function handleError(err)
+	function _G.handleError(err)
 		return isErrorObject(err) and err or makeError(tostring(err), 2)
 	end
 
-	function makeError(message, level)
+	function _G.makeError(message, level)
 		assertarg(1, message, "string")
 		assertarg(2, level,   "number","nil")
 
@@ -2082,12 +2088,7 @@ do
 
 		local didFixMessage = false
 
-		for i = 1, math.huge do
-			if stack[ERROR_TRACEBACK_LINES] then
-				table.insert(stack, "(...)")
-				break
-			end
-
+		for i = 1, 1/0 do
 			local info = debug.getinfo(level+i, "nSl")
 			if not info then  break  end
 
@@ -2133,22 +2134,22 @@ do
 		return err
 	end
 
-	function makeErrorf(level, s, ...)
+	function _G.makeErrorf(level, s, ...)
 		if type(level) == "number" then
-			return makeError(s:format(...), level+1)
+			return makeError(F(s, ...), level+1)
 		else
-			return makeError(level:format(s, ...), 2)
+			return makeError(F(level, s, ...), 2)
 		end
 	end
 
-	function isErrorObject(v)
+	function _G.isErrorObject(v)
 		return type(v) == "table" and getmetatable(v) == errMt
 	end
 end
 
 
 
-function cleanupPath(someKindOfPath)
+function _G.cleanupPath(someKindOfPath)
 	local path = toNormalPath(someKindOfPath)
 
 	local count
@@ -2161,11 +2162,11 @@ end
 
 
 
-function ipairsr(t)
+function _G.ipairsr(t)
 	return iprev, t, #t+1
 end
 
-function iprev(t, i)
+function _G.iprev(t, i)
 	i = i-1
 	local v = t[i]
 	if v ~= nil then  return i, v  end
@@ -2173,7 +2174,7 @@ end
 
 
 
-function pairsSorted(t)
+function _G.pairsSorted(t)
 	local keys = sortNatural(getKeys(t))
 	local i    = 0
 
@@ -2186,14 +2187,14 @@ end
 
 
 
-function attributeWith(t, v)
+function _G.attributeWith(t, v)
 	for k, item in pairs(t) do
 		if item == v then  return k  end
 	end
 	return nil
 end
 
-function attributeWithAny(t, ...)
+function _G.attributeWithAny(t, ...)
 	for k, item in pairs(t) do
 		if isAny(item, ...) then  return k  end
 	end
@@ -2202,7 +2203,7 @@ end
 
 
 
-function sort(t, ...)
+function _G.sort(t, ...)
 	table.sort(t, ...)
 	return t
 end
@@ -2211,40 +2212,61 @@ end
 
 do
 	local imageLoaders = {
-		["png"]  = gd.createFromPng,
-		["jpg"]  = gd.createFromJpeg,
-		["jpeg"] = gd.createFromJpeg,
-		["gif"]  = gd.createFromGif,
+		["png"]  = gd and gd.createFromPng,
+		["jpg"]  = gd and gd.createFromJpeg,
+		["jpeg"] = gd and gd.createFromJpeg,
+		["gif"]  = gd and gd.createFromGif,
 	}
 
-	function loadImage(pathImageRel)
+	function _G.loadImage(pathImageRel)
+		if not gd then
+			return nil, "GD library is not installed."
+		end
+
 		local filename  = getFilename(pathImageRel)
 		local extLower  = getExtension(filename):lower()
 		local pathImage = DIR_CONTENT.."/"..pathImageRel
 
 		if not isFile(pathImage) then
-			return F("File does not exist: %s", pathImage)
+			return nil, F("File does not exist: %s", pathImage)
 		end
 
 		local imageLoader = imageLoaders[extLower]
 		if not imageLoader then
-			return F("Unknown image file format '%'.", extLower)
+			return nil, F("Unknown image file format '%'.", extLower)
 		end
 
 		local image = imageLoader(pathImage)
 		if not image then
-			return F("Could not load image '%s'. Maybe the image is corrupted?", pathImage)
+			return nil, F("Could not load image '%s'. Maybe the image is corrupted?", pathImage)
 		end
 
 		return image
 	end
 end
 
-function getImageDimensions(pathImageRel)
+function _G.getImageDimensions(pathImageRel)
 	local image, err = loadImage(pathImageRel)
 	if not image then  return nil, err  end
 
 	return image:sizeXY()
+end
+
+
+
+function _G.getTimeBetter()
+	return socket and socket.gettime() or os.time()
+end
+
+function _G.sleep(duration)
+	if socket then
+		socket.sleep(duration)
+	else
+		local endTime = getTimeBetter() + duration
+		while getTimeBetter() < endTime do
+			-- @Incomplete: Do something to waste time?
+		end
+	end
 end
 
 
