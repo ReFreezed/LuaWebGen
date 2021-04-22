@@ -1,0 +1,143 @@
+--[[============================================================
+--=
+--=  Global Variables and Constants
+--=
+--=-------------------------------------------------------------
+--=
+--=  LuaWebGen - static website generator in Lua!
+--=  - Written by Marcus 'ReFreezed' Thunström
+--=  - MIT License (See LICENSE.txt)
+--=
+--============================================================]]
+
+_G.WEBGEN_VERSION = !(getReleaseVersion())
+
+
+
+-- Settings.
+
+_G.DIR_CONTENT = "content" -- @Incomplete: Make directories configurable.
+_G.DIR_DATA    = "data"
+_G.DIR_LAYOUTS = "layouts"
+_G.DIR_LOGS    = "logs"
+_G.DIR_OUTPUT  = "output"
+_G.DIR_SCRIPTS = "scripts"
+
+_G.AUTOBUILD_MIN_INTERVAL = 1.00
+
+
+
+-- Constants.
+
+_G.FILE_TYPE_SET       = {["markdown"]=true, ["html"]=true, ["othertemplate"]=true}
+_G.OUTPUT_CATEGORY_SET = {["page"]=true, ["template"]=true, ["raw"]=true}
+
+_G.DATA_FILE_EXTENSIONS = {"lua","toml","xml"}
+_G.IMAGE_EXTENSIONS     = {"png","jpg","jpeg","gif"}
+
+_G.NOOP = function()end
+
+
+
+-- Modules.
+
+_G.lfs = require"lfs"
+
+_G.dateLib     = require"date"
+_G.markdownLib = require"markdown"
+_G.tomlLib     = require"toml"
+_G.urlLib      = require"url"
+_G.xmlLib      = require"pl.xml"
+
+
+
+-- Misc variables.
+
+_G.logFile = nil
+_G.logPath = ""
+_G.toLog   = {--[[ message1, ... ]]} -- Before the log file has opened.
+
+_G.includeDrafts = false
+_G.verbosePrint  = false
+
+_G.scriptEnvironment        = nil
+_G.scriptEnvironmentGlobals = nil
+
+_G.dataReaderPaths     = setmetatable({--[[ [dataFolderReader1]=path1, ... ]]}, {__mode="k"})
+_G.dataIsPreloaded     = setmetatable({--[[ [dataFolderReader1]=true,  ... ]]}, {__mode="k"})
+_G.protectionWrappers  = setmetatable({--[[ [object1]=wrapper1, ... ]]}, {__mode="kv"})
+_G.protectionedObjects = setmetatable({--[[ [wrapper1]=object1, ... ]]}, {__mode="kv"})
+
+_G.oncePrints   = {--[[ [message1]=true, ... ]]}
+_G.warningCount = 0
+
+_G._ = nil -- Dummy.
+
+
+
+-- Site variables. These are reset in buildWebsite() (including oncePrints and warningCount).
+function _G.resetSiteVariables()
+	site = {
+		_readonly = true,
+
+		title = {
+			v = "",
+			g = function(field) return field.v end,
+		},
+		baseUrl = {
+			v = "",
+			g = function(field) return field.v end,
+		},
+		languageCode = {
+			v = "",
+			g = function(field) return field.v end,
+		},
+		defaultLayout = {
+			v = "page",
+			g = function(field) return field.v end,
+		},
+
+		redirections = {
+			v = {--[[ [url1]=targetUrl1, ... ]]},
+			g = function(field) return field.v end,
+		},
+	}
+
+	ignoreFiles   = {--[[ pathPattern1, ... ]]}
+	ignoreFolders = {--[[ pathPattern1, ... ]]}
+
+	fileTypes      = {["md"]="markdown", ["html"]="html", ["css"]="othertemplate"}
+	fileProcessors = {--[[ [extension1]=function(data, sitePath), ... ]]}
+
+	htaErrors = {--[[ [httpStatusCode1]=document1, ... ]]}
+
+	outputPathFormat = "%s"
+	rewriteExcludes  = {--[[ pathPattern1, ... ]]}
+
+	autoLockPages   = false
+	noTrailingSlash = false
+
+
+	contextStack    = {--[[ context1,                    ... ]]}
+	layoutTemplates = {--[[ [path1]=template1,           ... ]]}
+	scriptFunctions = {--[[ [scriptName1]=function(...), ... ]]}
+
+	pages           = {--[[ page1, ... ]]}
+	pagesGenerating = {--[[ [pathRelOut1]=true, ... ]]}
+
+	writtenOutputFiles         = {--[[ [pathOutputRel1]=true, pathOutputRel1, ... ]]}
+	writtenOutputUrls          = {--[[ [url1]=true,       ... ]]}
+	writtenRedirects           = {--[[ [url1]=targetUrl1, ... ]]}
+	unwrittenRedirects         = {--[[ [url1]=targetUrl1, ... ]]}
+	outputFileCount            = 0
+	outputFileCounts           = {--[[ [category1]=count1, ... ]]}
+	outputFileByteCount        = 0
+	outputFilePreservedCount   = 0  -- This should only count raw files. @Cleanup: Maybe rename the variable?
+	outputFileSkippedPageCount = 0
+
+	thumbnailInfos = {}
+end
+
+resetSiteVariables()
+
+

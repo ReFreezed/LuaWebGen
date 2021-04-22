@@ -1,10 +1,19 @@
-<h1 align="center"><img src="logo.png" width="200" height="200" alt="LuaWebGen" title="LuaWebGen"></h1>
+<h1 align="center"><img src="gfx/logo.png" width="200" height="200" alt="LuaWebGen" title="LuaWebGen"></h1>
 
-<p align="center"><img src="https://img.shields.io/badge/version-0.19-green.svg" alt="version 0.19"></p>
+<p align="center">
+	<a href="https://github.com/ReFreezed/LuaWebGen/releases/latest">
+		<img src="https://img.shields.io/github/release/ReFreezed/LuaWebGen.svg" alt="">
+	</a>
+	<a href="https://github.com/ReFreezed/LuaWebGen/blob/master/LICENSE">
+		<img src="https://img.shields.io/github/license/ReFreezed/LuaWebGen.svg" alt="">
+	</a>
+</p>
 
 **LuaWebGen** - static website generator, powered by Lua. Somewhat inspired by [Hugo](https://gohugo.io/).
 
 Webpages are generated using HTML and markdown *templates* with embedded Lua code. CSS files can also include code.
+
+Download: [latest release](https://github.com/ReFreezed/LuaWebGen/releases/latest)
 
 - [Why?](#why)
 - [Example](#example)
@@ -70,42 +79,81 @@ Page template, `page.html`:
 
 
 ## Installation / Usage
+There are two versions of LuaWebGen: Windows and universal.
+Begin by [downloading](https://github.com/ReFreezed/LuaWebGen/releases/latest) and unzipping the program somewhere.
 
-LuaWebGen requires Lua 5.1 and these libraries:
 
-- [Lua-GD](https://ittner.github.io/lua-gd/) for image manipulation.
-- [LuaFileSystem](https://keplerproject.github.io/luafilesystem/) for file system access.
-- [LuaSocket](http://w3.impa.br/~diego/software/luasocket/home.html) for URL handling.
+### Windows
+Just run `webgen.exe`, like this:
 
-If you're on Windows you can simply install [Lua for Windows](https://github.com/rjpcomputing/luaforwindows).
+```batch
+cd path/to/siteroot
+path/to/webgen.exe command [options]
+```
 
-> **Note:** LuaWebGen has only been tested on Windows.
+If you add the program folder to your [PATH](https://www.computerhope.com/issues/ch000549.htm)
+it's a bit nicer:
 
+```batch
+cd path/to/siteroot
+webgen command [options]
+```
+
+> **Note:** The documentation uses this format.
+
+
+### Universal
+This version requires these things to be installed:
+
+- [Lua 5.1](https://www.lua.org/)
+- [LuaFileSystem](https://keplerproject.github.io/luafilesystem/) - required for file system access.
+
+Some functionality also require these things:
+
+- [Lua-GD](https://ittner.github.io/lua-gd/) - required for image manipulation.
+- [LuaSocket](http://w3.impa.br/~diego/software/luasocket/home.html) - optional, for more CPU-friendly auto-builds.
+
+> **Hint:** On Windows you can simply install [Lua for Windows](https://github.com/rjpcomputing/luaforwindows)
+> which includes everything that's needed in a neat package.
+
+Run the program like this:
+
+```batch
+cd path/to/siteroot
+lua path/to/webgen.lua command [options]
+```
+
+> **Note:** LuaWebGen has only been tested on Windows so far.
+
+
+### Build Website
 To generate a website, run this from the [command line](https://github.com/ReFreezed/LuaWebGen/wiki/Command-Line):
 
 ```batch
-cd path/to/site/root
-lua path/to/LuaWebGen/main.lua build
+cd path/to/siteroot
+webgen build
 ```
 
 LuaWebGen expects this folder hierarchy:
 
 ```
 site-root/
-    content/           -- All website content, including pages, images, CSS and JavaScript files.
-        index.html|md  -- Homepage/root index page.
-    data/              -- Optional data folder. Can contain Lua, TOML and XML files.
-    layouts/           -- All HTML layout templates.
-        page.html      -- Default page template.
-    logs/              -- Automatically created log file folder.
-    output/            -- Automatically created output folder.
-    scripts/           -- Optional Lua script folder. The scripts must return a function.
-    config.lua         -- Site-wide configurations.
+    content/            -- All website content, including pages, images, CSS and JavaScript files.
+        index.(html|md) -- Homepage/root index page.
+    data/               -- Optional data folder. Can contain Lua, TOML and XML files.
+    layouts/            -- All HTML layout templates.
+        page.html       -- Default page template.
+    logs/               -- Automatically created log file folder.
+    output/             -- Automatically created output folder.
+    scripts/            -- Optional Lua script folder. Scripts must return a function.
+    config.lua          -- Site-wide configurations.
 ```
 
 Everything in the *content* folder will be processed and end up in the *output* folder.
 
 > **Note:** The *output* folder is automatically cleaned from files and folders that do not exist in the *content* folder,
 > so it's not a good idea to save files in the *output* folder.
+
+See the [wiki](https://github.com/ReFreezed/LuaWebGen/wiki) for the full documentation.
 
 

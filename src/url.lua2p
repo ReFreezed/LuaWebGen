@@ -110,10 +110,10 @@ function M.parse(url, default)
 	local authority = parsed.authority
 	if not authority then  return parsed  end
 
-	authority = authority:gsub("^([^@]*)@", function(u)  parsed.userinfo = u ; return ""  end)
-	authority = authority:gsub(":([^:]*)$", function(p)  parsed.port     = p ; return ""  end)
+	authority = authority:gsub("^([^@]*)@",   function(u)  parsed.userinfo = u ; return ""  end)
+	authority = authority:gsub(":([^:%]]*)$", function(p)  parsed.port     = p ; return ""  end)
 
-	if authority ~= "" then  parsed.host = authority  end
+	if authority ~= "" then  parsed.host = authority:match"^%[(.+)%]$" or authority  end -- IPv6?
 
 	local userinfo = parsed.userinfo
 	if not userinfo then  return parsed  end
@@ -137,7 +137,8 @@ function M.build(parsed)
 
 	if parsed.host then
 		authority = parsed.host
-		if parsed.port then  authority = authority .. ":" .. parsed.port  end
+        if authority:find(":", 1, true) then  authority = "[" .. authority .. "]"          end -- IPv6?
+		if parsed.port                  then  authority = authority .. ":" .. parsed.port  end
 
 		local userinfo = parsed.userinfo
 

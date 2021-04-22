@@ -6,7 +6,7 @@
 --=
 --=  LuaWebGen - static website generator in Lua!
 --=  - Written by Marcus 'ReFreezed' Thunström
---=  - MIT License (See main.lua)
+--=  - MIT License (See LICENSE.txt)
 --=
 --==============================================================
 
@@ -17,10 +17,11 @@
 	createThumbnail
 	datetimeToTime, getDatetime
 	encodeHtmlEntities
-	errorf, fileerror, errorInGeneratedCodeFromTemplate
+	errorf, fileError, errorInGeneratedCodeFromTemplate
 	F, formatBytes, formatTemplate
 	generateFromTemplate, generateFromTemplateFile, generateRedirection
 	generatorMeta
+	getCwd
 	getDirectory, getFilename, getExtension, getBasename
 	getFileContents
 	getKeys
@@ -29,8 +30,7 @@
 	getProtectionWrapper
 	getTimeBetter, sleep
 	getTimezone, getTimezoneOffsetString, getTimezoneOffset
-	gsub2
-	handleError, makeError, makeErrorf, isErrorObject
+	gsubPlainSub
 	htaccessRewriteEscapeTestString, htaccessRewriteEscapeCondPattern, htaccessRewriteEscapeRuleSubstitution
 	indexOf, itemWith, itemWithAll
 	insertLineNumberCode
@@ -48,7 +48,7 @@
 	pairsSorted
 	parseTemplate
 	pathToSitePath, sitePathToPath
-	print, _print, printOnce, printf, printfOnce, log, logprint, logprintOnce, logVerbose, printobj
+	printNoLog, printfNoLog, log, print, printOnce, printf, printfOnce, timestampPrint, timestampPrintOnce, timestampPrintVerbose, timestampPrintError, timestampPrintWarning, timestampPrintWarningOnce, printobj
 	pushContext, popContext, assertContext, getContext
 	removeItem
 	rewriteOutputPath
@@ -65,6 +65,7 @@
 	unindent
 	urlExists
 	writeOutputFile, preserveExistingOutputFile
+	xpcallErrorHandler, makeError, makeErrorf, isErrorObject
 
 --============================================================]]
 
@@ -189,7 +190,7 @@ do
 				_, codePosEnd = template:find("%]"..longCommentLevel.."%]}}", pos)
 
 				if not codePosEnd then
-					fileerror(
+					fileError(
 						path, template, pos,
 						'Comment block never ends. ("{{--[%s[" must end with "]%s]}}")',
 						longCommentLevel, longCommentLevel
@@ -200,7 +201,7 @@ do
 				_, codePosEnd = template:find("}}", pos, true)
 
 				if not codePosEnd then
-					fileerror(path, template, pos, 'Code block never ends.')
+					fileError(path, template, pos, 'Code block never ends.')
 				end
 			end
 
@@ -223,7 +224,7 @@ do
 					foriArr = code:match"^fori +(.+)$"
 
 					if not foriArr then
-						fileerror(path, template, pos, "Invalid fori statement.")
+						fileError(path, template, pos, "Invalid fori statement.")
 					end
 				end
 
@@ -239,7 +240,7 @@ do
 				local innerEndCode = trim(template:sub(innerEndCodePosStart+2, innerEndCodePosEnd-2))
 
 				if innerEndCode ~= "end" then
-					fileerror(
+					fileError(
 						path, template, innerEndCodePosStart,
 						"Expected end for 'fori' starting at line %d.",
 						getLineNumber(template, pos)
@@ -280,7 +281,7 @@ do
 				local innerEndCode = trim(template:sub(innerEndCodePosStart+2, innerEndCodePosEnd-2))
 
 				if innerEndCode ~= "end" then
-					fileerror(
+					fileError(
 						path, template, innerEndCodePosStart,
 						"Expected end for 'for' starting at line %d.",
 						getLineNumber(template, pos)
@@ -302,7 +303,7 @@ do
 				local innerEndCode = trim(template:sub(innerEndCodePosStart+2, innerEndCodePosEnd-2))
 
 				if innerEndCode ~= "end" then
-					fileerror(
+					fileError(
 						path, template, innerEndCodePosStart,
 						"Expected end for 'do' starting at line %d.",
 						getLineNumber(template, pos)
@@ -353,7 +354,7 @@ do
 				end
 
 				if innerEndCode ~= "end" then
-					fileerror(
+					fileError(
 						path, template, innerEndCodePosStart,
 						"Expected end for 'if' starting at line %d.",
 						getLineNumber(template, pos)
@@ -375,7 +376,7 @@ do
 				local innerEndCode = trim(template:sub(innerEndCodePosStart+2, innerEndCodePosEnd-2))
 
 				if innerEndCode ~= "end" then
-					fileerror(
+					fileError(
 						path, template, innerEndCodePosStart,
 						"Expected end for 'while' starting at line %d.",
 						getLineNumber(template, pos)
@@ -397,7 +398,7 @@ do
 				local innerEndCode = trim(template:sub(innerEndCodePosStart+2, innerEndCodePosEnd-2))
 
 				if not innerEndCode:find"^until[ (]" then
-					fileerror(
+					fileError(
 						path, template, innerEndCodePosStart,
 						"Expected until for 'repeat' starting at line %d.",
 						getLineNumber(template, pos)
@@ -418,7 +419,7 @@ do
 			-- End of block.
 			elseif code == "end" or code:find"^until[ (]" or code == "else" or code:find"^elseif[ (]" then
 				if level == 1 then
-					fileerror(path, template, pos, "Unexpected '%s'.", (code:match"^%w+"))
+					fileError(path, template, pos, "Unexpected '%s'.", (code:match"^%w+"))
 				end
 				return lua, codePosStart, codePosEnd
 
@@ -437,7 +438,7 @@ do
 		end
 
 		if level > 1 then
-			fileerror(path, template, blockStartPos, "Block never ends.")
+			fileError(path, template, blockStartPos, "Block never ends.")
 		end
 
 		if pos <= #template then
@@ -455,11 +456,9 @@ do
 
 		local out = {}
 
-		local fullPath = F("%s/%s/%s", lfs.currentdir(), DIR_CONTENT, path)
+		local fullPath   = F("%s/%s/%s", getCwd(), DIR_CONTENT, path)
 		local chunk, err = loadstring(luaCode, fullPath)
-		if not chunk then
-			errorInGeneratedCodeFromTemplate(path, luaCode, err)
-		end
+		if not chunk then  error(err)  end
 
 		setfenv(chunk, scriptEnvironment)
 
@@ -471,7 +470,7 @@ do
 		ctx.out = out
 		ctx.enableHtmlEncoding = enableHtmlEncoding
 
-		local ok, err = xpcall(chunk, handleError)
+		local ok, err = xpcall(chunk, xpcallErrorHandler)
 
 		popContext("template")
 
@@ -527,9 +526,9 @@ function _G.errorf(level, s, ...)
 	end
 end
 
--- fileerror( path, contents, position,   formatString, ... )
--- fileerror( path, nil,      lineNumber, formatString, ... )
-function _G.fileerror(path, contents, pos, s, ...)
+-- fileError( path, contents, position,   formatString, ... )
+-- fileError( path, nil,      lineNumber, formatString, ... )
+function _G.fileError(path, contents, pos, s, ...)
 	local ln = contents and getLineNumber(contents, pos) or pos
 	if type(s) ~= "string" then
 		s = F("%s:%d: %s", path, ln, tostring(s))
@@ -549,7 +548,7 @@ do
 		local lnInTemplate = 0
 
 		for line in genCode:gmatch"([^\n]*)\n?" do
-			lnInGenCode  = lnInGenCode-1
+			lnInGenCode  = lnInGenCode - 1
 			lnInTemplate = tonumber(line:match"^%-%- @LINE(%d+)$") or lnInTemplate
 
 			if lnInGenCode <= 1 then  break  end
@@ -560,13 +559,12 @@ do
 	end
 
 	function _G.errorInGeneratedCodeFromTemplate(path, genCode, errInGenCode)
-		local fullPath = F("%s/%s/%s", cleanupPath(lfs.currentdir()), DIR_CONTENT, path)
-
+		local fullPath       = F("%s/%s/%s", getCwd(), DIR_CONTENT, path)
 		errInGenCode.message = fixLineNumber(errInGenCode.message, fullPath, genCode)
 
-		local didFix
 		for _, i in ipairsr(errInGenCode.stringLines) do
-			errInGenCode.stack[i], didFix = fixLineNumber(errInGenCode.stack[i], fullPath, genCode)
+			local s, didFix       = fixLineNumber(errInGenCode.stack[i], fullPath, genCode)
+			errInGenCode.stack[i] = s
 
 			if didFix then
 				-- Prevent fixing line numbers more than once.
@@ -614,7 +612,7 @@ function _G.writeOutputFile(category, pathRel, url, data, modTime)
 	end
 
 	local path = DIR_OUTPUT.."/"..pathOutputRel
-	logVerbose("Writing: %s", path)
+	timestampPrintVerbose("Writing: %s", path)
 
 	createDirectory(getDirectory(path))
 
@@ -625,7 +623,7 @@ function _G.writeOutputFile(category, pathRel, url, data, modTime)
 	if modTime then
 		local ok, err = lfs.touch(path, modTime)
 		if not ok then
-			logprint("Error: Could not update modification time for '%s'. (%s)", path, err)
+			timestampPrintError("Could not update modification time for '%s'. (%s)", path, err)
 		end
 	end
 
@@ -649,11 +647,11 @@ function _G.preserveExistingOutputFile(category, pathRel, url)
 	assert(not writtenOutputUrls[url])
 
 	local path = DIR_OUTPUT.."/"..pathOutputRel
-	logVerbose("Preserving: %s", path)
+	timestampPrintVerbose("Preserving: %s", path)
 
 	local dataLen, err = lfs.attributes(path, "size")
 	if not dataLen then
-		logprint("Error: Could not retrieve size of file '%s'. (%s)", path, err)
+		timestampPrintError("Could not retrieve size of file '%s'. (%s)", path, err)
 		dataLen = 0
 	end
 
@@ -703,7 +701,7 @@ function _G.removeEmptyDirectories(dirPath)
 		if name ~= "." and name ~= ".." and isDirectory(path) then
 			removeEmptyDirectories(path)
 			if isDirectoryEmpty(path) then
-				logVerbose("Removing empty folder: %s", path)
+				timestampPrintVerbose("Removing empty folder: %s", path)
 				assert(lfs.rmdir(path))
 			end
 		end
@@ -713,13 +711,38 @@ end
 
 
 
+--
+-- Note: Print functions log, but log functions do not print.
+--
+
+-- log( string )
+-- log( formatString, ... )
+function _G.log(s, ...)
+	if select("#", ...) > 0 then  s = F(s, ...)  end
+
+	if not logFile then
+		table.insert(toLog, s)
+		return
+	end
+
+	for i, s in ipairs(toLog) do
+		logFile:write(s, "\n")
+		toLog[i] = nil
+	end
+
+	logFile:write(s, "\n")
+end
+
 do
 	local values = {}
 
-	_G._print = print
+	_G.printNoLog = print
+	function _G.printfNoLog(s, ...)
+		printNoLog(F(s, ...))
+	end
 
 	function _G.print(...)
-		_print(...)
+		printNoLog(...)
 
 		local argCount = select("#", ...)
 		for i = 1, argCount do
@@ -728,7 +751,6 @@ do
 
 		log(table.concat(values, "\t", 1, argCount))
 	end
-
 	function _G.printOnce(...)
 		local argCount = select("#", ...)
 		for i = 1, argCount do
@@ -740,7 +762,7 @@ do
 		if oncePrints[s] then  return  end
 		oncePrints[s] = true
 
-		_print(...)
+		printNoLog(...)
 		log(s)
 	end
 end
@@ -748,61 +770,94 @@ end
 function _G.printf(s, ...)
 	print(F(s, ...))
 end
-
 function _G.printfOnce(s, ...)
 	printOnce(F(s, ...))
 end
 
--- log( string )
--- log( formatString, ... )
-function _G.log(s, ...)
+-- timestampLog( string )
+-- timestampLog( formatString, ... )
+function _G.timestampLog(s, ...)
 	if select("#", ...) > 0 then  s = F(s, ...)  end
-
-	if not logFile then
-		table.insert(logBuffer, s)
-		return
-	end
-
-	for i, s in ipairs(logBuffer) do
-		logFile:write(s, "\n")
-		logBuffer[i] = nil
-	end
-
-	logFile:write(s, "\n")
+	log("[%s] %s", os.date"%H:%M:%S", s)
 end
 
-function _G.logprint(s, ...)
+-- timestampPrint( string )
+-- timestampPrint( formatString, ... )
+-- timestampPrintOnce( string )
+-- timestampPrintOnce( formatString, ... )
+function _G.timestampPrint(s, ...)
 	if select("#", ...) > 0 then  s = F(s, ...)  end
 
 	printf("[%s] %s", os.date"%H:%M:%S", s)
 end
-
-function _G.logprintOnce(s, ...)
+function _G.timestampPrintOnce(s, ...)
 	if select("#", ...) > 0 then  s = F(s, ...)  end
 
-	printfOnce("[%s] %s", os.date"%H:%M:%S", s)
+	if oncePrints[s] then  return  end
+	oncePrints[s] = true
+
+	printf("[%s] %s", os.date"%H:%M:%S", s)
 end
 
-function _G.logVerbose(...)
+-- timestampPrintVerbose( string )
+-- timestampPrintVerbose( formatString, ... )
+function _G.timestampPrintVerbose(...)
 	if verbosePrint then
-		logprint(...)
+		timestampPrint(...)
 	else
-		log(...)
+		timestampLog(...)
 	end
+end
+
+-- timestampPrintError( string )
+-- timestampPrintError( formatString, ... )
+function _G.timestampPrintError(s, ...)
+	if select("#", ...) > 0 then
+		s = F("[%s] ERROR: "..s, os.date"%H:%M:%S", ...)
+	else
+		s = F("[%s] ERROR: %s",  os.date"%H:%M:%S", s)
+	end
+	io.stderr:write(s, "\n")
+	log(s)
+end
+
+-- timestampPrintWarning( string )
+-- timestampPrintWarning( formatString, ... )
+-- timestampPrintWarningOnce( string )
+-- timestampPrintWarningOnce( formatString, ... )
+function _G.timestampPrintWarning(s, ...)
+	if select("#", ...) > 0 then  s = F(s, ...)  end
+
+	_G.warningCount = warningCount + 1
+	s               = F("[%s] WARNING(%d): %s", os.date"%H:%M:%S", warningCount, s)
+
+	io.stderr:write(s, "\n")
+	log(s)
+end
+function _G.timestampPrintWarningOnce(s, ...)
+	if select("#", ...) > 0 then  s = F(s, ...)  end
+
+	if oncePrints[s] then  return  end
+	oncePrints[s] = true
+
+	_G.warningCount = warningCount + 1
+	s               = F("[%s] WARNING(%d): %s", os.date"%H:%M:%S", warningCount, s)
+
+	io.stderr:write(s, "\n")
+	log(s)
 end
 
 -- printobj( ... )
 -- Note: Does not write to log.
 do
-	local out = io.stdout
+	local stdoutWrite = io.write
 
-	local _tostring = tostring
-	local function tostring(v)
-		return (_tostring(v):gsub('^table: ', ''))
+	local function toStringBetter(v)
+		return (tostring(v):gsub("^table: ", ""))
 	end
 
 	local function compareKeys(a, b)
-		return compareNatural(tostring(a), tostring(b))
+		return compareNatural(toStringBetter(a), toStringBetter(b))
 	end
 
 	local function _printobj(v, tables)
@@ -810,11 +865,11 @@ do
 
 		if vType == "table" then
 			if tables[v] then
-				out:write(tostring(v), " ")
+				stdoutWrite(toStringBetter(v), " ")
 				return
 			end
 
-			out:write(tostring(v), "{ ")
+			stdoutWrite(toStringBetter(v), "{ ")
 			tables[v] = true
 
 			local indices = {}
@@ -822,39 +877,38 @@ do
 
 			for _, k in ipairs(sort(getKeys(v), compareKeys)) do
 				if not indices[k] then
-					out:write(tostring(k), "=")
+					stdoutWrite(toStringBetter(k), "=")
 					_printobj(v[k], tables)
 				end
 			end
 
 			for i = 1, #v do
-				out:write(i, "=")
+				stdoutWrite(i, "=")
 				_printobj(v[i], tables)
 			end
 
-			out:write("} ")
+			stdoutWrite("} ")
 
 		elseif vType == "number" then
-			out:write(F("%g ", v))
+			stdoutWrite(F("%g ", v))
 
 		elseif vType == "string" then
-			out:write('"', v:gsub("%z", "\\0"):gsub("\n", "\\n"), '" ')
+			stdoutWrite('"', v:gsub("%z", "\\0"):gsub("\n", "\\n"), '" ')
 
 		else
-			out:write(tostring(v), " ")
+			stdoutWrite(toStringBetter(v), " ")
 		end
 
 	end
 
 	function _G.printobj(...)
 		for i = 1, select("#", ...) do
-			if i > 1 then  out:write("\t")  end
+			if i > 1 then  stdoutWrite("\t")  end
 
 			_printobj(select(i, ...), {})
 		end
-		out:write("\n")
+		stdoutWrite("\n")
 	end
-
 end
 
 
@@ -893,7 +947,7 @@ end
 function _G.formatTemplate(s, values)
 	s = s:gsub(":([%a_][%w_]*):", function(k)
 		if values[k] == nil then
-			logprint("[formatTemplate] WARNING: No value for ':%s:'.", k)
+			timestampPrintWarning("[formatTemplate] No value for :%s:.", k)
 		else
 			return tostring(values[k])
 		end
@@ -1068,15 +1122,17 @@ function _G.newDataFolderReader(path, checkDirExistance)
 				errorf(2, "Bad data key '%s'.", k)
 
 			elseif isFile(F("%s/%s.lua", path, k)) then
-				local filePath = F("%s/%s.lua", path, k)
-				local chunk    = assert(loadfile(filePath))
+				local filePath   = F("%s/%s.lua", path, k)
+				local chunk, err = loadfile(filePath)
+				if not chunk then  errorf(2, "Error loading Lua data file '%s': %s", filePath, err)  end
+
 				setfenv(chunk, scriptEnvironment)
 
 				pushContext("none")
 				dataObj = chunk()
 				popContext("none")
 
-				if not dataObj then
+				if dataObj == nil then
 					errorf(2, "Lua data file returned nothing. (%s)", filePath)
 				end
 
@@ -1094,7 +1150,7 @@ function _G.newDataFolderReader(path, checkDirExistance)
 				dataObj = newDataFolderReader(F("%s/%s", path, k))
 
 			else
-				logprintOnce("WARNING: Bad data path '%s/%s'.", path, k)
+				timestampPrintWarningOnce("Bad data path '%s/%s'.", path, k)
 				return nil
 			end
 
@@ -1575,8 +1631,10 @@ do
 		thumbH   = thumbH or 0
 		errLevel = (errLevel or 1)+1
 
+		local gd = pcall(require, "gd") and require"gd" or nil
+
 		if not gd then
-			error("GD library is not installed.", errLevel)
+			error("Failed loading Lua-GD.", errLevel)
 		elseif thumbW == 0 and thumbH == 0 then
 			error("Thumbnail images must have at least a width or a height.", errLevel)
 		end
@@ -1997,9 +2055,9 @@ end
 
 
 
--- Same as string.gsub(), but "%" has no meaning in the replacement.
-function _G.gsub2(s, pat, repl, ...)
-	return s:gsub(pat, repl:gsub("%%", "%%%%"), ...)
+-- Same as string.gsub(), but "%" has no meaning in the substitution.
+function _G.gsubPlainSub(s, pat, repl)
+	return s:gsub(pat, (repl:gsub("%%", "%%%%")))
 end
 
 
@@ -2073,7 +2131,7 @@ do
 		end,
 	}
 
-	function _G.handleError(err)
+	function _G.xpcallErrorHandler(err)
 		return isErrorObject(err) and err or makeError(tostring(err), 2)
 	end
 
@@ -2152,9 +2210,9 @@ end
 function _G.cleanupPath(someKindOfPath)
 	local path = toNormalPath(someKindOfPath)
 
-	local count
 	repeat
-		path, count = path:gsub("/[^/]+/%.%./", "/", 1) -- Not completely fool proof!
+		local count
+		path, count = path:gsub("/[^/]+/%.%./", "/", 1) -- Not completely fool proof! @Robustness
 	until count == 0
 
 	return path
@@ -2211,17 +2269,29 @@ end
 
 
 do
-	local imageLoaders = {
-		["png"]  = gd and gd.createFromPng,
-		["jpg"]  = gd and gd.createFromJpeg,
-		["jpeg"] = gd and gd.createFromJpeg,
-		["gif"]  = gd and gd.createFromGif,
-	}
+	local initted = false
+	local gd, imageLoaders
+
+	local function init()
+		if initted then  return  end
+
+		initted = true
+		gd      = pcall(require, "gd") and require"gd" or nil
+
+		if not gd then
+			error("Failed loading Lua-GD.")
+		end
+
+		imageLoaders = {
+			["png"]  = gd.createFromPng,
+			["jpg"]  = gd.createFromJpeg,
+			["jpeg"] = gd.createFromJpeg,
+			["gif"]  = gd.createFromGif,
+		}
+	end
 
 	function _G.loadImage(pathImageRel)
-		if not gd then
-			return nil, "GD library is not installed."
-		end
+		init()
 
 		local filename  = getFilename(pathImageRel)
 		local extLower  = getExtension(filename):lower()
@@ -2254,19 +2324,36 @@ end
 
 
 
-function _G.getTimeBetter()
-	return socket and socket.gettime() or os.time()
-end
+do
+	local initted = false
+	local socket
 
-function _G.sleep(duration)
-	if socket then
-		socket.sleep(duration)
-	else
-		local endTime = getTimeBetter() + duration
-		while getTimeBetter() < endTime do
-			-- @Incomplete: Do something to waste time?
+	local function init()
+		if initted then  return  end
+		initted = true
+		socket  = pcall(require, "socket.core") and require"socket.core" or nil
+	end
+
+	function _G.getTimeBetter()
+		init()
+		return socket and socket.gettime() or os.time()
+	end
+
+	function _G.sleep(duration)
+		init()
+		if socket then
+			socket.sleep(duration)
+		else
+			local endTime = getTimeBetter() + duration
+			repeat until getTimeBetter() >= endTime -- @Incomplete: Do something to waste time?
 		end
 	end
+end
+
+
+
+function _G.getCwd()
+	return toNormalPath(lfs.currentdir())
 end
 
 

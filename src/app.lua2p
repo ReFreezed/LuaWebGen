@@ -6,12 +6,12 @@
 --=
 --=  LuaWebGen - static website generator in Lua!
 --=  - Written by Marcus 'ReFreezed' Thunström
---=  - MIT License (See main.lua)
+--=  - MIT License (See LICENSE.txt)
 --=
 --============================================================]]
 
-io.stdout:setvbuf("no")
-io.stderr:setvbuf("no")
+printf!("==== LuaWebGen v"..getReleaseVersion().." ====")
+print(os.date"%Y-%m-%d")
 
 
 
@@ -175,28 +175,34 @@ if command == "new" then
 ----------------------------------------------------------------
 
 elseif command == "build" then
+	local options = {}
+
 	while args[i] do
 		local arg = args[i]
 
 		if arg == "--force" or arg == "-f" then
+			arg = "--force"
 			_G.ignoreModificationTimes = true
 
 		elseif arg == "--autobuild" or arg == "-a" then
+			arg = "--autobuild"
 			_G.autobuild = true
 
 		elseif arg == "--drafts" or arg == "-d" then
+			arg = "--drafts"
 			includeDrafts = true
 
 		elseif arg == "--verbose" or arg == "-v" then
+			arg = "--verbose"
 			verbosePrint = true
 
 		elseif arg:find"^%-" then
 			errorf("[arg] Unknown option '%s'.", arg)
-
 		else
 			errorf("[arg] Unknown argument '%s'.", arg)
 		end
 
+		table.insert(options, arg)
 		i = i+1
 	end
 
@@ -204,12 +210,10 @@ elseif command == "build" then
 		error("The current folder doesn't seem to contain a site.")
 	end
 
-	if ignoreModificationTimes then  logprint("Option --force: Ignoring modification times.")  end
-	if autobuild               then  logprint("Option --autobuild: Auto-building website.")  end
-	if includeDrafts           then  logprint("Option --drafts: Drafts are included.")  end
-	if verbosePrint            then  logprint("Option --verbose: Verbose printing enabled.")  end
-
-	logprint("Site folder: %s", toNormalPath(lfs.currentdir()))
+	if options[1] then
+		printf("Options: %s", table.concat(options, ", "))
+	end
+	printf("SiteFolder: %s", getCwd())
 
 	-- Continue...
 
@@ -229,15 +233,15 @@ do
 	end
 
 	local basePath = DIR_LOGS..os.date"/%Y%m%d_%H%M%S"
+	local i        = 1
+	_G.logPath     = basePath..".log"
 
-	logPath = basePath..".log"
-	local i = 1
 	while isFile(logPath) do
-		i = i+1
-		logPath = basePath.."_"..i..".log"
+		i          = i + 1
+		_G.logPath = basePath.."_"..i..".log"
 	end
 
-	logFile = io.open(logPath, "w")
+	_G.logFile = io.open(logPath, "w")
 end
 
 
@@ -294,27 +298,26 @@ scriptEnvironmentGlobals = {
 	end,
 
 	-- Lua modules.
-	coroutine      = coroutine,
-	debug          = debug,
-	io             = io,
-	math           = math,
-	os             = os,
-	package        = package,
-	string         = string,
-	table          = table,
+	coroutine = coroutine,
+	debug     = debug,
+	io        = io,
+	math      = math,
+	os        = os,
+	package   = package,
+	string    = string,
+	table     = table,
 
 	-- Lua libraries.
-	lfs            = lfs,
-	socket         = socket, -- May be nil.
+	lfs = lfs,
 
 	-- Site objects. (Create at site generation.)
-	site           = nil,
-	data           = nil,
+	site = nil,
+	data = nil,
 
 	-- Page objects. (Create for each individual page. Store in context.)
-	page           = nil,
-	params         = nil,
-	P              = nil,
+	page   = nil,
+	params = nil,
+	P      = nil,
 
 	-- Utility functions.
 	----------------------------------------------------------------
@@ -477,10 +480,11 @@ scriptEnvironmentGlobals = {
 
 	warning = function(s)
 		s = F("!!! WARNING: %s !!!", s)
+
 		local border = ("!"):rep(#s)
 		print()
 		print(border)
-		printf("!!! WARNING: %s !!!", s)
+		print(s)
 		print(border)
 		print()
 	end,
@@ -593,7 +597,7 @@ scriptEnvironmentGlobals = {
 		local ok = true
 		for _, url in ipairs(urls) do
 			if not urlExists(url) then
-				printf("Error: URL is missing: %s", url)
+				timestampPrintError("URL is missing: %s", url)
 				ok = false
 			end
 		end
@@ -849,7 +853,8 @@ scriptEnvironment = setmetatable({}, {
 local function buildWebsite()
 	local startTime = getTimeBetter()
 
-	oncePrints = {}
+	_G.oncePrints   = {}
+	_G.warningCount = 0
 	resetSiteVariables()
 
 	scriptEnvironmentGlobals.site = getProtectionWrapper(site, "site")
@@ -861,7 +866,7 @@ local function buildWebsite()
 	----------------------------------------------------------------
 
 	if not isFile"config.lua" then
-		error(makeErrorf("%s:0: %s", toNormalPath(lfs.currentdir()), "Missing config.lua"))
+		error(makeErrorf("%s:0: %s", getCwd(), "Missing config.lua"))
 	end
 
 	local chunk = assert(loadfile"config.lua")
@@ -938,10 +943,10 @@ local function buildWebsite()
 	noTrailingSlash        = getV("removeTrailingSlashFromPermalinks", false, "boolean")
 
 	for k in pairs(config) do
-		logprint("WARNING: Unknown config field '%s'.", k)
+		timestampPrintWarning("Unknown config field '%s'.", k)
 	end
 	for k in pairs(htaccess or {}) do
-		logprint("WARNING: Unknown config.htaccess field '%s'.", k)
+		timestampPrintWarning("Unknown config.htaccess field '%s'.", k)
 	end
 
 
@@ -991,7 +996,7 @@ local function buildWebsite()
 	-- Generate website from content folder.
 	----------------------------------------------------------------
 
-	logprint("Generating website...")
+	timestampPrint("Generating website...")
 
 	for category in pairs(OUTPUT_CATEGORY_SET) do
 		outputFileCounts[category] = 0
@@ -1200,7 +1205,7 @@ local function buildWebsite()
 			local directives = b()
 
 			local count
-			contents, count = gsub2(contents, "# *:webgen%.rewriting: *\n", directives)
+			contents, count = gsubPlainSub(contents, "# *:webgen%.rewriting: *\n", directives)
 			if count == 0 then
 				contents = F("%s\n%s", contents, directives)
 			end
@@ -1220,25 +1225,26 @@ local function buildWebsite()
 	-- Cleanup old generated stuff.
 	traverseFiles(DIR_OUTPUT, nil, function(path, pathOutputRel, filename, extLower)
 		if not writtenOutputFiles[pathOutputRel] then
-			logVerbose("Removing: %s", path)
+			timestampPrintVerbose("Removing: %s", path)
 			assert(os.remove(path))
 		end
 	end)
 	removeEmptyDirectories(DIR_OUTPUT)
 
-	logprint("Generating website... done!")
+	timestampPrint("Generating website... done!")
 
 
 
 	----------------------------------------------------------------
 
 	if contextStack[1] then
-		logprint("Error: Context stack is not empty after generation. (Depth is %d)", #contextStack)
+		timestampPrintError("Context stack is not empty after generation. (Depth is %d)", #contextStack)
 	end
 
-	local endTime = getTimeBetter()
+	!local SEPARATOR = ("-"):rep(64)
+	local endTime    = getTimeBetter()
 
-	printf(("-"):rep(64))
+	print!(SEPARATOR)
 	printf("Files: %d", outputFileCount)
 	printf("    Pages:           %d  (Skipped: %d)", outputFileCounts["page"], outputFileSkippedPageCount)
 	printf("    OtherTemplates:  %d", outputFileCounts["template"])
@@ -1248,7 +1254,7 @@ local function buildWebsite()
 	)
 	printf("TotalSize: %s", formatBytes(outputFileByteCount))
 	printf("Time: %.2f seconds", endTime-startTime)
-	printf(("-"):rep(64))
+	print!(SEPARATOR)
 
 	logFile:flush()
 end
@@ -1258,7 +1264,7 @@ buildWebsite()
 
 
 if autobuild then
-	_print("Press Ctrl+C to stop auto-building.")
+	printNoLog("Press Ctrl+C to stop auto-building.")
 
 	local lastDirTree = nil
 
@@ -1336,5 +1342,12 @@ end
 
 --==============================================================
 
-_print(F("Check log for details: %s", logPath))
+if warningCount > 0 then
+	printf("Finished with %d warnings!", warningCount)
+else
+	printf("Finished!")
+end
+
+printfNoLog("Check log for details: %s", logPath)
 logFile:close()
+_G.logFile = nil

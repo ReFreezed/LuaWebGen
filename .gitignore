@@ -1,7 +1,13 @@
-/local/
+*.lnk
+local/
+
+/*.lua
+/*.sublime-*
+/.run
+/output/
+/srcgen/
+/temp/
 /wiki/
 
-/*.sublime-*
-/CreateExe.cmd
-/exe.lua
-/TODO.txt
+/gfx/appIcon*.png
+!/gfx/appIcon16.png

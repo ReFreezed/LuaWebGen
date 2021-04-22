@@ -1,0 +1,9 @@
+Changelog
+LuaWebGen
+
+v0.20 (2021-04-22)
+- First "proper" release.
+- Small fixes.
+
+v0.19 (2018)
+- Initial beta release.
