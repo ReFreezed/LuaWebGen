@@ -151,8 +151,8 @@ site-root/
 
 Everything in the *content* folder will be processed and end up in the *output* folder.
 
-> **Note:** The *output* folder is automatically cleaned from files and folders that do not exist in the *content* folder,
-> so it's not a good idea to save files in the *output* folder.
+> **Warning:** The *output* folder is automatically cleaned from files and folders that do not exist in the *content* folder,
+> so don't save any files in the *output* folder!
 
 See the [wiki](https://github.com/ReFreezed/LuaWebGen/wiki) for the full documentation.
 
