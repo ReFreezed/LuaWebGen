@@ -20,22 +20,22 @@ print(os.date"%Y-%m-%d")
 
 local i = 1
 
-local command = args[i] or error("[arg] Missing command.")
-i = i+1
+local command = args[i] or error("Arguments: Missing command.")
+i             = i + 1
 
 ----------------------------------------------------------------
 
 if command == "new" then
-	local kind = args[i] or error("[arg] Missing kind after 'new'.")
-	i = i+1
+	local kind = args[i] or error("Arguments: Missing kind after 'new'.")
+	i          = i + 1
 
 	if kind == "page" then
-		local pathRel = args[i] or error("[arg] Missing path after 'page'.")
-		pathRel = pathRel:gsub("^/", "")
-		i = i+1
+		local pathRel = args[i] or error("Arguments: Missing path after 'page'.")
+		pathRel       = pathRel:gsub("^/", "")
+		i             = i + 1
 
 		if args[i] then
-			errorf("[arg] Unknown argument '%s'.", args[i])
+			errorf("Arguments: Unknown argument '%s'.", args[i])
 		end
 
 		local filename = getFilename(pathRel)
@@ -71,11 +71,11 @@ if command == "new" then
 		printf("Created page: %s", path)
 
 	elseif kind == "site" then
-		local pathToSite = args[i] or error("[arg] Missing path after 'site'.")
+		local pathToSite = args[i] or error("Arguments: Missing path after 'site'.")
 		i = i+1
 
 		if args[i] then
-			errorf("[arg] Unknown argument '%s'.", args[i])
+			errorf("Arguments: Unknown argument '%s'.", args[i])
 		end
 
 		-- Create folders.
@@ -164,7 +164,7 @@ if command == "new" then
 		printf("Created site: %s", pathToSite)
 
 	else
-		errorf("[arg] Unknown kind '%s' after 'new'.", kind)
+		errorf("Arguments: Unknown kind '%s' after 'new'.", kind)
 	end
 
 	return
@@ -172,31 +172,39 @@ if command == "new" then
 ----------------------------------------------------------------
 
 elseif command == "build" then
+	local SHORT_TO_LONG_FORM = {
+		["-f"] = "--force",
+		["-a"] = "--autobuild",
+		["-d"] = "--drafts",
+		["-v"] = "--verbose",
+	}
+
 	local options = {}
 
 	while args[i] do
-		local arg = args[i]
+		local argRaw = args[i]
+		local arg    = SHORT_TO_LONG_FORM[argRaw] or argRaw
 
-		if arg == "--force" or arg == "-f" then
-			arg = "--force"
+		if arg == "--force" then
 			_G.ignoreModificationTimes = true
 
-		elseif arg == "--autobuild" or arg == "-a" then
-			arg = "--autobuild"
+		elseif arg == "--autobuild" then
 			_G.autobuild = true
 
-		elseif arg == "--drafts" or arg == "-d" then
-			arg = "--drafts"
+		elseif arg == "--drafts" then
 			_G.includeDrafts = true
 
-		elseif arg == "--verbose" or arg == "-v" then
-			arg = "--verbose"
+		elseif arg == "--verbose" then
 			_G.verbosePrint = true
 
+		elseif arg == "--nogc" then
+			_G.enableGc = false
+			collectgarbage("stop")
+
 		elseif arg:find"^%-" then
-			errorf("[arg] Unknown option '%s'.", arg)
+			errorf("Arguments: Unknown option '%s'.", argRaw)
 		else
-			errorf("[arg] Unknown argument '%s'.", arg)
+			errorf("Arguments: Unknown argument '%s'.", argRaw)
 		end
 
 		table.insert(options, arg)
@@ -216,7 +224,7 @@ elseif command == "build" then
 
 ----------------------------------------------------------------
 else
-	errorf("[arg] Unknown command '%s'.", command)
+	errorf("Arguments: Unknown command '%s'.", command)
 end
 
 
@@ -1343,6 +1351,10 @@ if warningCount > 0 then
 	printf("Finished with %d warnings!", warningCount)
 else
 	printf("Finished!")
+end
+
+if not enableGc then
+	printf("Memory usage: %s", formatBytes(collectgarbage"count"*1024))
 end
 
 printfNoLog("Check log for details: %s", logPath)

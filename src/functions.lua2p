@@ -1070,14 +1070,11 @@ end
 _G.F = string.format
 
 function _G.formatBytes(n)
-	if n > (1024*1024*1024)/100 then
-		return F("%.2f GB", n/(1024*1024*1024))
-	elseif n > (1024*1024)/100 then
-		return F("%.2f MB", n/(1024*1024))
-	elseif n > (1024)/100 then
-		return F("%.2f KB", n/(1024))
-	end
-	return F("%d bytes", n)
+	if     n >= !(1024^4/10) then  return F("%.2f TiB", n*!(1/1024^4))
+	elseif n >= !(1024^3/10) then  return F("%.2f GiB", n*!(1/1024^3))
+	elseif n >= !(1024^2/10) then  return F("%.2f MiB", n*!(1/1024^2))
+	elseif n >= !(1024^1/10) then  return F("%.2f KiB", n*!(1/1024^1))
+	else                           return F("%d bytes", n            )  end
 end
 
 function _G.formatTemplate(s, values)

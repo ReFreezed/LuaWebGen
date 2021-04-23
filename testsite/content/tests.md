@@ -71,6 +71,8 @@ end
 Extra spaces.
 {{  end  }}
 
+Many curly braces: {{{{{x="foo"}}}}}
+
 
 
 ## Value Expressions
