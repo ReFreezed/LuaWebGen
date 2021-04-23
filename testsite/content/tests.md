@@ -22,17 +22,24 @@ An image < <img src="{{/images/head.png}}"> > inside markdown.
 
 An image < {{'<img src="'..url'/images/head.png'..'">'}} > inside markdown.
 
-{{-- Line comment. }}
-{{--[[ Block comment. {{"asdf"}} ]]}}
-{{--[=[ --[[ Messy block comment. {{"asdf"}} ]] ]=]}}
+{{-- Line comment. {{"nope"}}
+}}
+{{--[[ Block comment. {{"nope"}} ]]}}
+{{--[=[ --[[ Messy block comment. {{"nope"}} ]] ]=]}}
 
-{{--globalVar = 123 -- Error! }}
-{{local localVar = 123}}
-{{--localVar = globalVar -- Error! }}
+{{
+-- globalVar = 123 -- Error: Cannot assign globals!
+local localVar = function()end
+-- localVar = globalVar -- Error: Cannot access non-existing globals!
+}}
 {{localVar}}
 
-{{--function()end -- Error! }}
-{{--function globalFunc()end -- Error! }}
+{{
+-- function()end -- Error: Invalid expression!
+}}
+{{
+-- function globalFunc() end -- Error: Cannot assign globals!
+}}
 
 <p style="text-align: center;">
 	Centered text in HTML.
@@ -44,7 +51,7 @@ An image < {{'<img src="'..url'/images/head.png'..'">'}} > inside markdown.
 -- Larger block of code.
 print("Hello")
 for i = 1, 3 do
-	echo(F("- Blargh %d.\n", i))
+	echof("- Blargh %d.\n", i)
 end
 }}
 
@@ -72,7 +79,8 @@ String: {{"Water"}}
 
 Operations: {{1+2*3}}
 
-Operations: {{"a-".."-b" -- Inline comment.}}
+Operations: {{"a-".."-b" -- Inline comment.
+}}
 
 Operations: {{1 + --[[ Inline comment. ]] 2}}
 
@@ -86,7 +94,7 @@ Table: {{site}}
 
 Param: {{P.foo}}
 
-Text: {{"asdf <img>"}}
+Text: {{"foo <img>"}}
 
 Html: {{"<img>"}}
 

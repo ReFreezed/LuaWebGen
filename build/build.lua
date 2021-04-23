@@ -213,11 +213,12 @@ if doRelease then
 		-- Create exe.
 		do
 			executeRequired(params.pathGpp32, {
+				"-D", "UNICODE", "-D", "_UNICODE",
+				"build/exe.cpp",
 				"-mwindows", "-mconsole",
 				"-static",
 				"-fdata-sections", "-ffunction-sections", "-Wl,--gc-sections,-strip-all",
 				-- "-Wl,-Map,temp/output.map", DEBUG
-				"build/exe.cpp",
 				"-o", "temp/app.exe",
 			})
 

@@ -16,9 +16,11 @@ An HTML image > <img src="{{/images/head.png}}"> < inside markdown.
 
 A constructed HTML image > {{'<img src="'..url'/images/head.png'..'">'}} < inside markdown.
 
-{{-- Comment 1}}
-{{--[[ Comment 2 {{"asdf"}} ]]}}
-{{--[=[ --[[ Comment 3 {{"asdf"}} ]] ]=]}}
+{{
+-- Comment 1
+}}
+{{--[[ Comment 2 ]]}}
+{{--[=[ --[[ Comment 3 ]] ]=]}}
 
 {{local localVar = 123}}
 {{localVar}}

@@ -57,8 +57,10 @@ _G.logFile = nil
 _G.logPath = ""
 _G.toLog   = {--[[ message1, ... ]]} -- Before the log file has opened.
 
-_G.includeDrafts = false
-_G.verbosePrint  = false
+_G.autobuild               = false
+_G.ignoreModificationTimes = false
+_G.includeDrafts           = false
+_G.verbosePrint            = false
 
 _G.scriptEnvironment        = nil
 _G.scriptEnvironmentGlobals = nil
@@ -77,7 +79,7 @@ _G._ = nil -- Dummy.
 
 -- Site variables. These are reset in buildWebsite() (including oncePrints and warningCount).
 function _G.resetSiteVariables()
-	site = {
+	_G.site = {
 		_readonly = true,
 
 		title = {
@@ -103,39 +105,39 @@ function _G.resetSiteVariables()
 		},
 	}
 
-	ignoreFiles   = {--[[ pathPattern1, ... ]]}
-	ignoreFolders = {--[[ pathPattern1, ... ]]}
+	_G.ignoreFiles                = {--[[ pathPattern1, ... ]]}
+	_G.ignoreFolders              = {--[[ pathPattern1, ... ]]}
 
-	fileTypes      = {["md"]="markdown", ["html"]="html", ["css"]="othertemplate"}
-	fileProcessors = {--[[ [extension1]=function(data, sitePath), ... ]]}
+	_G.fileTypes                  = {["md"]="markdown", ["html"]="html", ["css"]="othertemplate"}
+	_G.fileProcessors             = {--[[ [extension1]=function(data, sitePath), ... ]]}
 
-	htaErrors = {--[[ [httpStatusCode1]=document1, ... ]]}
+	_G.htaErrors                  = {--[[ [httpStatusCode1]=document1, ... ]]}
 
-	outputPathFormat = "%s"
-	rewriteExcludes  = {--[[ pathPattern1, ... ]]}
+	_G.outputPathFormat           = "%s"
+	_G.rewriteExcludes            = {--[[ pathPattern1, ... ]]}
 
-	autoLockPages   = false
-	noTrailingSlash = false
+	_G.autoLockPages              = false
+	_G.noTrailingSlash            = false
 
 
-	contextStack    = {--[[ context1,                    ... ]]}
-	layoutTemplates = {--[[ [path1]=template1,           ... ]]}
-	scriptFunctions = {--[[ [scriptName1]=function(...), ... ]]}
+	_G.contextStack               = {--[[ context1,                    ... ]]}
+	_G.layoutTemplates            = {--[[ [path1]=template1,           ... ]]}
+	_G.scriptFunctions            = {--[[ [scriptName1]=function(...), ... ]]}
 
-	pages           = {--[[ page1, ... ]]}
-	pagesGenerating = {--[[ [pathRelOut1]=true, ... ]]}
+	_G.pages                      = {--[[ page1, ... ]]}
+	_G.pagesGenerating            = {--[[ [pathRelOut1]=true, ... ]]}
 
-	writtenOutputFiles         = {--[[ [pathOutputRel1]=true, pathOutputRel1, ... ]]}
-	writtenOutputUrls          = {--[[ [url1]=true,       ... ]]}
-	writtenRedirects           = {--[[ [url1]=targetUrl1, ... ]]}
-	unwrittenRedirects         = {--[[ [url1]=targetUrl1, ... ]]}
-	outputFileCount            = 0
-	outputFileCounts           = {--[[ [category1]=count1, ... ]]}
-	outputFileByteCount        = 0
-	outputFilePreservedCount   = 0  -- This should only count raw files. @Cleanup: Maybe rename the variable?
-	outputFileSkippedPageCount = 0
+	_G.writtenOutputFiles         = {--[[ [pathOutputRel1]=true, pathOutputRel1, ... ]]}
+	_G.writtenOutputUrls          = {--[[ [url1]=true,       ... ]]}
+	_G.writtenRedirects           = {--[[ [url1]=targetUrl1, ... ]]}
+	_G.unwrittenRedirects         = {--[[ [url1]=targetUrl1, ... ]]}
+	_G.outputFileCount            = 0
+	_G.outputFileCounts           = {--[[ [category1]=count1, ... ]]}
+	_G.outputFileByteCount        = 0
+	_G.outputFilePreservedCount   = 0 -- This should only count raw files. @Cleanup: Maybe rename the variable?
+	_G.outputFileSkippedPageCount = 0
 
-	thumbnailInfos = {}
+	_G.thumbnailInfos             = {--[[ [thumbIdString1]={ path=thumbPathRel, width=thumbWidth, height=thumbHeight }, ... ]]}
 end
 
 resetSiteVariables()

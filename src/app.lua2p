@@ -23,9 +23,6 @@ local i = 1
 local command = args[i] or error("[arg] Missing command.")
 i = i+1
 
-_G.ignoreModificationTimes = false
-_G.autobuild               = false
-
 ----------------------------------------------------------------
 
 if command == "new" then
@@ -190,11 +187,11 @@ elseif command == "build" then
 
 		elseif arg == "--drafts" or arg == "-d" then
 			arg = "--drafts"
-			includeDrafts = true
+			_G.includeDrafts = true
 
 		elseif arg == "--verbose" or arg == "-v" then
 			arg = "--verbose"
-			verbosePrint = true
+			_G.verbosePrint = true
 
 		elseif arg:find"^%-" then
 			errorf("[arg] Unknown option '%s'.", arg)
@@ -249,7 +246,7 @@ end
 -- Prepare script environment.
 --==============================================================
 
-scriptEnvironmentGlobals = {
+_G.scriptEnvironmentGlobals = {
 	_WEBGEN_VERSION      = WEBGEN_VERSION,
 	DATA_FILE_EXTENSIONS = DATA_FILE_EXTENSIONS,
 	IMAGE_EXTENSIONS     = IMAGE_EXTENSIONS,
@@ -811,7 +808,7 @@ scriptEnvironmentGlobals = {
 
 
 
-scriptEnvironment = setmetatable({}, {
+_G.scriptEnvironment = setmetatable({}, {
 	__index = function(env, k)
 		local v = scriptEnvironmentGlobals[k] or getContext()._scriptEnvironmentGlobals[k]
 		if v ~= nil then  return v  end
@@ -917,30 +914,30 @@ local function buildWebsite()
 
 	site.redirections.v    = getT("redirections",      site.redirections.v,   "string", "string")
 
-	ignoreFiles            = getA("ignoreFiles",       ignoreFiles,           "string")
-	ignoreFolders          = getA("ignoreFolders",     ignoreFolders,         "string")
+	_G.ignoreFiles         = getA("ignoreFiles",       ignoreFiles,           "string")
+	_G.ignoreFolders       = getA("ignoreFolders",     ignoreFolders,         "string")
 
-	fileTypes              = getT("types",             fileTypes,             "string", "string")
-	fileProcessors         = getT("processors",        fileProcessors,        "string", "function")
+	_G.fileTypes           = getT("types",             fileTypes,             "string", "string")
+	_G.fileProcessors      = getT("processors",        fileProcessors,        "string", "function")
 
 	local htaRedirect      = getV("htaccess.redirect", false,                 "boolean")
 	local htaWww           = getV("htaccess.www",      false,                 "boolean")
-	htaErrors              = getT("htaccess.errors",   htaErrors,             "number", "string")
+	_G.htaErrors           = getT("htaccess.errors",   htaErrors,             "number", "string")
 	local htaNoIndexes     = getV("htaccess.noIndexes",false,                 "boolean")
 	local htaPrettyUrlDir  = getV("htaccess.XXX_prettyUrlDirectory", "",      "string")
 	local htaDenyAccess    = getA("htaccess.XXX_denyDirectAccess",   {},      "string")
 	local htaccess         = getT("htaccess",          nil,                   "string")
 	local handleHtaccess   = htaccess ~= nil
 
-	outputPathFormat       = get("rewriteOutputPath", "%s", NOOP)
-	rewriteExcludes        = getA("rewriteExcludes",   rewriteExcludes,       "string")
+	_G.outputPathFormat    = get("rewriteOutputPath", "%s", NOOP)
+	_G.rewriteExcludes     = getA("rewriteExcludes",   rewriteExcludes,       "string")
 
 	local onBefore         = getV("before",            nil,                   "function")
 	local onAfter          = getV("after",             nil,                   "function")
 	local onValidate       = getV("validate",          nil,                   "function")
 
-	autoLockPages          = getV("autoLockPages",     false,                 "boolean")
-	noTrailingSlash        = getV("removeTrailingSlashFromPermalinks", false, "boolean")
+	_G.autoLockPages       = getV("autoLockPages",     false,                 "boolean")
+	_G.noTrailingSlash     = getV("removeTrailingSlashFromPermalinks", false, "boolean")
 
 	for k in pairs(config) do
 		timestampPrintWarning("Unknown config field '%s'.", k)
