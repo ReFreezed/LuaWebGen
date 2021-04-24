@@ -17,6 +17,7 @@
 	isFile, isDirectory
 	loadParams
 	makeDirectory, makeDirectoryRecursive, removeDirectory, removeDirectoryRecursive
+	NOSPACE
 	readFile, writeFile, writeTextFile
 	templateToLua
 	templateToString, templateToStringUtf16
@@ -362,6 +363,12 @@ function _G.indexOf(t, v)
 		if t[i] == v then  return i  end
 	end
 	return nil
+end
+
+
+
+function _G.NOSPACE(s)
+	return (s:gsub("%s+", ""))
 end
 
 

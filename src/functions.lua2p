@@ -13,6 +13,7 @@
 	assertf, assertType, assertTable, assertarg
 	attributeWith, attributeWithAny
 	cleanupPath
+	countStrings
 	createDirectory, isDirectoryEmpty, removeEmptyDirectories
 	createThumbnail
 	datetimeToTime, getDatetime
@@ -305,8 +306,10 @@ do
 	end
 
 	local function _parseTemplate(page, path, template, pos, level, enableHtmlEncoding)
+		!local PATTERN_IDENT_BEGIN = "%f[%w_]"
+		!local PATTERN_IDENT_END   = "%f[^%w_]"
 
-		--= Generate Lua.
+		-- Generate Lua.
 		--==============================================================
 
 		local blockStartPos = pos
@@ -327,7 +330,8 @@ do
 			pos = codePosStart
 			pos = pos + 2 -- Eat "{{".
 
-			insertLineNumberCode(lua, getLineNumber(template, pos))
+			local ln = getLineNumber(template, pos)
+			insertLineNumberCode(lua, ln)
 
 			local codePosEnd    = findEndOfCodeBlock(path, template, codePosStart, pos) + 2
 			local codeUntrimmed = template:sub(codePosStart+2, codePosEnd-2)
@@ -336,34 +340,39 @@ do
 
 			----------------------------------------------------------------
 
-			-- fori item in array ... end
-			-- fori array ... end
-			if code:find"^fori%f[^%w_]" then
-				local foriItem, foriArr = code:match"^fori +([%a_][%w_]+) +in +(%S.*)$"
+			-- Match custom keywords first so we don't confuse those with normal Lua identifiers later.
 
-				if not foriArr then
-					foriArr = code:match"^fori +(.+)$"
-
-					if not foriArr then
+			-- fori item in <array> (...) end
+			-- fori <array> (...) end
+			if codeUntrimmed:find!("^ *fori"..PATTERN_IDENT_END) then
+				-- New @Feature: fori < dogs
+				local itemIdent, expr = codeUntrimmed:match!(NOSPACE("^ %s* fori %s+ ([%a_][%w_]*) %s+ in "..PATTERN_IDENT_END.." %s* (%S.*)"))
+				if not expr then
+					expr = codeUntrimmed:match!(NOSPACE"^ %s* fori %s* (%S.*)")
+					if not expr then
 						fileError(path, template, pos, "Invalid fori statement.")
 					end
 				end
 
+				if not loadstring("_=("..expr.."\n)") then
+					fileError(path, template, pos, "Invalid value expression for 'fori' loop: %s", trim(expr)) -- @Robustness: Don't trim!  @UX: Better error message.
+				end
+
 				table.insert(lua, "for i, ")
-				table.insert(lua, foriItem or "it")
+				table.insert(lua, (itemIdent or "it"))
 				table.insert(lua, " in ipairs(")
-				table.insert(lua, foriArr)
+				table.insert(lua, expr)
 				table.insert(lua, "\n) do ")
 
 				local innerLua, innerEndCodePosStart, innerEndCodePosEnd = _parseTemplate(
 					page, path, template, codePosEnd+1, level+1, enableHtmlEncoding
 				)
-				local innerEndCode = trim(template:sub(innerEndCodePosStart+2, innerEndCodePosEnd-2))
+				local innerEndCode = trim(template:sub(innerEndCodePosStart+2, innerEndCodePosEnd-2)) -- @Robustness: Don't trim!
 
 				if innerEndCode ~= "end" then
 					fileError(
 						path, template, innerEndCodePosStart,
-						"Expected end for 'fori' starting at line %d.",
+						"Expected end for 'fori' loop starting at line %d.",
 						getLineNumber(template, pos)
 					)
 				end
@@ -374,40 +383,29 @@ do
 				codePosEnd = innerEndCodePosEnd
 
 			-- Value expression.
-			elseif
-				not code:find"^function%s*%(" -- We do allow echoing functions, but this is probably an error made by the user.
-				and maybeInsertPossibleValueExpression(lua, codeUntrimmed)
-			then
-				-- void
-
-			-- for index, item in expression ... end
-			-- for index = from, to, step ... end
-			-- for to ... end
-			elseif codeUntrimmed:find"^ *for%f[^%w_]" then
-				local shortformBackwards, shortformNumber = code:match"^for%s+(%-?)(%d+)$"
-
-				if shortformBackwards == "-" then
-					table.insert(lua, "for i = ")
-					table.insert(lua, shortformNumber)
-					table.insert(lua, ", 1, -1 do ")
-				elseif shortformNumber then
-					table.insert(lua, "for i = 1, ")
-					table.insert(lua, shortformNumber)
-					table.insert(lua, " do ")
-				else
-					table.insert(lua, codeUntrimmed)
-					table.insert(lua, "\ndo ")
+			elseif maybeInsertPossibleValueExpression(lua, codeUntrimmed) then
+				if codeUntrimmed:find"^%s*function%s*%(" then -- We do allow echoing functions, but this specifically is probably an error made by the user.
+					fileError(path, template, codePosStart, "Invalid value expression.")
 				end
+
+			-- for index [, item, ... ] in <expression> (...) end
+			-- for index = <from>, <to> [, <step> ] (...) end
+			elseif
+				codeUntrimmed:find!("^ *for%s+[%a_][%w_]*%s*[,=]") or
+				codeUntrimmed:find!("^ *for%s+[%a_][%w_]*%s+in"..PATTERN_IDENT_END)
+			then
+				table.insert(lua, codeUntrimmed)
+				table.insert(lua, "\ndo ")
 
 				local innerLua, innerEndCodePosStart, innerEndCodePosEnd = _parseTemplate(
 					page, path, template, codePosEnd+1, level+1, enableHtmlEncoding
 				)
-				local innerEndCode = trim(template:sub(innerEndCodePosStart+2, innerEndCodePosEnd-2))
+				local innerEndCode = trim(template:sub(innerEndCodePosStart+2, innerEndCodePosEnd-2)) -- @Robustness: Don't trim!
 
 				if innerEndCode ~= "end" then
 					fileError(
 						path, template, innerEndCodePosStart,
-						"Expected end for 'for' starting at line %d.",
+						"Expected end for 'for' loop starting at line %d.",
 						getLineNumber(template, pos)
 					)
 				end
@@ -417,14 +415,59 @@ do
 
 				codePosEnd = innerEndCodePosEnd
 
-			-- do ... end
+			-- for <to> (...) end
+			elseif codeUntrimmed:find!("^ *for"..PATTERN_IDENT_END) then
+				-- @Incomplete: Change 'for -8' to 'for < 8'.
+				local legacyShortformBackwardsNumber = codeUntrimmed:match!(NOSPACE"^ %s* for %s* %- %s* (%d+) %s* $") -- @Depricated
+
+				-- for - <n>
+				if legacyShortformBackwardsNumber then
+					timestampPrintWarningOnce("%s:%d: {{for -n}} has been depricated.", path, ln)
+					table.insert(lua, "for i = ")
+					table.insert(lua, legacyShortformBackwardsNumber)
+					table.insert(lua, ", 1, -1 do ")
+
+				-- for <to>
+				else
+					local expr = codeUntrimmed:gsub("for", "", 1)
+
+					if not loadstring("_=("..expr.."\n)") then
+						fileError(path, template, pos, "Invalid value expression for simplified 'for' loop: %s", trim(expr)) -- @Robustness: Don't trim!  @UX: Better error message.
+					end
+
+					table.insert(lua, "for i = 1, (")
+					table.insert(lua, expr)
+					table.insert(lua, "\n")
+					insertLineNumberCode(lua, ln+countStrings(expr, "\n", true))
+					table.insert(lua, ")do ")
+				end
+
+				local innerLua, innerEndCodePosStart, innerEndCodePosEnd = _parseTemplate(
+					page, path, template, codePosEnd+1, level+1, enableHtmlEncoding
+				)
+				local innerEndCode = trim(template:sub(innerEndCodePosStart+2, innerEndCodePosEnd-2)) -- @Robustness: Don't trim!
+
+				if innerEndCode ~= "end" then
+					fileError(
+						path, template, innerEndCodePosStart,
+						"Expected end for 'for' loop starting at line %d.",
+						getLineNumber(template, pos)
+					)
+				end
+
+				for _, luaCode in ipairs(innerLua) do  table.insert(lua, luaCode)  end
+				table.insert(lua, "\nend ")
+
+				codePosEnd = innerEndCodePosEnd
+
+			-- do (...) end
 			elseif code == "do" then
 				table.insert(lua, "do ")
 
 				local innerLua, innerEndCodePosStart, innerEndCodePosEnd = _parseTemplate(
 					page, path, template, codePosEnd+1, level+1, enableHtmlEncoding
 				)
-				local innerEndCode = trim(template:sub(innerEndCodePosStart+2, innerEndCodePosEnd-2))
+				local innerEndCode = trim(template:sub(innerEndCodePosStart+2, innerEndCodePosEnd-2)) -- @Robustness: Don't trim!
 
 				if innerEndCode ~= "end" then
 					fileError(
@@ -439,15 +482,15 @@ do
 
 				codePosEnd = innerEndCodePosEnd
 
-			-- if expression ... end
-			elseif codeUntrimmed:find"^ *if%f[^%w_]" then
+			-- if <condition> (...) end
+			elseif codeUntrimmed:find!("^ *if"..PATTERN_IDENT_END) then
 				table.insert(lua, codeUntrimmed)
 				table.insert(lua, "\nthen ")
 
 				local innerLua, innerEndCodePosStart, innerEndCodePosEnd = _parseTemplate(
 					page, path, template, codePosEnd+1, level+1, enableHtmlEncoding
 				)
-				local innerEndCode = trim(template:sub(innerEndCodePosStart+2, innerEndCodePosEnd-2))
+				local innerEndCode = trim(template:sub(innerEndCodePosStart+2, innerEndCodePosEnd-2)) -- @Robustness: Don't trim!
 
 				for _, luaCode in ipairs(innerLua) do  table.insert(lua, luaCode)  end
 				insertLineNumberCode(lua, getLineNumber(template, innerEndCodePosStart))
@@ -459,7 +502,7 @@ do
 					innerLua, innerEndCodePosStart, innerEndCodePosEnd = _parseTemplate(
 						page, path, template, innerEndCodePosEnd+1, level+1, enableHtmlEncoding
 					)
-					innerEndCode = trim(template:sub(innerEndCodePosStart+2, innerEndCodePosEnd-2))
+					innerEndCode = trim(template:sub(innerEndCodePosStart+2, innerEndCodePosEnd-2)) -- @Robustness: Don't trim!
 
 					for _, luaCode in ipairs(innerLua) do  table.insert(lua, luaCode)  end
 					insertLineNumberCode(lua, getLineNumber(template, innerEndCodePosStart))
@@ -471,7 +514,7 @@ do
 					innerLua, innerEndCodePosStart, innerEndCodePosEnd = _parseTemplate(
 						page, path, template, innerEndCodePosEnd+1, level+1, enableHtmlEncoding
 					)
-					innerEndCode = trim(template:sub(innerEndCodePosStart+2, innerEndCodePosEnd-2))
+					innerEndCode = trim(template:sub(innerEndCodePosStart+2, innerEndCodePosEnd-2)) -- @Robustness: Don't trim!
 
 					for _, luaCode in ipairs(innerLua) do  table.insert(lua, luaCode)  end
 					insertLineNumberCode(lua, getLineNumber(template, innerEndCodePosStart))
@@ -489,20 +532,20 @@ do
 
 				codePosEnd = innerEndCodePosEnd
 
-			-- while expression ... end
-			elseif codeUntrimmed:find"^ *while%f[^%w_]" then
+			-- while <condition> (...) end
+			elseif codeUntrimmed:find!("^ *while"..PATTERN_IDENT_END) then
 				table.insert(lua, codeUntrimmed)
 				table.insert(lua, "\ndo ")
 
 				local innerLua, innerEndCodePosStart, innerEndCodePosEnd = _parseTemplate(
 					page, path, template, codePosEnd+1, level+1, enableHtmlEncoding
 				)
-				local innerEndCode = trim(template:sub(innerEndCodePosStart+2, innerEndCodePosEnd-2))
+				local innerEndCode = trim(template:sub(innerEndCodePosStart+2, innerEndCodePosEnd-2)) -- @Robustness: Don't trim!
 
 				if innerEndCode ~= "end" then
 					fileError(
 						path, template, innerEndCodePosStart,
-						"Expected end for 'while' starting at line %d.",
+						"Expected end for 'while' loop starting at line %d.",
 						getLineNumber(template, pos)
 					)
 				end
@@ -512,19 +555,19 @@ do
 
 				codePosEnd = innerEndCodePosEnd
 
-			-- repeat ... until expression
+			-- repeat (...) until <condition>
 			elseif code == "repeat" then
 				table.insert(lua, "repeat ")
 
 				local innerLua, innerEndCodePosStart, innerEndCodePosEnd = _parseTemplate(
 					page, path, template, codePosEnd+1, level+1, enableHtmlEncoding
 				)
-				local innerEndCode = trim(template:sub(innerEndCodePosStart+2, innerEndCodePosEnd-2))
+				local innerEndCode = trim(template:sub(innerEndCodePosStart+2, innerEndCodePosEnd-2)) -- @Robustness: Don't trim!
 
 				if not innerEndCode:find"^until[ (]" then
 					fileError(
 						path, template, innerEndCodePosStart,
-						"Expected until for 'repeat' starting at line %d.",
+						"Expected until for 'repeat' loop starting at line %d.",
 						getLineNumber(template, pos)
 					)
 				end
@@ -536,7 +579,7 @@ do
 
 				codePosEnd = innerEndCodePosEnd
 
-			-- URL short form.
+			-- URL short-form.
 			elseif code:find"^/" or code:find"^%a+:/" then
 				table.insert(lua, F("echo(url%q)", code))
 
@@ -547,6 +590,7 @@ do
 				end
 				return lua, codePosStart, codePosEnd
 
+			-- Any other code.
 			else
 				table.insert(lua, codeUntrimmed)
 				table.insert(lua, "\n")
@@ -575,7 +619,7 @@ do
 
 		-- print("-- LUA --") print(luaCode) print("-- /LUA --")
 
-		--= Generate output.
+		-- Generate output.
 		--==============================================================
 
 		local out = {}
@@ -716,7 +760,7 @@ end
 
 function _G.getLineNumber(s, pos)
 	local lineCount = 1
-	for posCurrent in s:gmatch"()\n" do
+	for posCurrent in s:gmatch"()\n" do -- @Speed
 		if posCurrent < pos then
 			lineCount = lineCount+1
 		else
@@ -2490,6 +2534,20 @@ end
 
 function _G.getCwd()
 	return (toNormalPath(lfs.currentdir()))
+end
+
+
+
+-- count = countStrings( string, needle [, plain=false ] )
+function _G.countStrings(s, needle, plain)
+	local count = 0
+	local pos   = 1
+
+	while true do
+		local _, i2 = s:find(needle, pos, plain)
+		if not i2 then  return count  end
+		pos = i2 + 1
+	end
 end
 
 
