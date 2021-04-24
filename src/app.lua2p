@@ -754,7 +754,7 @@ _G.scriptEnvironmentGlobals = {
 		local oldLen = #s
 		local header = s:match"^/%*.-%*/" or ""
 
-		s = header..s
+		s = (header..s
 			:sub(#header+1)
 			:gsub("/%*.-%*/", "")   -- Remove comments.
 			:gsub("\t+",      "")   -- Remove all tabs.
@@ -762,10 +762,11 @@ _G.scriptEnvironmentGlobals = {
 			:gsub("  +",      " ")  -- Remove extra spaces.
 			:gsub("\n\n+",    "\n") -- Remove empty lines.
 			:gsub("%b{}",     function(scope)  return (scope:gsub("\n", " "))  end) -- Compress rules to one line each.
+		)
 
-		if verbosePrint then
-			printf("[opti] %s  from %d  to %d  (diff=%d)", getFilename(path), oldLen, #s, oldLen-#s)
-		end
+		!if DEV then
+			if verbosePrint then  printf("[opti] %s  from %d  to %d  (diff=%d)", getFilename(path), oldLen, #s, oldLen-#s)  end
+		!end
 
 		return s
 	end,
@@ -774,16 +775,17 @@ _G.scriptEnvironmentGlobals = {
 		local oldLen = #s
 		local header = s:match"^/%*.-%*/" or ""
 
-		s = header..s
+		s = (header..s
 			:sub(#header+1)
 			:gsub("()/%*.-%*/", "")   -- Remove long comments.
 			:gsub("\n\t+",      "\n") -- Remove indentations.
 			:gsub("\n//[^\n]*", "\n") :gsub(" // [^\n]*", "") -- Remove all comment lines.
 			:gsub("\n\n+",      "\n") -- Remove empty lines.
+		)
 
-		if verbosePrint then
-			printf("[opti] %s  from %d  to %d  (diff=%d)", getFilename(path), oldLen, #s, oldLen-#s)
-		end
+		!if DEV then
+			if verbosePrint then  printf("[opti] %s  from %d  to %d  (diff=%d)", getFilename(path), oldLen, #s, oldLen-#s)  end
+		!end
 
 		return s
 	end,
@@ -791,14 +793,15 @@ _G.scriptEnvironmentGlobals = {
 	XXX_minimizeHtaccess = function(s)
 		local oldLen = #s
 
-		s = s
+		s = (s
 			:gsub("\n\t+",     "\n") -- Remove indentations.
 			:gsub("\n#[^\n]*", "\n") :gsub("^#[^\n]*", "") -- Remove all comments.
 			:gsub("\n\n+",     "\n") :gsub("^\n",      "") -- Remove empty lines.
+		)
 
-		if verbosePrint then
-			printf("[opti] %s  from %d  to %d  (diff=%d)", getFilename(path), oldLen, #s, oldLen-#s)
-		end
+		!if DEV then
+			if verbosePrint then  printf("[opti] %s  from %d  to %d  (diff=%d)", getFilename(path), oldLen, #s, oldLen-#s)  end
+		!end
 
 		return s
 	end,

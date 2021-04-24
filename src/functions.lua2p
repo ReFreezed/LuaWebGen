@@ -376,7 +376,7 @@ do
 			-- Value expression.
 			elseif
 				not code:find"^function%s*%(" -- We do allow echoing functions, but this is probably an error made by the user.
-				and maybeInsertPossibleValueExpression(lua, code)
+				and maybeInsertPossibleValueExpression(lua, codeUntrimmed)
 			then
 				-- void
 
@@ -395,7 +395,7 @@ do
 					table.insert(lua, shortformNumber)
 					table.insert(lua, " do ")
 				else
-					table.insert(lua, code)
+					table.insert(lua, codeUntrimmed)
 					table.insert(lua, "\ndo ")
 				end
 
@@ -441,7 +441,7 @@ do
 
 			-- if expression ... end
 			elseif codeUntrimmed:find"^ *if%f[^%w_]" then
-				table.insert(lua, code)
+				table.insert(lua, codeUntrimmed)
 				table.insert(lua, "\nthen ")
 
 				local innerLua, innerEndCodePosStart, innerEndCodePosEnd = _parseTemplate(
@@ -491,7 +491,7 @@ do
 
 			-- while expression ... end
 			elseif codeUntrimmed:find"^ *while%f[^%w_]" then
-				table.insert(lua, code)
+				table.insert(lua, codeUntrimmed)
 				table.insert(lua, "\ndo ")
 
 				local innerLua, innerEndCodePosStart, innerEndCodePosEnd = _parseTemplate(
@@ -537,7 +537,7 @@ do
 				codePosEnd = innerEndCodePosEnd
 
 			-- URL short form.
-			elseif code:find"^/" then
+			elseif code:find"^/" or code:find"^%a+:/" then
 				table.insert(lua, F("echo(url%q)", code))
 
 			-- End of block.
