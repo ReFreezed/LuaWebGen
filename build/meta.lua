@@ -368,7 +368,7 @@ end
 
 
 function _G.NOSPACE(s)
-	return (s:gsub("%s+", ""))
+	return (s:gsub(" +", ""))
 end
 
 

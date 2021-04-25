@@ -136,7 +136,7 @@ Favorite fruit is neither apple nor banana. :(
 - Short form {{i}}
 {{end}}
 
-{{for -3}}
+{{for < 3}}
 - Backwards {{i}}
 {{end}}
 
@@ -160,8 +160,8 @@ Dogs:
 - {{i}}: {{dog.name}} (age {{dog.age}})
 {{end}}
 
-Cats:
-{{fori data.cats.cats}}
+Cats, in reverse:
+{{fori < data.cats.cats}}
 - {{i}}: {{it.name}} (age {{it.age}})
 {{end}}
 
