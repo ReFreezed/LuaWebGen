@@ -656,7 +656,7 @@ _G.scriptEnvironmentGlobals = {
 			errorf(2, "Could not read file '%s': %s", path, err)
 		end
 
-		local html = parseTemplate(getContext().page, path, template, "html")
+		local html = parseAndRunTemplate(getContext().page, path, template, "html", true)
 		return html
 	end,
 

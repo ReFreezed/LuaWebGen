@@ -47,7 +47,7 @@
 	newStringBuilder
 	pack
 	pairsSorted
-	parseTemplate
+	parseAndRunTemplate
 	pathToSitePath, sitePathToPath
 	printNoLog, printfNoLog, log, print, printOnce, printf, printfOnce, timestampPrint, timestampPrintOnce, timestampPrintVerbose, timestampPrintError, timestampPrintWarning, timestampPrintWarningOnce, printobj
 	pushContext, popContext, assertContext, getContext
@@ -148,12 +148,12 @@ end
 
 
 do
-	-- isValueExpression = maybeInsertPossibleValueExpression( outputBuffer, luaCode )
-	local function maybeInsertPossibleValueExpression(lua, code)
-		local doBlock = F("do  local v = (%s\n)  if type(v) == 'string' and v:match'%%S' == '<' then  echoRaw(v)  elseif v ~= nil then  echo(v)  end end ", code)
+	-- isValueExpression = insertLuaForEchoingIfExpression( luaOutputBuffer, luaCode )
+	local function insertLuaForEchoingIfExpression(out, luaCode)
+		local doBlock = F("do  local v = (%s\n)  if type(v) == 'string' and v:match'%%S' == '<' then  echoRaw(v)  elseif v ~= nil then  echo(v)  end end ", luaCode)
 		if not loadstring(doBlock) then  return false  end
 
-		table.insert(lua, doBlock)
+		table.insert(out, doBlock)
 		return true
 	end
 
@@ -163,7 +163,7 @@ do
 		["["] = "]",
 	}
 
-	local function findEndOfCodeBlock(path, template, blockStart, pos)
+	local function findEndOfLuaCodeBlock(path, template, blockStart, pos)
 		!local PRINT_PROGRESS = DEV and 1==0
 		!if PRINT_PROGRESS then  __LUA`printf("%s(%d):%d: >>>>>>>>", path, pos, getLineNumber(template, pos))`  end
 
@@ -305,16 +305,13 @@ do
 		assert(false)
 	end
 
-	local function _parseTemplate(page, path, template, pos, level, enableHtmlEncoding)
+	-- endBlockStart, endBlockEnd = templateToLua( luaOutputBuffer, path, template, position, levelOfTemplateifiedControlStructure )
+	local function templateToLua(out, path, template, pos, level)
 		!local PATTERN_IDENT       = "[%a_][%w_]*"
 		!local PATTERN_IDENT_BEGIN = "%f[%w_]"
 		!local PATTERN_IDENT_END   = "%f[^%w_]"
 
-		-- Generate Lua.
-		--==============================================================
-
-		local blockStartPos = pos
-		local lua = {}
+		local posAtStartOfParsing = pos
 
 		while pos <= #template do
 			local blockStart = template:find("{{", pos, true)
@@ -323,7 +320,7 @@ do
 			if blockStart > pos then
 				local plainSegment = template:sub(pos, blockStart-1)
 				local luaStatement = F("echoRaw(%q)", plainSegment) --:gsub("\\\n", "\\n")
-				table.insert(lua, luaStatement)
+				table.insert(out, luaStatement)
 			end
 
 			local autoLock = (autoLockPages and blockStart == 1)
@@ -332,9 +329,9 @@ do
 			pos = pos + 2 -- Eat "{{".
 
 			local ln = getLineNumber(template, pos)
-			insertLineNumberCode(lua, ln)
+			insertLineNumberCode(out, ln)
 
-			local blockEnd = findEndOfCodeBlock(path, template, blockStart, pos) + 2
+			local blockEnd = findEndOfLuaCodeBlock(path, template, blockStart, pos) + 2
 			local block    = template:sub(blockStart+2, blockEnd-2) -- Without "{{" and "}}".
 			-- print("BLOCK: "..trim(block))
 
@@ -358,31 +355,27 @@ do
 					fileError(path, template, pos, "Invalid value expression for 'fori' loop: %s", trim(expr)) -- @UX: Better error message.
 				end
 
-				table.insert(lua, "for i, ")
-				table.insert(lua, (ident or "it"))
-				table.insert(lua, " in ")
-				table.insert(lua, (reverse and "ipairsr" or "ipairs"))
-				table.insert(lua, "(")
-				table.insert(lua, expr)
-				table.insert(lua, "\n) do ")
+				table.insert(out, "for i, ")
+				table.insert(out, (ident or "it"))
+				table.insert(out, " in ")
+				table.insert(out, (reverse and "ipairsr" or "ipairs"))
+				table.insert(out, "(")
+				table.insert(out, expr)
+				table.insert(out, "\n) do ")
 
-				local innerLua, innerEndCodePosStart, innerEndCodePosEnd = _parseTemplate(
-					page, path, template, blockEnd+1, level+1, enableHtmlEncoding
-				)
-				local innerEndCode = template:sub(innerEndCodePosStart+2, innerEndCodePosEnd-2)
+				local innerEndBlockStart, innerEndBlockEnd = templateToLua(out, path, template, blockEnd+1, level+1)
+				local innerEndBlock                        = template:sub(innerEndBlockStart+2, innerEndBlockEnd-2)
 
-				if not innerEndCode:find!("^ *end"..PATTERN_IDENT_END) then
+				if not innerEndBlock:find!("^ *end"..PATTERN_IDENT_END) then
 					fileError(
-						path, template, innerEndCodePosStart,
+						path, template, innerEndBlockStart,
 						"Expected 'end' for 'fori' loop starting at line %d.",
 						getLineNumber(template, pos)
 					)
 				end
 
-				for _, luaCode in ipairs(innerLua) do  table.insert(lua, luaCode)  end
-				table.insert(lua, "end ")
-
-				blockEnd = innerEndCodePosEnd
+				table.insert(out, "end ")
+				blockEnd = innerEndBlockEnd
 
 			-- for index [, item, ... ] in <expression> (...) end
 			-- for index = <from>, <to> [, <step> ] (...) end
@@ -390,26 +383,22 @@ do
 				block:find!("^ *for%s+"..PATTERN_IDENT.."%s*[,=]") or
 				block:find!("^ *for%s+"..PATTERN_IDENT.."%s+in"..PATTERN_IDENT_END)
 			then
-				table.insert(lua, block)
-				table.insert(lua, "\ndo ")
+				table.insert(out, block)
+				table.insert(out, "\ndo ")
 
-				local innerLua, innerEndCodePosStart, innerEndCodePosEnd = _parseTemplate(
-					page, path, template, blockEnd+1, level+1, enableHtmlEncoding
-				)
-				local innerEndCode = template:sub(innerEndCodePosStart+2, innerEndCodePosEnd-2)
+				local innerEndBlockStart, innerEndBlockEnd = templateToLua(out, path, template, blockEnd+1, level+1)
+				local innerEndBlock                        = template:sub(innerEndBlockStart+2, innerEndBlockEnd-2)
 
-				if not innerEndCode:find!("^ *end"..PATTERN_IDENT_END) then
+				if not innerEndBlock:find!("^ *end"..PATTERN_IDENT_END) then
 					fileError(
-						path, template, innerEndCodePosStart,
+						path, template, innerEndBlockStart,
 						"Expected 'end' for 'for' loop starting at line %d.",
 						getLineNumber(template, pos)
 					)
 				end
 
-				for _, luaCode in ipairs(innerLua) do  table.insert(lua, luaCode)  end
-				table.insert(lua, "\nend ")
-
-				blockEnd = innerEndCodePosEnd
+				table.insert(out, "\nend ")
+				blockEnd = innerEndBlockEnd
 
 			-- for [<] <to> (...) end
 			elseif block:find!("^ *for"..PATTERN_IDENT_END) then
@@ -421,11 +410,11 @@ do
 						fileError(path, template, pos, "Invalid value expression for simplified 'for' loop: %s", trim(expr)) -- @UX: Better error message.
 					end
 
-					table.insert(lua, "for i = (")
-					table.insert(lua, expr)
-					table.insert(lua, "\n")
-					insertLineNumberCode(lua, ln+countStrings(expr, "\n", true))
-					table.insert(lua, "), 1, -1 do ")
+					table.insert(out, "for i = (")
+					table.insert(out, expr)
+					table.insert(out, "\n")
+					insertLineNumberCode(out, ln+countStrings(expr, "\n", true))
+					table.insert(out, "), 1, -1 do ")
 
 				-- for <to>
 				else
@@ -435,152 +424,126 @@ do
 						fileError(path, template, pos, "Invalid value expression for simplified 'for' loop: %s", trim(expr)) -- @UX: Better error message.
 					end
 
-					table.insert(lua, "for i = 1, (")
-					table.insert(lua, expr)
-					table.insert(lua, "\n")
-					insertLineNumberCode(lua, ln+countStrings(expr, "\n", true))
-					table.insert(lua, ") do ")
+					table.insert(out, "for i = 1, (")
+					table.insert(out, expr)
+					table.insert(out, "\n")
+					insertLineNumberCode(out, ln+countStrings(expr, "\n", true))
+					table.insert(out, ") do ")
 				end
 
-				local innerLua, innerEndCodePosStart, innerEndCodePosEnd = _parseTemplate(
-					page, path, template, blockEnd+1, level+1, enableHtmlEncoding
-				)
-				local innerEndCode = template:sub(innerEndCodePosStart+2, innerEndCodePosEnd-2)
+				local innerEndBlockStart, innerEndBlockEnd = templateToLua(out, path, template, blockEnd+1, level+1)
+				local innerEndBlock                        = template:sub(innerEndBlockStart+2, innerEndBlockEnd-2)
 
-				if not innerEndCode:find!("^ *end"..PATTERN_IDENT_END) then
+				if not innerEndBlock:find!("^ *end"..PATTERN_IDENT_END) then
 					fileError(
-						path, template, innerEndCodePosStart,
+						path, template, innerEndBlockStart,
 						"Expected 'end' for 'for' loop starting at line %d.",
 						getLineNumber(template, pos)
 					)
 				end
 
-				for _, luaCode in ipairs(innerLua) do  table.insert(lua, luaCode)  end
-				table.insert(lua, "\nend ")
-
-				blockEnd = innerEndCodePosEnd
+				table.insert(out, "\nend ")
+				blockEnd = innerEndBlockEnd
 
 			-- do (...) end
 			elseif block:find!("^ *do"..PATTERN_IDENT_END) then
-				table.insert(lua, "do ")
+				table.insert(out, "do ")
 
-				local innerLua, innerEndCodePosStart, innerEndCodePosEnd = _parseTemplate(
-					page, path, template, blockEnd+1, level+1, enableHtmlEncoding
-				)
-				local innerEndCode = template:sub(innerEndCodePosStart+2, innerEndCodePosEnd-2)
+				local innerEndBlockStart, innerEndBlockEnd = templateToLua(out, path, template, blockEnd+1, level+1)
+				local innerEndBlock                        = template:sub(innerEndBlockStart+2, innerEndBlockEnd-2)
 
-				if not innerEndCode:find!("^ *end"..PATTERN_IDENT_END) then
+				if not innerEndBlock:find!("^ *end"..PATTERN_IDENT_END) then
 					fileError(
-						path, template, innerEndCodePosStart,
+						path, template, innerEndBlockStart,
 						"Expected 'end' for 'do' starting at line %d.",
 						getLineNumber(template, pos)
 					)
 				end
 
-				for _, luaCode in ipairs(innerLua) do  table.insert(lua, luaCode)  end
-				table.insert(lua, "\nend ")
-
-				blockEnd = innerEndCodePosEnd
+				table.insert(out, "\nend ")
+				blockEnd = innerEndBlockEnd
 
 			-- if <condition> (...) end
 			elseif block:find!("^ *if"..PATTERN_IDENT_END) then
-				table.insert(lua, block)
-				table.insert(lua, "\nthen ")
+				table.insert(out, block)
+				table.insert(out, "\nthen ")
 
-				local innerLua, innerEndCodePosStart, innerEndCodePosEnd = _parseTemplate(
-					page, path, template, blockEnd+1, level+1, enableHtmlEncoding
-				)
-				local innerEndCode = template:sub(innerEndCodePosStart+2, innerEndCodePosEnd-2)
+				local innerEndBlockStart, innerEndBlockEnd = templateToLua(out, path, template, blockEnd+1, level+1)
+				local innerEndBlock                        = template:sub(innerEndBlockStart+2, innerEndBlockEnd-2)
 
-				for _, luaCode in ipairs(innerLua) do  table.insert(lua, luaCode)  end
-				insertLineNumberCode(lua, getLineNumber(template, innerEndCodePosStart))
+				insertLineNumberCode(out, getLineNumber(template, innerEndBlockStart))
 
-				while innerEndCode:find!("^ *elseif"..PATTERN_IDENT_END) do
-					table.insert(lua, innerEndCode)
-					table.insert(lua, "\nthen ")
+				while innerEndBlock:find!("^ *elseif"..PATTERN_IDENT_END) do
+					table.insert(out, innerEndBlock)
+					table.insert(out, "\nthen ")
 
-					innerLua, innerEndCodePosStart, innerEndCodePosEnd = _parseTemplate(
-						page, path, template, innerEndCodePosEnd+1, level+1, enableHtmlEncoding
-					)
-					innerEndCode = template:sub(innerEndCodePosStart+2, innerEndCodePosEnd-2)
+					innerEndBlockStart, innerEndBlockEnd = templateToLua(out, path, template, innerEndBlockEnd+1, level+1)
+					innerEndBlock                        = template:sub(innerEndBlockStart+2, innerEndBlockEnd-2)
 
-					for _, luaCode in ipairs(innerLua) do  table.insert(lua, luaCode)  end
-					insertLineNumberCode(lua, getLineNumber(template, innerEndCodePosStart))
+					insertLineNumberCode(out, getLineNumber(template, innerEndBlockStart))
 				end
 
-				if innerEndCode:find!("^ *else"..PATTERN_IDENT_END) then
-					table.insert(lua, "else ")
+				if innerEndBlock:find!("^ *else"..PATTERN_IDENT_END) then
+					table.insert(out, "else ")
 
-					innerLua, innerEndCodePosStart, innerEndCodePosEnd = _parseTemplate(
-						page, path, template, innerEndCodePosEnd+1, level+1, enableHtmlEncoding
-					)
-					innerEndCode = template:sub(innerEndCodePosStart+2, innerEndCodePosEnd-2)
+					innerEndBlockStart, innerEndBlockEnd = templateToLua(out, path, template, innerEndBlockEnd+1, level+1)
+					innerEndBlock                        = template:sub(innerEndBlockStart+2, innerEndBlockEnd-2)
 
-					for _, luaCode in ipairs(innerLua) do  table.insert(lua, luaCode)  end
-					insertLineNumberCode(lua, getLineNumber(template, innerEndCodePosStart))
+					insertLineNumberCode(out, getLineNumber(template, innerEndBlockStart))
 				end
 
-				if not innerEndCode:find!("^ *end"..PATTERN_IDENT_END) then
+				if not innerEndBlock:find!("^ *end"..PATTERN_IDENT_END) then
 					fileError(
-						path, template, innerEndCodePosStart,
+						path, template, innerEndBlockStart,
 						"Expected 'end' for 'if' starting at line %d.",
 						getLineNumber(template, pos)
 					)
 				end
 
-				table.insert(lua, "end ")
-
-				blockEnd = innerEndCodePosEnd
+				table.insert(out, "end ")
+				blockEnd = innerEndBlockEnd
 
 			-- while <condition> (...) end
 			elseif block:find!("^ *while"..PATTERN_IDENT_END) then
-				table.insert(lua, block)
-				table.insert(lua, "\ndo ")
+				table.insert(out, block)
+				table.insert(out, "\ndo ")
 
-				local innerLua, innerEndCodePosStart, innerEndCodePosEnd = _parseTemplate(
-					page, path, template, blockEnd+1, level+1, enableHtmlEncoding
-				)
-				local innerEndCode = template:sub(innerEndCodePosStart+2, innerEndCodePosEnd-2)
+				local innerEndBlockStart, innerEndBlockEnd = templateToLua(out, path, template, blockEnd+1, level+1)
+				local innerEndBlock                        = template:sub(innerEndBlockStart+2, innerEndBlockEnd-2)
 
-				if not innerEndCode:find!("^ *end"..PATTERN_IDENT_END) then
+				if not innerEndBlock:find!("^ *end"..PATTERN_IDENT_END) then
 					fileError(
-						path, template, innerEndCodePosStart,
+						path, template, innerEndBlockStart,
 						"Expected 'end' for 'while' loop starting at line %d.",
 						getLineNumber(template, pos)
 					)
 				end
 
-				for _, luaCode in ipairs(innerLua) do  table.insert(lua, luaCode)  end
-				table.insert(lua, "end ")
-
-				blockEnd = innerEndCodePosEnd
+				table.insert(out, "end ")
+				blockEnd = innerEndBlockEnd
 
 			-- repeat (...) until <condition>
 			elseif block:find!("^ *repeat"..PATTERN_IDENT_END) then
 				-- @Incomplete: Make sure there's no garbage afterwards.
-				table.insert(lua, "repeat ")
+				table.insert(out, "repeat ")
 
-				local innerLua, innerEndCodePosStart, innerEndCodePosEnd = _parseTemplate(
-					page, path, template, blockEnd+1, level+1, enableHtmlEncoding
-				)
-				local innerEndCode = template:sub(innerEndCodePosStart+2, innerEndCodePosEnd-2)
+				local innerEndBlockStart, innerEndBlockEnd = templateToLua(out, path, template, blockEnd+1, level+1)
+				local innerEndBlock                        = template:sub(innerEndBlockStart+2, innerEndBlockEnd-2)
 
-				if not innerEndCode:find!("^ *until" ..PATTERN_IDENT_END) then
+				if not innerEndBlock:find!("^ *until" ..PATTERN_IDENT_END) then
 					fileError(
-						path, template, innerEndCodePosStart,
+						path, template, innerEndBlockStart,
 						"Expected 'until' for 'repeat' loop starting at line %d.",
 						getLineNumber(template, pos)
 					)
 				end
 
-				for _, luaCode in ipairs(innerLua) do  table.insert(lua, luaCode)  end
-				insertLineNumberCode(lua, getLineNumber(template, innerEndCodePosStart))
-				table.insert(lua, innerEndCode)
-				table.insert(lua, "\n")
+				insertLineNumberCode(out, getLineNumber(template, innerEndBlockStart))
+				table.insert(out, innerEndBlock)
+				table.insert(out, "\n")
+				blockEnd = innerEndBlockEnd
 
-				blockEnd = innerEndCodePosEnd
-
-			-- End block.
+			-- End block + elseif.
 			elseif
 				block:find!("^ *end"   ..PATTERN_IDENT_END) or
 				block:find!("^ *until" ..PATTERN_IDENT_END) or
@@ -590,51 +553,64 @@ do
 				if level == 1 then
 					fileError(path, template, pos, "Unexpected templateified '%s'.", (block:match"%a+"))
 				end
-				return lua, blockStart, blockEnd
+				return blockStart, blockEnd
 
 			-- URL short-form.
 			elseif block:find"^ */" or block:find"^ *%a+:/" then
-				table.insert(lua, F("echo(url%q)", trim(block)))
+				table.insert(out, F("echo(url%q)", trim(block)))
 
 			-- Value expression.
-			elseif maybeInsertPossibleValueExpression(lua, block) then
+			elseif insertLuaForEchoingIfExpression(out, block) then
 				if block:find"^%s*function%s*%(" then -- We do allow echoing functions, but this specifically is probably an error made by the user.
 					fileError(path, template, blockStart, "Invalid value expression.")
 				end
 
-			-- Any other code.
+			-- Any other Lua code.
 			else
-				table.insert(lua, block)
-				table.insert(lua, "\n")
+				table.insert(out, block)
+				table.insert(out, "\n")
 			end
 
 			----------------------------------------------------------------
 
 			if autoLock then
-				table.insert(lua, "lock()")
+				table.insert(out, "lock()")
 			end
 
 			pos = blockEnd + 1
 		end
 
 		if level > 1 then
-			fileError(path, template, blockStartPos, "Templateified control structure doesn't have an end.")
+			fileError(path, template, posAtStartOfParsing, "Templateified control structure doesn't have an end.")
 		end
 
 		if pos <= #template then
 			local plainSegment = template:sub(pos)
 			local luaStatement = F("echoRaw(%q)", plainSegment) --:gsub("\\\n", "\\n")
-			table.insert(lua, luaStatement)
+			table.insert(out, luaStatement)
 		end
 
-		local luaCode = table.concat(lua)
+		return #template+1, #template -- These return values should never actually be used if everything is working correctly.
+	end
 
-		-- print("-- LUA --") print(luaCode) print("-- /LUA --")
+	local luaCodeCache = {}
 
-		-- Generate output.
-		--==============================================================
+	local function _parseAndRunTemplate(page, path, template, useCache, enableHtmlEncoding)
+		local luaCode = useCache and luaCodeCache[path] or nil
 
-		local out = {}
+		if not luaCode then
+			local luaBuffer = {}
+			templateToLua(luaBuffer, path, template, 1, 1)
+
+			luaCode = table.concat(luaBuffer)
+			if useCache then  luaCodeCache[path] = luaCode  end
+
+			!if DEV and 1==0 then
+				print("-- LUA "..path.." --")
+				print(luaCode)
+				print("-- /LUA --")
+			!end
+		end
 
 		local fullPath   = F("%s/%s/%s", getCwd(), DIR_CONTENT, path)
 		local chunk, err = loadstring(luaCode, "@"..fullPath)
@@ -642,13 +618,13 @@ do
 
 		setfenv(chunk, scriptEnvironment)
 
-		local ctx = pushContext("template")
-		ctx.page = page
+		local ctx                            = pushContext("template")
+		ctx.page                             = page
 		ctx._scriptEnvironmentGlobals.page   = getProtectionWrapper(page, "page")
 		ctx._scriptEnvironmentGlobals.params = page.params.v
 		ctx._scriptEnvironmentGlobals.P      = page.params.v
-		ctx.out = out
-		ctx.enableHtmlEncoding = enableHtmlEncoding
+		ctx.out                              = {}
+		ctx.enableHtmlEncoding               = enableHtmlEncoding
 
 		local ok, err = xpcall(chunk, xpcallErrorHandler)
 
@@ -658,40 +634,39 @@ do
 			errorInGeneratedCodeFromTemplate(path, luaCode, err)
 		end
 
-		out = table.concat(out)
+		local templateResult = (table.concat(ctx.out)
 			:gsub("[ \t]+\n", "\n"  ) -- :Beautify
-			:gsub("\n\n\n+",  "\n\n") -- :Beautify
+			:gsub("\n\n\n+",  "\n\n") -- :Beautify  @UX Not sure if this line is actually good.
+		)
 
-		--==============================================================
-
-		return out
+		return templateResult
 	end
 
-	-- contents = parseTemplate( page, path, template [, fileType=fromPage ] )
-	function _G.parseTemplate(page, path, template, fileType)
+	-- stringResult = parseAndRunTemplate( page, path, template, fileType=fromPage, useCache )
+	function _G.parseAndRunTemplate(page, path, template, fileType, useCache)
 		fileType = (fileType or fileTypes[page._extension])
 
-		!local PRINT_CONTENTS = DEV and 1==0
-		local contents
+		!local PRINT_RESULT = DEV and 1==0
+		local result
 
 		if fileType == "markdown" then
-			contents = _parseTemplate(page, path, template, 1, 1, true)
-			contents = markdownToHtml(contents)
-			contents = trimNewlines(contents).."\n" -- :Beautify
-			!if PRINT_CONTENTS then  __LUA` print"-- HTML --" print(contents) print"-- /HTML --" `  end
+			result = _parseAndRunTemplate(page, path, template, useCache, true)
+			result = markdownToHtml(result)
+			result = trimNewlines(result).."\n" -- :Beautify
+			!if PRINT_RESULT then  __LUA` print"-- HTML --" print(result) print"-- /HTML --" `  end
 
 		elseif fileType == "html" then
-			contents = _parseTemplate(page, path, template, 1, 1, true)
-			contents = trimNewlines(contents).."\n" -- :Beautify
-			!if PRINT_CONTENTS then  __LUA` print"-- HTML --" print(contents) print"-- /HTML --" `  end
+			result = _parseAndRunTemplate(page, path, template, useCache, true)
+			result = trimNewlines(result).."\n" -- :Beautify
+			!if PRINT_RESULT then  __LUA` print"-- HTML --" print(result) print"-- /HTML --" `  end
 
 		else
-			contents = _parseTemplate(page, path, template, 1, 1, false)
-			contents = trimNewlines(contents).."\n" -- :Beautify
-			!if PRINT_CONTENTS then  __LUA` print"-- CONTENTS --" print(contents) print"-- /CONTENTS --" `  end
+			result = _parseAndRunTemplate(page, path, template, useCache, false)
+			result = trimNewlines(result).."\n" -- :Beautify
+			!if PRINT_RESULT then  __LUA` print"-- result --" print(result) print"-- /result --" `  end
 		end
 
-		return contents
+		return result
 	end
 
 end
@@ -1489,10 +1464,10 @@ function _G.generateFromTemplate(page, template, modTime)
 	local extLower = ext:lower()
 	assert(pathRel)
 
-	local outStr
+	local result
 
 	if page.isPage.v then
-		page.content.v = parseTemplate(page, pathRel, template)
+		page.content.v = parseAndRunTemplate(page, pathRel, template, nil, false)
 
 		if
 			(page.isDraft.v and not includeDrafts) or -- Is draft?
@@ -1508,15 +1483,15 @@ function _G.generateFromTemplate(page, template, modTime)
 		end
 
 		local layoutTemplate, layoutPath = getLayoutTemplate(page)
-		outStr = parseTemplate(page, layoutPath, layoutTemplate, "html")
+		result                           = parseAndRunTemplate(page, layoutPath, layoutTemplate, "html", true)
 
 		page.content.v = "" -- Free up memory, as we don't need this anymore.
 
 	else
-		outStr = parseTemplate(page, pathRel, template)
+		result = parseAndRunTemplate(page, pathRel, template, nil, false)
 	end
 
-	writeOutputFile(page._category, page._pathOut, page.url.v, outStr, modTime)
+	writeOutputFile(page._category, page._pathOut, page.url.v, result, modTime)
 	page._isGenerated = true
 
 	pagesGenerating[page._pathOut] = nil
