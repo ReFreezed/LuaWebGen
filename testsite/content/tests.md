@@ -176,3 +176,16 @@ echoOgres: {{echoOgres()}}
 fullscreenImage: {{fullscreenImage"/images/head.png"}}
 
 
+
+{{
+local function errorTests()
+	-- (               -- Template parsing error.
+	-- }} {{if 1}} {{  -- Template parsing error.
+	-- nil             -- Lua parsing error.
+	-- x = 5 + nil     -- Lua runtime error.
+	-- error("Oh no!") -- User-raised error.
+end
+errorTests()
+}}
+
+

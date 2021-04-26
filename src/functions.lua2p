@@ -10,7 +10,7 @@
 --=
 --==============================================================
 
-	assertf, assertType, assertTable, assertarg
+	assertArg
 	attributeWith, attributeWithAny
 	cleanupPath
 	countStrings
@@ -18,7 +18,7 @@
 	createThumbnail
 	datetimeToTime, getDatetime
 	encodeHtmlEntities
-	errorf, fileError, errorInGeneratedCodeFromTemplate
+	error, errorf, fileError, errorLine
 	F, formatBytes, formatTemplate
 	generateFromTemplate, generateFromTemplateFile, generateRedirection
 	generatorMeta
@@ -34,7 +34,6 @@
 	gsubPlainSub
 	htaccessRewriteEscapeTestString, htaccessRewriteEscapeCondPattern, htaccessRewriteEscapeRuleSubstitution
 	indexOf, itemWith, itemWithAll
-	insertLineNumberCode
 	ipairsr, iprev
 	isAny
 	isArgs
@@ -69,6 +68,8 @@
 	xpcallErrorHandler, makeError, makeErrorf, isErrorObject
 
 --============================================================]]
+
+local templateMetaprogramCache = {}
 
 
 
@@ -305,6 +306,12 @@ do
 		assert(false)
 	end
 
+	local function addLineNumberIndicator(out, ln)
+		table.insert(out, "\n-- @LINE")
+		table.insert(out, ln)
+		table.insert(out, "\n")
+	end
+
 	-- endBlockStart, endBlockEnd = templateToLua( luaOutputBuffer, path, template, position, levelOfTemplateifiedControlStructure )
 	local function templateToLua(out, path, template, pos, level)
 		!local PATTERN_IDENT       = "[%a_][%w_]*"
@@ -329,7 +336,7 @@ do
 			pos = pos + 2 -- Eat "{{".
 
 			local ln = getLineNumber(template, pos)
-			insertLineNumberCode(out, ln)
+			addLineNumberIndicator(out, ln)
 
 			local blockEnd = findEndOfLuaCodeBlock(path, template, blockStart, pos) + 2
 			local block    = template:sub(blockStart+2, blockEnd-2) -- Without "{{" and "}}".
@@ -413,7 +420,7 @@ do
 					table.insert(out, "for i = (")
 					table.insert(out, expr)
 					table.insert(out, "\n")
-					insertLineNumberCode(out, ln+countStrings(expr, "\n", true))
+					addLineNumberIndicator(out, ln+countStrings(expr, "\n", true))
 					table.insert(out, "), 1, -1 do ")
 
 				-- for <to>
@@ -427,7 +434,7 @@ do
 					table.insert(out, "for i = 1, (")
 					table.insert(out, expr)
 					table.insert(out, "\n")
-					insertLineNumberCode(out, ln+countStrings(expr, "\n", true))
+					addLineNumberIndicator(out, ln+countStrings(expr, "\n", true))
 					table.insert(out, ") do ")
 				end
 
@@ -471,7 +478,7 @@ do
 				local innerEndBlockStart, innerEndBlockEnd = templateToLua(out, path, template, blockEnd+1, level+1)
 				local innerEndBlock                        = template:sub(innerEndBlockStart+2, innerEndBlockEnd-2)
 
-				insertLineNumberCode(out, getLineNumber(template, innerEndBlockStart))
+				addLineNumberIndicator(out, getLineNumber(template, innerEndBlockStart))
 
 				while innerEndBlock:find!("^ *elseif"..PATTERN_IDENT_END) do
 					table.insert(out, innerEndBlock)
@@ -480,7 +487,7 @@ do
 					innerEndBlockStart, innerEndBlockEnd = templateToLua(out, path, template, innerEndBlockEnd+1, level+1)
 					innerEndBlock                        = template:sub(innerEndBlockStart+2, innerEndBlockEnd-2)
 
-					insertLineNumberCode(out, getLineNumber(template, innerEndBlockStart))
+					addLineNumberIndicator(out, getLineNumber(template, innerEndBlockStart))
 				end
 
 				if innerEndBlock:find!("^ *else"..PATTERN_IDENT_END) then
@@ -489,7 +496,7 @@ do
 					innerEndBlockStart, innerEndBlockEnd = templateToLua(out, path, template, innerEndBlockEnd+1, level+1)
 					innerEndBlock                        = template:sub(innerEndBlockStart+2, innerEndBlockEnd-2)
 
-					insertLineNumberCode(out, getLineNumber(template, innerEndBlockStart))
+					addLineNumberIndicator(out, getLineNumber(template, innerEndBlockStart))
 				end
 
 				if not innerEndBlock:find!("^ *end"..PATTERN_IDENT_END) then
@@ -538,7 +545,7 @@ do
 					)
 				end
 
-				insertLineNumberCode(out, getLineNumber(template, innerEndBlockStart))
+				addLineNumberIndicator(out, getLineNumber(template, innerEndBlockStart))
 				table.insert(out, innerEndBlock)
 				table.insert(out, "\n")
 				blockEnd = innerEndBlockEnd
@@ -593,17 +600,16 @@ do
 		return #template+1, #template -- These return values should never actually be used if everything is working correctly.
 	end
 
-	local luaCodeCache = {}
-
 	local function _parseAndRunTemplate(page, path, template, useCache, enableHtmlEncoding)
-		local luaCode = useCache and luaCodeCache[path] or nil
+		useCache      = true -- We need all these for correcting file numbers in error messages! @Cleanup
+		local luaCode = useCache and templateMetaprogramCache[path] or nil
 
 		if not luaCode then
 			local luaBuffer = {}
 			templateToLua(luaBuffer, path, template, 1, 1)
 
 			luaCode = table.concat(luaBuffer)
-			if useCache then  luaCodeCache[path] = luaCode  end
+			if useCache then  templateMetaprogramCache[path] = luaCode  end
 
 			!if DEV and 1==0 then
 				print("-- LUA "..path.." --")
@@ -612,9 +618,8 @@ do
 			!end
 		end
 
-		local fullPath   = F("%s/%s/%s", getCwd(), DIR_CONTENT, path)
-		local chunk, err = loadstring(luaCode, "@"..fullPath)
-		if not chunk then  error(err)  end
+		local chunk, err = loadstring(luaCode, "@"..path)
+		if not chunk then  errorLine(err)  end
 
 		setfenv(chunk, scriptEnvironment)
 
@@ -626,13 +631,11 @@ do
 		ctx.out                              = {}
 		ctx.enableHtmlEncoding               = enableHtmlEncoding
 
-		local ok, err = xpcall(chunk, xpcallErrorHandler)
+		local ok, errObj = xpcall(chunk, xpcallErrorHandler)
 
 		popContext("template")
 
-		if not ok then
-			errorInGeneratedCodeFromTemplate(path, luaCode, err)
-		end
+		if not ok then  error(errObj)  end
 
 		local templateResult = (table.concat(ctx.out)
 			:gsub("[ \t]+\n", "\n"  ) -- :Beautify
@@ -675,11 +678,21 @@ end
 
 local _error = error
 
--- error( message, level=1 )
+-- error( message [, level=1 ] )
 function _G.error(err, level)
 	level = (level or 1) + 1
-	err   = isErrorObject(err) and err or makeError(err, level)
-	_error(err, level)
+	if isErrorObject(err) then  _error(err, level)  end
+
+	err = tostring(err)
+
+	local info = debug.getinfo(level, "Sl")
+	if info then
+		local sourceName = info.source:find"^@" and info.source:sub(2) or info.short_src
+		err              = sourceName .. (info.currentline > 0 and ":"..info.currentline or "") .. ": " .. err
+	end
+
+	local errObj = makeError(err, level)
+	_error(errObj, level)
 end
 
 -- errorf( [ level=1, ] formatString, ... )
@@ -700,47 +713,14 @@ function _G.fileError(path, contents, pos, s, ...)
 	else
 		s = F("%s:%d: "..s, path, ln, ...)
 	end
-	error(s, 2)
+	errorLine(s)
 end
 
-do
-	local function fixLineNumber(s, fullPath, genCode)
-		-- @Robustness: All this isn't great...
-		if s:sub(1, #fullPath+1) ~= fullPath..":" then
-			return s, false
-		end
-
-		local lnInGenCode  = tonumber(s:match":(%d+):")
-		local lnInTemplate = 0
-
-		for line in genCode:gmatch"([^\n]*)\n?" do
-			lnInGenCode  = lnInGenCode - 1
-			local lnStr  = line:match"^%-%- @LINE(%d+)$"
-			lnInTemplate = (lnStr and tonumber(lnStr)-1 or lnInTemplate+1)
-
-			if lnInGenCode == 0 then  break  end
-		end
-
-		s = s:gsub(":(%d+):", ":"..lnInTemplate..":", 1)
-		return s, true
-	end
-
-	function _G.errorInGeneratedCodeFromTemplate(path, genCode, errInGenCode)
-		local fullPath       = F("%s/%s/%s", getCwd(), DIR_CONTENT, path)
-		errInGenCode.message = fixLineNumber(errInGenCode.message, fullPath, genCode)
-
-		for _, i in ipairsr(errInGenCode.stringLines) do
-			local s, didFix       = fixLineNumber(errInGenCode.stack[i], fullPath, genCode)
-			errInGenCode.stack[i] = s
-
-			if didFix then
-				-- Prevent fixing line numbers more than once.
-				table.remove(errInGenCode.stringLines, i)
-			end
-		end
-
-		error(errInGenCode)
-	end
+-- errorLine( message )
+-- errorLine( formatString, ... )
+function _G.errorLine(s, ...)
+	if select("#", ...) > 0 then  s = F(s, ...)  end
+	_error(makeError(s, 0))
 end
 
 
@@ -775,7 +755,9 @@ function _G.writeOutputFile(category, pathRel, url, data, modTime)
 		data = fileProcessors[extLower](data, pathToSitePath(pathRel))
 		popContext("config")
 
-		assertType(data, "string", "File processor didn't return a string. (%s)", extLower)
+		if type(data) ~= "string" then
+			errorf("File processor for '%s' files did not return a string.", extLower)
+		end
 	end
 
 	local path = DIR_OUTPUT.."/"..pathOutputRel
@@ -1080,14 +1062,6 @@ end
 
 
 
-function _G.insertLineNumberCode(t, ln)
-	table.insert(t, "\n-- @LINE")
-	table.insert(t, ln)
-	table.insert(t, "\n")
-end
-
-
-
 function _G.isFile(path)
 	return lfs.attributes(path, "mode") == "file"
 end
@@ -1361,8 +1335,8 @@ end
 
 
 function _G.getProtectionWrapper(obj, objName)
-	assertarg(1, obj,     "table")
-	assertarg(2, objName, "string")
+	assertArg(1, obj,     "table")
+	assertArg(2, objName, "string")
 
 	local wrapper = protectionWrappers[obj]
 	if wrapper then  return wrapper  end
@@ -1445,14 +1419,14 @@ end
 
 -- generateFromTemplate( page, template [, modificationTime ] )
 function _G.generateFromTemplate(page, template, modTime)
-	assert(type(page) == "table")
+	assert(type(page)     == "table")
 	assert(type(template) == "string")
 
 	if page._isGenerated then
 		errorf(2, "Page has already generated. (%s)", page._path)
 	end
 	if page._isGenerating or pagesGenerating[page._pathOut] then
-		errorf(2, "Recursive page generation detected. You may want to call lock() in '%s'.", page._path)
+		errorf(2, "Recursive page generation detected. (You may want to call lock() in '%s')", page._path)
 	end
 
 	page._isGenerating = true
@@ -1462,12 +1436,11 @@ function _G.generateFromTemplate(page, template, modTime)
 	local filename = getFilename(pathRel)
 	local ext      = getExtension(filename)
 	local extLower = ext:lower()
-	assert(pathRel)
 
 	local result
 
 	if page.isPage.v then
-		page.content.v = parseAndRunTemplate(page, pathRel, template, nil, false)
+		page.content.v = parseAndRunTemplate(page, page._pathForError, template, nil, false)
 
 		if
 			(page.isDraft.v and not includeDrafts) or -- Is draft?
@@ -1488,7 +1461,7 @@ function _G.generateFromTemplate(page, template, modTime)
 		page.content.v = "" -- Free up memory, as we don't need this anymore.
 
 	else
-		result = parseAndRunTemplate(page, pathRel, template, nil, false)
+		result = parseAndRunTemplate(page, page._pathForError, template, nil, false)
 	end
 
 	writeOutputFile(page._category, page._pathOut, page.url.v, result, modTime)
@@ -1515,8 +1488,8 @@ function _G.generateFromTemplateFile(page)
 end
 
 function _G.generateRedirection(url, targetUrl)
-	assertarg(1, url,       "string")
-	assertarg(2, targetUrl, "string")
+	assertArg(1, url,       "string")
+	assertArg(2, targetUrl, "string")
 
 	if not url:find"^/" then
 		errorf(2, "Redirection URLs must begin with a '/'. (%s)", url)
@@ -1568,32 +1541,9 @@ end
 
 
 
-function _G.assertf(v, err, ...)
-	if not v then
-		if select("#", ...) > 0 then  err = F(err, ...)  end
-		assert(false, err)
-	end
-	return v
-end
-
-function _G.assertType(v, vType, err, ...)
-	assertf(type(v) == vType, err, ...)
-	return v
-end
-
--- value = assertTable( value [, fieldKeyType, fieldValueType, errorMessage, ... ] )
-function _G.assertTable(t, kType, vType, err, ...)
-	assertType(t, "table", err, ...)
-	for k, v in pairs(t) do
-		if kType then  assertType(k, kType, err, ...)  end
-		if vType then  assertType(v, vType, err, ...)  end
-	end
-	return t
-end
-
--- value = assertarg( [ functionName=auto, ] argumentNumber, value, expectedValueType... [, depth=2 ] )
+-- value = assertArg( [ functionName=auto, ] argumentNumber, value, expectedValueType1, ... [, depth=2 ] )
 do
-	local function _assertarg(fName, n, v, ...)
+	local function _assertArg(fName, n, v, ...)
 		local vType       = type(v)
 		local varargCount = select("#", ...)
 		local lastArg     = select(varargCount, ...)
@@ -1604,7 +1554,7 @@ do
 			if vType == select(i, ...) then  return v  end
 		end
 
-		local depth = 2+(hasDepthArg and lastArg or 2)
+		local depth = 2 + (hasDepthArg and lastArg or 2)
 
 		if not fName then
 			fName = debug.traceback("", depth-1):match": in function '(.-)'" or "?"
@@ -1615,11 +1565,11 @@ do
 		errorf(depth, "bad argument #%d to '%s' (%s expected, got %s)", n, fName, expects, vType)
 	end
 
-	function _G.assertarg(fNameOrArgNum, ...)
+	function _G.assertArg(fNameOrArgNum, ...)
 		if type(fNameOrArgNum) == "string" then
-			return _assertarg(fNameOrArgNum, ...)
+			return (_assertArg(fNameOrArgNum, ...))
 		else
-			return _assertarg(nil, fNameOrArgNum, ...)
+			return (_assertArg(nil, fNameOrArgNum, ...))
 		end
 	end
 end
@@ -1716,7 +1666,7 @@ end
 
 
 function _G.datetimeToTime(datetime)
-	assertarg(1, datetime, "string")
+	assertArg(1, datetime, "string")
 
 	local date = dateLib(datetime)
 	local time = (date-dateLib.epoch()):spanseconds()
@@ -1726,7 +1676,7 @@ end
 
 -- datetime = getDatetime( [ time=now ] )
 function _G.getDatetime(time)
-	assertarg(1, time, "number","nil")
+	assertArg(1, time, "number","nil")
 
 	local date     = dateLib(time or os.time()):tolocal()
 	local datetime = date:fmt"${iso}%z" :gsub("..$", ":%0") :gsub("%+00:00$", "Z")
@@ -1765,21 +1715,19 @@ end
 function _G.assertContext(ctxName, funcContext, errLevel)
 	local ctx = contextStack[#contextStack]
 	if not ctx or ctx._name ~= ctxName then
-		errLevel = (errLevel or 2)+1
+		errLevel = (errLevel or 2) + 1
 		if funcContext then
-			errorf(errLevel, "[%s] Context is wrong. (Expected '%s', but is '%s')", funcContext, ctxName, ctx and ctx._name or "none")
+			errorf(errLevel, "[%s] Context is wrong. (Expected '%s', but is '%s')", funcContext, ctxName, (ctx and ctx._name or "none"))
 		else
-			errorf(errLevel,      "Context is wrong. (Expected '%s', but is '%s')",              ctxName, ctx and ctx._name or "none")
+			errorf(errLevel,      "Context is wrong. (Expected '%s', but is '%s')",              ctxName, (ctx and ctx._name or "none"))
 		end
 	end
 end
 
--- context = getContext( [ contextName ] )
+-- context = getContext( [ requiredContextName=any ] )
 function _G.getContext(ctxName)
 	if ctxName then  assertContext(ctxName)  end
-
-	local ctx = contextStack[#contextStack] or error("There is no context.")
-	return ctx
+	return contextStack[#contextStack] or error("There is no context.", 2)
 end
 
 
@@ -1914,14 +1862,14 @@ do
 	end
 
 	function _G.newPage(pathRel)
-		assertType(pathRel, "string")
+		assertArg(1, pathRel, "string")
 
 		local filename = getFilename(pathRel)
 		local ext      = getExtension(filename)
 		local extLower = ext:lower()
 
 		if not fileTypes[extLower] then
-			errorf("Invalid template extension '%s'. You may want to specify config.types[\"%s\"].", extLower, extLower)
+			errorf("Invalid template extension '%s'. (You may want to specify config.types[\"%s\"])", extLower, extLower)
 		end
 
 		local isPage  = isAny(fileTypes[extLower], "markdown", "html")
@@ -1961,6 +1909,7 @@ do
 			_isLocked     = false,
 			_path         = pathRel,
 			_pathOut      = pathRelOut,
+			_pathForError = F("%s/%s", DIR_CONTENT, pathRel),
 			_extension    = extLower,
 
 			isPage = {
@@ -2001,7 +1950,7 @@ do
 				g = function(field)  return field.v ~= "" and field.v or page.date.v  end,
 				s = function(field, datetime)
 					assertContext("template", "publishDate", 3)
-					assertarg(1, datetime, "string")
+					assertArg(1, datetime, "string")
 					field.v = datetime
 				end,
 			},
@@ -2287,14 +2236,14 @@ end
 
 do
 	local errMt = {
-		__tostring = function(err)
+		__tostring = function(errObj)
 			return
-				err.stack[1]
+				errObj.stack[1]
 				and F(
 					"ERROR: %s\nstack traceback:\n\t%s\n",
-					err.message, table.concat(err.stack, "\n\t")
+					errObj.message, table.concat(errObj.stack, "\n\t")
 				)
-				or F("ERROR: %s\n", err.message)
+				or F("ERROR: %s\n", errObj.message)
 		end,
 	}
 
@@ -2302,61 +2251,83 @@ do
 		return isErrorObject(err) and err or makeError(tostring(err), 2)
 	end
 
+	local function fixLineNumbers(s)
+		s = s:gsub("([^\n]*)\n?", function(sLine)
+			if sLine == "" then  return  end
+
+			local path, lnPos, lnStr = sLine:match"(%S*%.[%w_]+):()(%d+): " -- Not robust at all, but should work in most cases, at least for internally constructed error messages.
+
+			local luaCode = templateMetaprogramCache[path]
+			if not luaCode then  return  end
+
+			local ln           = tonumber(lnStr)
+			local lnInTemplate = 0
+
+			for line in luaCode:gmatch"([^\n]*)\n?" do
+				ln                = ln - 1
+				local mappedLnStr = line:match"^%-%- @LINE(%d+)$"
+				lnInTemplate      = (mappedLnStr and tonumber(mappedLnStr)-1 or lnInTemplate+1)
+
+				if ln == 0 then  break  end
+			end
+
+			sLine = sLine:sub(1, lnPos-1) .. lnInTemplate .. sLine:sub(lnPos+#lnStr)
+			return sLine
+		end)
+
+		return s
+	end
+
 	function _G.makeError(message, level)
-		assertarg(1, message, "string")
-		assertarg(2, level,   "number","nil")
+		assertArg(1, message, "string")
+		assertArg(2, level,   "number","nil")
 
-		level = (level or 1)
+		level       = (level == 0) and 0 or (level or 1)
+		local stack = {}
 
-		local stack       = {}
-		local stringLines = {}
+		if level > 0 then
+			while level < 1/0 do
+				level = level + 1
 
-		local didFixMessage = false
+				local info = debug.getinfo(level, "nSl")
+				if not info then  break  end
 
-		for i = 1, 1/0 do
-			local info = debug.getinfo(level+i, "nSl")
-			if not info then  break  end
+				local isFile     = info.source:find"^@" ~= nil
+				local sourceName = cleanupPath(isFile and info.source:sub(2) or info.short_src)
 
-			local isStr      = info.short_src:find"^%[string \"" ~= nil -- Probably need to @Revisit this. 2021-04-23
-			local sourceName = cleanupPath(isStr and info.source or info.short_src)
-
-			if isStr then
-				table.insert(stringLines, i)
-
-				if not didFixMessage and message:sub(1, #info.short_src) == info.short_src then
-					message = sourceName..message:sub(#info.short_src+1)
-					didFixMessage = true
+				if isFile then
+					sourceName = cleanupPath(sourceName)
 				end
+
+				local b = newStringBuilder()
+				b("%s:", sourceName)
+
+				if info.currentline > 0 then
+					b("%d:", info.currentline)
+				end
+
+				if info.name then
+					b(" in '%s'", info.name)
+				elseif info.what == "main" then
+					b(" in main chunk")
+				elseif info.what == "C" or info.what == "tail" then
+					b(" ?")
+				else
+					b(" in <%s:%d>", getFilename(sourceName), info.linedefined)
+				end
+
+				table.insert(stack, fixLineNumbers(b()))
 			end
 
-			local b = newStringBuilder()
-			b("%s:", sourceName)
-
-			if info.currentline > 0 then  b("%d:", info.currentline)  end
-
-			if info.name then
-				b(" in function '%s'", info.name)
-			elseif info.what == "main" then
-				b(" in main chunk")
-			elseif info.what == "C" or info.what == "tail" then
-				b(" ?")
-			else
-				b(" in function <%s:%d>", getFilename(sourceName), info.linedefined)
+			while stack[#stack] == "[C]: ?" do
+				stack[#stack] = nil
 			end
-
-			table.insert(stack, b())
 		end
 
-		while stack[#stack] == "[C]: ?" do
-			stack[#stack] = nil
-		end
+		message = fixLineNumbers(message:gsub("^.-:%d+: ", cleanupPath))
 
-		if not didFixMessage then
-			message = message:gsub("^.-:%d+: ", cleanupPath)
-		end
-
-		local err = setmetatable({message=message, stack=stack, stringLines=stringLines}, errMt)
-		return err
+		local errObj = setmetatable({message=message, stack=stack}, errMt)
+		return errObj
 	end
 
 	function _G.makeErrorf(level, s, ...)

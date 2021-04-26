@@ -20,22 +20,22 @@ print(os.date"%Y-%m-%d")
 
 local i = 1
 
-local command = args[i] or error("Arguments: Missing command.")
+local command = args[i] or errorLine("Arguments: Missing command.")
 i             = i + 1
 
 ----------------------------------------------------------------
 
 if command == "new" then
-	local kind = args[i] or error("Arguments: Missing kind after 'new'.")
+	local kind = args[i] or errorLine("Arguments: Missing kind after 'new'.")
 	i          = i + 1
 
 	if kind == "page" then
-		local pathRel = args[i] or error("Arguments: Missing path after 'page'.")
+		local pathRel = args[i] or errorLine("Arguments: Missing path after 'page'.")
 		pathRel       = pathRel:gsub("^/", "")
 		i             = i + 1
 
 		if args[i] then
-			errorf("Arguments: Unknown argument '%s'.", args[i])
+			errorLine("Arguments: Unknown argument '%s'.", args[i])
 		end
 
 		local filename = getFilename(pathRel)
@@ -59,23 +59,25 @@ if command == "new" then
 
 		local path = DIR_CONTENT.."/"..pathRel
 		if lfs.attributes(path, "mode") then
-			errorf("Item already exists: %s", path)
+			errorLine("File or directory already exists: %s", path)
 		end
 
 		createDirectory(getDirectory(path))
 
-		local file = assert(io.open(path, "wb"))
+		local file, err = io.open(path, "wb")
+		if not file then  errorLine(err)  end
+
 		file:write(contents)
 		file:close()
 
 		printf("Created page: %s", path)
 
 	elseif kind == "site" then
-		local pathToSite = args[i] or error("Arguments: Missing path after 'site'.")
+		local pathToSite = args[i] or errorLine("Arguments: Missing path after 'site'.")
 		i = i+1
 
 		if args[i] then
-			errorf("Arguments: Unknown argument '%s'.", args[i])
+			errorLine("Arguments: Unknown argument '%s'.", args[i])
 		end
 
 		-- Create folders.
@@ -89,7 +91,8 @@ if command == "new" then
 			pathToSite.."/"..DIR_SCRIPTS,
 		} do
 			if not isDirectory(path) then
-				assert(lfs.mkdir(path))
+				local ok, err = lfs.mkdir(path)
+				if not ok then  errorLine(err)  end
 			end
 		end
 
@@ -115,7 +118,9 @@ if command == "new" then
 				}
 			)
 
-			local file = assert(io.open(path, "wb"))
+			local file, err = io.open(path, "wb")
+			if not file then  errorLine(err)  end
+
 			file:write(contents)
 			file:close()
 		end
@@ -156,7 +161,9 @@ if command == "new" then
 				}
 			)
 
-			local file = assert(io.open(path, "wb"))
+			local file, err = io.open(path, "wb")
+			if not file then  errorLine(err)  end
+
 			file:write(contents)
 			file:close()
 		end
@@ -164,7 +171,7 @@ if command == "new" then
 		printf("Created site: %s", pathToSite)
 
 	else
-		errorf("Arguments: Unknown kind '%s' after 'new'.", kind)
+		errorLine("Arguments: Unknown kind '%s' after 'new'.", kind)
 	end
 
 	return
@@ -202,9 +209,9 @@ elseif command == "build" then
 			collectgarbage("stop")
 
 		elseif arg:find"^%-" then
-			errorf("Arguments: Unknown option '%s'.", argRaw)
+			errorLine("Arguments: Unknown option '%s'.", argRaw)
 		else
-			errorf("Arguments: Unknown argument '%s'.", argRaw)
+			errorLine("Arguments: Unknown argument '%s'.", argRaw)
 		end
 
 		table.insert(options, arg)
@@ -212,7 +219,7 @@ elseif command == "build" then
 	end
 
 	if not (isDirectory(DIR_CONTENT) or isDirectory(DIR_LAYOUTS) or isFile"config.lua") then
-		error("The current folder doesn't seem to contain a site.")
+		errorLine("The current folder doesn't seem to contain a site.")
 	end
 
 	if options[1] then
@@ -224,7 +231,7 @@ elseif command == "build" then
 
 ----------------------------------------------------------------
 else
-	errorf("Arguments: Unknown command '%s'.", command)
+	errorLine("Arguments: Unknown command '%s'.", command)
 end
 
 
@@ -234,7 +241,8 @@ end
 
 do
 	if not isDirectory(DIR_LOGS) then
-		assert(lfs.mkdir(DIR_LOGS))
+		local ok, err = lfs.mkdir(DIR_LOGS)
+		if not ok then  errorLine(err)  end
 	end
 
 	local basePath = DIR_LOGS..os.date"/%Y%m%d_%H%M%S"
@@ -398,22 +406,22 @@ _G.scriptEnvironmentGlobals = {
 	end,
 
 	X = function(node, tagName) -- @Doc
-		assertType(node, "table", "Invalid XML argument.")
+		if type(node) ~= "table" then  error("Invalid XML argument.", 2)  end
 		return (itemWith(node, "tag", tagName))
 	end,
 
 	Xs = function(node, tagName) -- @Doc
-		assertType(node, "table", "Invalid XML argument.")
+		if type(node) ~= "table" then  error("Invalid XML argument.", 2)  end
 		return (itemWithAll(node, "tag", tagName))
 	end,
 
 	forXml = function(node, tagName) -- @Doc
-		assertType(node, "table", "Invalid XML argument.")
+		if type(node) ~= "table" then  error("Invalid XML argument.", 2)  end
 		return ipairs(itemWithAll(node, "tag", tagName))
 	end,
 
 	printXmlTree = function(node) -- @Doc
-		assertType(node, "table", "Invalid XML argument.")
+		if type(node) ~= "table" then  error("Invalid XML argument.", 2)  end
 
 		local function printNode(node, indent)
 			print(("    "):rep(indent)..node.tag)
@@ -580,7 +588,7 @@ _G.scriptEnvironmentGlobals = {
 	end,
 
 	toDatetime = function(time)
-		assertarg(1, time, "number")
+		assertArg(1, time, "number")
 		return getDatetime(time)
 	end,
 
@@ -648,7 +656,9 @@ _G.scriptEnvironmentGlobals = {
 
 	include = function(htmlFileBasename)
 		assertContext("template", "include")
-		assert(not htmlFileBasename:find"^/")
+		if htmlFileBasename:find"^/" then
+			errorf(2, "Filename is not valid: %s", htmlFileBasename)
+		end
 
 		local path = F("%s/%s.html", DIR_LAYOUTS, htmlFileBasename)
 		local template, err = getFileContents(path)
@@ -676,7 +686,7 @@ _G.scriptEnvironmentGlobals = {
 
 	outputRaw = function(sitePathRel, contents)
 		assertContext("config", "outputRaw")
-		assertType(contents, "string", "The contents must be a string.")
+		assertArg(2, contents, "string")
 
 		local pathRel = sitePathToPath(sitePathRel)
 		writeOutputFile("raw", pathRel, sitePathRel, contents)
@@ -827,9 +837,9 @@ _G.scriptEnvironment = setmetatable({}, {
 		v = scriptFunctions[k]
 		if v then  return v  end
 
-		if isFile(F("%s/%s.lua", DIR_SCRIPTS, k)) then
-			local path = F("%s/%s.lua", DIR_SCRIPTS, k)
+		local path = F("%s/%s.lua", DIR_SCRIPTS, k)
 
+		if isFile(path) then
 			local chunk, err = loadfile(path)
 			if not chunk then
 				error(err, 2)
@@ -873,17 +883,34 @@ local function buildWebsite()
 	-- Read config.
 	----------------------------------------------------------------
 
-	if not isFile"config.lua" then
-		error(makeErrorf("%s:0: %s", getCwd(), "Missing config.lua"))
+	local function lineAssertType(v, vType, s, ...)
+		if type(v) == vType then  return v  end
+		errorLine(s, ...)
 	end
 
-	local chunk = assert(loadfile"config.lua")
+	local function lineAssertTable(t, kType, vType, s, ...)
+		lineAssertType(t, "table", s, ...)
+		for k, v in pairs(t) do
+			if kType then  lineAssertType(k, kType, s, ...)  end
+			if vType then  lineAssertType(v, vType, s, ...)  end
+		end
+		return t
+	end
+
+	if not isFile"config.lua" then
+		errorLine("Missing config.lua in site folder.")
+	end
+
+	local chunk, err = loadfile"config.lua"
+	if not chunk then  errorLine(err)  end
+
 	setfenv(chunk, scriptEnvironment)
+
 	local config = chunk()
-	assertTable(config, nil, nil, "config.lua must return a table.")
+	lineAssertTable(config, nil, nil, "config.lua: The file must return a table.")
 
 	local function get(kPath, default, assertFunc, ...)
-		local v = config
+		local v     = config
 		local tLast = nil
 		local kLast = nil
 
@@ -903,19 +930,25 @@ local function buildWebsite()
 	end
 
 	local function getV(kPath, default, vType) -- Value.
-		return get(kPath, default, assertType, vType, "config.%s must be a %s.", kPath, vType)
+		return get(
+			kPath, default, lineAssertType, vType,
+			"config.lua: config.%s must be a %s.",
+			kPath, vType
+		)
 	end
-
 	local function getT(kPath, default, kType, vType) -- Table
 		return get(
-			kPath, default, assertTable, kType, vType,
+			kPath, default, lineAssertTable, kType, vType,
 			"config.%s must be a table of [%s]=%s.",
 			kPath, (kType or "value"), (vType or "value")
 		)
 	end
-
 	local function getA(kPath, default, vType) -- Array.
-		return get(kPath, default, assertTable, "number", vType, "config.%s must be an array of %s.", kPath, vType)
+		return get(
+			kPath, default, lineAssertTable, "number", vType,
+			"config.lua: config.%s must be an array of %s.",
+			kPath, vType
+		)
 	end
 
 	site.title.v           = getV("title",             "",                    "string")
@@ -957,22 +990,23 @@ local function buildWebsite()
 		timestampPrintWarning("Unknown config.htaccess field '%s'.", k)
 	end
 
-
-	assert(isAny(type(outputPathFormat), "string","function"), "config.rewriteOutputPath must be a string or a function.")
+	if not isAny(type(outputPathFormat), "string","function") then
+		errorLine("config.lua: config.rewriteOutputPath must be a string or a function.")
+	end
 
 	-- Validate config.types
 	for ext, fileType in pairs(fileTypes) do
 		if ext ~= ext:lower() then
-			errorf("File extensions must be lower case: config.types[\"%s\"]", ext)
+			errorLine("config.lua: File extensions must be lower case: config.types[\"%s\"]", ext)
 		elseif not FILE_TYPE_SET[fileType] then
-			errorf("Invalid generator file type '%s'.", fileType)
+			errorLine("config.lua: Invalid generator file type '%s'.", fileType)
 		end
 	end
 
 	-- Validate config.processors
 	for ext in pairs(fileProcessors) do
 		if ext ~= ext:lower() then
-			errorf("File extensions must be lower case: config.processors[\"%s\"]", ext)
+			errorLine("config.lua: File extensions must be lower case: config.processors[\"%s\"]", ext)
 		end
 	end
 
@@ -980,23 +1014,23 @@ local function buildWebsite()
 	local parsedUrl = require"url".parse(site.baseUrl.v)
 
 	if site.baseUrl.v == "" then
-		errorf("config.baseUrl is missing or empty.", site.baseUrl.v)
+		errorLine("config.lua: config.baseUrl is missing or empty.", site.baseUrl.v)
 
 	elseif not parsedUrl.host then
-		errorf("Missing host in config.baseUrl (%s)", site.baseUrl.v)
+		errorLine("config.lua: Missing host in config.baseUrl (%s)", site.baseUrl.v)
 
 	elseif not parsedUrl.scheme then
-		errorf("Missing scheme in config.baseUrl (%s)", site.baseUrl.v)
+		errorLine("config.lua: Missing scheme in config.baseUrl (%s)", site.baseUrl.v)
 	elseif not isAny(parsedUrl.scheme, "http", "https") then
-		errorf("Invalid scheme in config.baseUrl (Expected http or https, got '%s')", parsedUrl.scheme)
+		errorLine("config.lua: Invalid scheme in config.baseUrl (Expected http or https, got '%s')", parsedUrl.scheme)
 
 	elseif not (parsedUrl.path or ""):find"/$" then
-		errorf("config.baseUrl must end with a '/'. (%s)", site.baseUrl.v)
+		errorLine("config.lua: config.baseUrl must end with a '/'. (%s)", site.baseUrl.v)
 
 	elseif parsedUrl.query then
-		errorf("config.baseUrl Cannot contain a query. (%s)", site.baseUrl.v)
+		errorLine("config.lua: config.baseUrl Cannot contain a query. (%s)", site.baseUrl.v)
 	elseif parsedUrl.fragment then
-		errorf("config.baseUrl Cannot contain a fragment. (%s)", site.baseUrl.v)
+		errorLine("config.lua: config.baseUrl Cannot contain a fragment. (%s)", site.baseUrl.v)
 	end
 
 
@@ -1331,7 +1365,7 @@ if autobuild then
 			end
 		end
 
-		if somethingChanged then buildWebsite() end
+		if somethingChanged then  buildWebsite()  end
 
 		if configChanged then
 			-- Recheck everything in case config.ignore* changed.
