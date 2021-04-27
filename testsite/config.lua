@@ -54,8 +54,10 @@ end
 -- After generation.
 config.after = function()
 	print("We did it!")
+end
 
-	print("URLs:")
+config.validate = function()
+	print("All URLs:")
 	for _, fileInfo in ipairs(getOutputtedFiles()) do
 		printf("  %s", fileInfo.url)
 	end

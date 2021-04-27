@@ -739,8 +739,8 @@ end
 
 
 
--- writeOutputFile( category, pathRelative, url, dataString, modificationTime=now )
-function _G.writeOutputFile(category, pathRel, url, data, modTime)
+-- writeOutputFile( category, pathRelative, url, dataString, modificationTime=now, sourcePath )
+function _G.writeOutputFile(category, pathRel, url, data, modTime, sourcePath)
 	local pathOutputRel = rewriteOutputPath(pathRel)
 	if writtenOutputFiles[pathOutputRel] then
 		errorf("Duplicate output file '%s'.", pathOutputRel)
@@ -752,7 +752,7 @@ function _G.writeOutputFile(category, pathRel, url, data, modTime)
 
 	if fileProcessors[extLower] then
 		pushContext("config")
-		data = fileProcessors[extLower](data, pathToSitePath(pathRel))
+		data = fileProcessors[extLower](data)
 		popContext("config")
 
 		if type(data) ~= "string" then
@@ -776,7 +776,7 @@ function _G.writeOutputFile(category, pathRel, url, data, modTime)
 		end
 	end
 
-	table.insert(writtenOutputEntries, {path=pathRel, pathOut=pathOutputRel, url=url})
+	table.insert(writtenOutputEntries, {path=sourcePath, pathOut=pathOutputRel, url=url})
 	table.insert(writtenOutputFiles,   pathOutputRel)
 	table.insert(writtenOutputUrls,    url)
 	writtenOutputFiles[pathOutputRel] = true
@@ -789,8 +789,8 @@ function _G.writeOutputFile(category, pathRel, url, data, modTime)
 	_G.outputFileByteCount = outputFileByteCount + #data
 end
 
--- preserveExistingOutputFile( category, pathRelative, url )
-function _G.preserveExistingOutputFile(category, pathRel, url)
+-- preserveExistingOutputFile( category, pathRelative, url, sourcePath )
+function _G.preserveExistingOutputFile(category, pathRel, url, sourcePath)
 	local pathOutputRel = rewriteOutputPath(pathRel)
 	if writtenOutputFiles[pathOutputRel] then
 		errorf("Duplicate output file '%s'.", pathOutputRel)
@@ -806,7 +806,7 @@ function _G.preserveExistingOutputFile(category, pathRel, url)
 		dataLen = 0
 	end
 
-	table.insert(writtenOutputEntries, {path=pathRel, pathOut=pathOutputRel, url=url})
+	table.insert(writtenOutputEntries, {path=sourcePath, pathOut=pathOutputRel, url=url})
 	table.insert(writtenOutputFiles,   pathOutputRel)
 	table.insert(writtenOutputUrls,    url)
 	writtenOutputFiles[pathOutputRel] = true
@@ -1473,7 +1473,7 @@ function _G.generateFromTemplate(page, template, modTime)
 		result = parseAndRunTemplate(page, page._pathForError, template, nil, false)
 	end
 
-	writeOutputFile(page._category, page._pathOut, page.url.v, result, modTime)
+	writeOutputFile(page._category, page._pathOut, page.url.v, result, modTime, page._path)
 	page._isGenerated = true
 
 	pagesGenerating[page._pathOut] = nil
@@ -1496,7 +1496,7 @@ function _G.generateFromTemplateFile(page)
 	generateFromTemplate(page, template, modTime)
 end
 
-function _G.generateRedirection(url, targetUrl)
+function _G.generateRedirection(url, targetUrl, sourcePath)
 	assertArg(1, url,       "string")
 	assertArg(2, targetUrl, "string")
 
@@ -1504,7 +1504,7 @@ function _G.generateRedirection(url, targetUrl)
 		errorf(2, "Redirection URLs must begin with a '/'. (%s)", url)
 	end
 
-	if url:find"?" or not url:find"/$" then
+	if url:find("?", 1, true) or not url:find"/$" then
 		if unwrittenRedirects[url] == targetUrl then
 			errorf(2, "Duplicate redirect from '%s' to '%s'.", url, targetUrl)
 		elseif unwrittenRedirects[url] then
@@ -1544,7 +1544,7 @@ function _G.generateRedirection(url, targetUrl)
 		}
 	)
 
-	writeOutputFile("page", pathRel, url, contents, nil)
+	writeOutputFile("page", pathRel, url, contents, nil, sourcePath)
 	writtenRedirects[url] = targetUrl
 end
 
@@ -1822,7 +1822,7 @@ do
 
 		if modTimeImage and modTimeImage == modTimeThumb and not ignoreModificationTimes then
 			-- @Note: This will bypass any file processor for JPG files. Not sure if OK. 2018-06-30
-			preserveExistingOutputFile("raw", pathThumbRel, "/"..pathThumbRel)
+			preserveExistingOutputFile("raw", pathThumbRel, "/"..pathThumbRel, pathImageRel)
 
 		else
 			local scale = math.min(imageW/thumbW, imageH/thumbH)
@@ -1842,7 +1842,7 @@ do
 
 			local imageCreatorMethod = "jpegStr"--assert(imageCreatorMethods[extLower], extLower)
 			local contents = thumb[imageCreatorMethod](thumb, 75)
-			writeOutputFile("raw", pathThumbRel, "/"..pathThumbRel, contents, modTimeImage)
+			writeOutputFile("raw", pathThumbRel, "/"..pathThumbRel, contents, modTimeImage, pathImageRel)
 		end
 
 		thumbnailInfos[id] = thumbInfo

@@ -631,7 +631,11 @@ _G.scriptEnvironmentGlobals = {
 		local fileInfos = {}
 
 		for _, entry in ipairs(writtenOutputEntries) do
-			table.insert(fileInfos, {sourcePath=pathToSitePath(entry.path), outputPath=pathToSitePath(entry.pathOut), url=entry.url})
+			table.insert(fileInfos, {
+				sourcePath = entry.path ~= "" and pathToSitePath(entry.path) or "",
+				path       = pathToSitePath(entry.pathOut),
+				url        = entry.url,
+			})
 		end
 
 		table.sort(fileInfos, function(a, b)
@@ -714,7 +718,7 @@ _G.scriptEnvironmentGlobals = {
 		assertArg(2, contents, "string")
 
 		local pathRel = sitePathToPath(sitePathRel)
-		writeOutputFile("raw", pathRel, sitePathRel, contents, nil)
+		writeOutputFile("raw", pathRel, sitePathRel, contents, nil, "")
 	end,
 
 	preserveRaw = function(sitePathRel)
@@ -728,7 +732,7 @@ _G.scriptEnvironmentGlobals = {
 			errorf(2, "File does not exist. (%s)", path)
 		end
 
-		preserveExistingOutputFile("raw", pathRel, sitePathRel)
+		preserveExistingOutputFile("raw", pathRel, sitePathRel, "")
 	end,
 
 	isCurrentUrl = function(url)
@@ -1107,10 +1111,10 @@ local function buildWebsite()
 			)
 
 			if modTime and modTime == oldModTime then
-				preserveExistingOutputFile("raw", pathRel, "/"..pathRel)
+				preserveExistingOutputFile("raw", pathRel, "/"..pathRel, pathRel)
 			else
 				local contents = assert(getFileContents(path))
-				writeOutputFile("raw", pathRel, "/"..pathRel, contents, modTime)
+				writeOutputFile("raw", pathRel, "/"..pathRel, contents, modTime, pathRel)
 			end
 
 		else
@@ -1136,18 +1140,20 @@ local function buildWebsite()
 			assert(page._isGenerated)
 
 			for _, url in ipairs(page.aliases.v) do
-				generateRedirection(url, page.permalink.v)
+				generateRedirection(url, page.permalink.v, page._path)
 			end
 		end
 	end
 
-	for url, targetUrl in pairs(site.redirections.v) do
-		generateRedirection(url, targetUrl)
+	for url, targetUrl in pairsSorted(site.redirections.v) do
+		generateRedirection(url, targetUrl, "")
 	end
 
 	-- Htaccess.
 	if handleHtaccess then
-		local contents = getFileContents(DIR_CONTENT.."/.htaccess") or ""
+		local contents    = getFileContents(DIR_CONTENT.."/.htaccess")
+		local fileExisted = (contents ~= nil)
+		contents          = contents or ""
 
 		-- Non-rewriting.
 		--------------------------------
@@ -1289,7 +1295,7 @@ local function buildWebsite()
 
 		--------------------------------
 
-		writeOutputFile("raw", ".htaccess", "/.htaccess", contents, nil)
+		writeOutputFile("raw", ".htaccess", "/.htaccess", contents, nil, (fileExisted and ".htaccess" or ""))
 	end--if handleHtaccess
 
 	if onValidate then
