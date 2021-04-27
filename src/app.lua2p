@@ -625,6 +625,22 @@ _G.scriptEnvironmentGlobals = {
 		return getImageDimensions(sitePathToPath(sitePath))
 	end,
 
+	getOutputtedFiles = function()
+		-- There's no reason to restrict context for this function, I don't think. 2021-04-27
+
+		local fileInfos = {}
+
+		for _, entry in ipairs(writtenOutputEntries) do
+			table.insert(fileInfos, {sourcePath=pathToSitePath(entry.path), outputPath=pathToSitePath(entry.pathOut), url=entry.url})
+		end
+
+		table.sort(fileInfos, function(a, b)
+			return a.url < b.url
+		end)
+
+		return fileInfos
+	end,
+
 	-- Context functions.
 	----------------------------------------------------------------
 
@@ -764,22 +780,6 @@ _G.scriptEnvironmentGlobals = {
 		local page = getContext().page
 		page._isLocked = true -- Note: It's OK for this function to be called multiple times.
 		page._readonly = true
-	end,
-
-	getOutputtedFiles = function()
-		assertContext({"config","validation"}, "getOutputtedFiles")
-
-		local fileInfos = {}
-
-		for _, entry in ipairs(writtenOutputEntries) do
-			table.insert(fileInfos, {sourcePath=pathToSitePath(entry.path), outputPath=pathToSitePath(entry.pathOut), url=entry.url})
-		end
-
-		table.sort(fileInfos, function(a, b)
-			return a.url < b.url
-		end)
-
-		return fileInfos
 	end,
 
 	-- Hacks. (These are not very robust!)
@@ -1011,7 +1011,7 @@ local function buildWebsite()
 	local onValidate       = getV("validate",          nil,                   "function")
 
 	_G.autoLockPages       = getV("autoLockPages",     false,                 "boolean")
-	_G.noTrailingSlash     = getV("removeTrailingSlashFromPermalinks", false, "boolean")
+	_G.noTrailingSlash     = getV("removeTrailingSlashFromPermalinks", false, "boolean") -- @Doc? @Hack?
 
 	for k in pairs(config) do
 		timestampPrintWarning("Unknown config field '%s'.", k)
