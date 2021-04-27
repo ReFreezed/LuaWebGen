@@ -670,11 +670,19 @@ _G.scriptEnvironmentGlobals = {
 		return html
 	end,
 
-	generateFromTemplate = function(sitePathRel, template)
+	generateFromTemplate = function(sitePathRel, template, params)
 		assertContext("config", "generateFromTemplate")
+		assertArg(1, sitePathRel, "string")
+		assertArg(2, template,    "string")
+		assertArg(3, params,      "table","nil")
 
 		local pathRel = sitePathToPath(sitePathRel)
 		local page    = newPage(pathRel)
+
+		if params then
+			page.params.v = params
+		end
+
 		generateFromTemplate(page, template)
 
 		if page.isPage.v and not page._isSkipped then
@@ -831,8 +839,13 @@ _G.scriptEnvironmentGlobals = {
 
 _G.scriptEnvironment = setmetatable({}, {
 	__index = function(env, k)
-		local v = scriptEnvironmentGlobals[k] or getContext()._scriptEnvironmentGlobals[k]
+		local v = scriptEnvironmentGlobals[k]
 		if v ~= nil then  return v  end
+
+		if contextStack[1] then
+			v = getContext()._scriptEnvironmentGlobals[k]
+			if v ~= nil then  return v  end
+		end
 
 		v = scriptFunctions[k]
 		if v then  return v  end

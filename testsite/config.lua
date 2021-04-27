@@ -25,32 +25,28 @@ local config = {
 
 -- File processors.
 config.processors["css"] = function(css)
-
 	-- Remove CSS comments, before the file is written to the output folder.
 	css = css:gsub("/%*.-%*/", "")
-
 	return css
 end
 
 
 
 -- Before generation.
-local dogPageFormat = [[
-# A Dog of Mine
+local dogPageTemplate = [[
+{{
+page.title = "A Dog of Mine: "..P.dog.name
+}}
 
-The dog named %s is %d years old.
+The dog named {{P.dog.name}} is {{P.dog.age}} years old.
 ]]
 
 config.before = function()
-
 	-- Generate dog pages from database.
 	for _, dog in ipairs(data.dogs) do
-		local path     = F("/dogs/%s.md", urlize(dog.name))
-		local template = F(dogPageFormat, dog.name, dog.age)
-
-		generateFromTemplate(path, template)
+		local path = F("/dogs/%s.md", urlize(dog.name))
+		generateFromTemplate(path, dogPageTemplate, {dog=dog})
 	end
-
 end
 
 

@@ -151,7 +151,7 @@ end
 do
 	-- isValueExpression = insertLuaForEchoingIfExpression( luaOutputBuffer, luaCode )
 	local function insertLuaForEchoingIfExpression(out, luaCode)
-		local doBlock = F("do  local v = (%s\n)  if type(v) == 'string' and v:match'%%S' == '<' then  echoRaw(v)  elseif v ~= nil then  echo(v)  end end ", luaCode)
+		local doBlock = F("do  local v = (%s\n)  if type(v) == 'string' and v:find'^%%s*<[!%%a].*>%%s*$' then  echoRaw(v)  elseif v ~= nil then  echo(v)  end end ", luaCode)
 		if not loadstring(doBlock) then  return false  end
 
 		table.insert(out, doBlock)
@@ -696,11 +696,11 @@ function _G.error(err, level)
 end
 
 -- errorf( [ level=1, ] formatString, ... )
-function _G.errorf(level, ...)
-	if type(level) == "number" then
-		_error(makeErrorf(level+1, ...), level+1)
+function _G.errorf(levelOrS, ...)
+	if type(levelOrS) == "number" then
+		error(F(...), levelOrS+1)
 	else
-		_error(makeErrorf(2, level, ...), 2)
+		error(F(levelOrS, ...), 2)
 	end
 end
 
@@ -1440,11 +1440,11 @@ function _G.generateFromTemplate(page, template, modTime)
 	local result
 
 	if page.isPage.v then
-		page.content.v = parseAndRunTemplate(page, page._pathForError, template, nil, false)
+		local pageContent = parseAndRunTemplate(page, page._pathForError, template, nil, false)
 
 		if
-			(page.isDraft.v and not includeDrafts) or -- Is draft?
-			(datetimeToTime(page.publishDate:g()) > os.time()) -- Is in future?
+			(page.isDraft.v and not includeDrafts            ) or -- Is draft?
+			(datetimeToTime(page.publishDate:g()) > os.time())    -- Is in future?
 		then
 			page._isSkipped               = true
 			_G.outputFileSkippedPageCount = outputFileSkippedPageCount + 1
@@ -1455,10 +1455,12 @@ function _G.generateFromTemplate(page, template, modTime)
 			return
 		end
 
+		page.content.v = pageContent
+
 		local layoutTemplate, layoutPath = getLayoutTemplate(page)
 		result                           = parseAndRunTemplate(page, layoutPath, layoutTemplate, "html", true)
 
-		page.content.v = "" -- Free up memory, as we don't need this anymore.
+		page.content.v = "" -- We don't need this anymore.
 
 	else
 		result = parseAndRunTemplate(page, page._pathForError, template, nil, false)

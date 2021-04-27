@@ -73,6 +73,13 @@ Extra spaces.
 
 Many curly braces: {{{{{x="foo"}}}}}
 
+<!--
+{{
+print("This code will run!")
+-- print("This will not...")
+}}
+-->
+
 
 
 ## Value Expressions
