@@ -376,7 +376,7 @@ _G.scriptEnvironmentGlobals = {
 
 		for _, ext in ipairs(exts) do
 			local pathRel = pathWithoutExt.."."..ext
-			if isFile(DIR_CONTENT.."/"..pathRel) then  return pathToSitePath(pathRel)  end
+			if isFile(DIR_CONTENT.."/"..pathRel) then  return (pathToSitePath(pathRel))  end
 		end
 
 		return nil
@@ -607,6 +607,7 @@ _G.scriptEnvironmentGlobals = {
 	end,
 
 	validateUrls = function(urls)
+		-- @Robustness: Should we restrict context here?
 		local ok = true
 		for _, url in ipairs(urls) do
 			if not urlExists(url) then
@@ -683,7 +684,7 @@ _G.scriptEnvironmentGlobals = {
 			page.params.v = params
 		end
 
-		generateFromTemplate(page, template)
+		generateFromTemplate(page, template, nil)
 
 		if page.isPage.v and not page._isSkipped then
 			table.insert(pages, page)
@@ -697,7 +698,7 @@ _G.scriptEnvironmentGlobals = {
 		assertArg(2, contents, "string")
 
 		local pathRel = sitePathToPath(sitePathRel)
-		writeOutputFile("raw", pathRel, sitePathRel, contents)
+		writeOutputFile("raw", pathRel, sitePathRel, contents, nil)
 	end,
 
 	preserveRaw = function(sitePathRel)
@@ -761,8 +762,24 @@ _G.scriptEnvironmentGlobals = {
 		assertContext("template", "lock")
 
 		local page = getContext().page
-		page._isLocked = true -- Note: It's OK to lock multiple times.
+		page._isLocked = true -- Note: It's OK for this function to be called multiple times.
 		page._readonly = true
+	end,
+
+	getOutputtedFiles = function()
+		assertContext({"config","validation"}, "getOutputtedFiles")
+
+		local fileInfos = {}
+
+		for _, entry in ipairs(writtenOutputEntries) do
+			table.insert(fileInfos, {sourcePath=pathToSitePath(entry.path), outputPath=pathToSitePath(entry.pathOut), url=entry.url})
+		end
+
+		table.sort(fileInfos, function(a, b)
+			return a.url < b.url
+		end)
+
+		return fileInfos
 	end,
 
 	-- Hacks. (These are not very robust!)
@@ -1034,7 +1051,7 @@ local function buildWebsite()
 
 	elseif not parsedUrl.scheme then
 		errorLine("config.lua: Missing scheme in config.baseUrl (%s)", site.baseUrl.v)
-	elseif not isAny(parsedUrl.scheme, "http", "https") then
+	elseif not isAny(parsedUrl.scheme, "http","https") then
 		errorLine("config.lua: Invalid scheme in config.baseUrl (Expected http or https, got '%s')", parsedUrl.scheme)
 
 	elseif not (parsedUrl.path or ""):find"/$" then
@@ -1075,18 +1092,18 @@ local function buildWebsite()
 			table.insert(pages, newPage(pathRel)) -- Generate later.
 
 		elseif not (handleHtaccess and pathRel == ".htaccess") then
-			local modTime = lfs.attributes(path, "modification")
+			local modTime       = lfs.attributes(path, "modification")
 			local pathOutputRel = rewriteOutputPath(pathRel)
 
 			-- Non-templates should be OK to preserve (if there's no file processor).
-			local oldModTime
-				=   not ignoreModificationTimes
-				and not fileProcessors[extLower]
+			local oldModTime = (
+				not ignoreModificationTimes and not fileProcessors[extLower]
 				and lfs.attributes(DIR_OUTPUT.."/"..pathOutputRel, "modification")
 				or  nil
+			)
 
 			if modTime and modTime == oldModTime then
-				preserveExistingOutputFile("raw", pathRel, pathRel)
+				preserveExistingOutputFile("raw", pathRel, "/"..pathRel)
 			else
 				local contents = assert(getFileContents(path))
 				writeOutputFile("raw", pathRel, "/"..pathRel, contents, modTime)
@@ -1259,17 +1276,17 @@ local function buildWebsite()
 
 			local directives = b()
 
-			local count
-			contents, count = gsubPlainSub(contents, "# *:webgen%.rewriting: *\n", directives)
-			if count == 0 then
+			local count1 ; contents, count1 = gsubPlainSub(contents, "#[ \t]*:webgen%.rewriting:[ \t]*\n", directives)
+			local count2 ; contents, count2 = gsubPlainSub(contents, "#[ \t]*:webgen%.rewriting:[ \t]*$",  directives)
+			if count1+count2 == 0 then
 				contents = F("%s\n%s", contents, directives)
 			end
 		end
 
 		--------------------------------
 
-		writeOutputFile("raw", ".htaccess", "/.htaccess", contents)
-	end -- handleHtaccess
+		writeOutputFile("raw", ".htaccess", "/.htaccess", contents, nil)
+	end--if handleHtaccess
 
 	if onValidate then
 		pushContext("validation")
@@ -1378,7 +1395,7 @@ if autobuild then
 			end
 		end
 
-		if somethingChanged then  buildWebsite()  end
+		if somethingChanged then  buildWebsite()  end -- @UX: Should we pcall this?
 
 		if configChanged then
 			-- Recheck everything in case config.ignore* changed.

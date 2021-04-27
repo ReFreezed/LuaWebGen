@@ -739,7 +739,7 @@ end
 
 
 
--- writeOutputFile( category, pathRelative, url, dataString [ modificationTime ] )
+-- writeOutputFile( category, pathRelative, url, dataString, modificationTime=now )
 function _G.writeOutputFile(category, pathRel, url, data, modTime)
 	local pathOutputRel = rewriteOutputPath(pathRel)
 	if writtenOutputFiles[pathOutputRel] then
@@ -776,9 +776,11 @@ function _G.writeOutputFile(category, pathRel, url, data, modTime)
 		end
 	end
 
-	table.insert(writtenOutputFiles, pathOutputRel)
+	table.insert(writtenOutputEntries, {path=pathRel, pathOut=pathOutputRel, url=url})
+	table.insert(writtenOutputFiles,   pathOutputRel)
+	table.insert(writtenOutputUrls,    url)
 	writtenOutputFiles[pathOutputRel] = true
-	writtenOutputUrls[url] = true
+	writtenOutputUrls[url]            = true
 
 	assert(OUTPUT_CATEGORY_SET[category], category)
 	_G.outputFileCount         = outputFileCount            + 1
@@ -804,9 +806,11 @@ function _G.preserveExistingOutputFile(category, pathRel, url)
 		dataLen = 0
 	end
 
-	table.insert(writtenOutputFiles, pathOutputRel)
+	table.insert(writtenOutputEntries, {path=pathRel, pathOut=pathOutputRel, url=url})
+	table.insert(writtenOutputFiles,   pathOutputRel)
+	table.insert(writtenOutputUrls,    url)
 	writtenOutputFiles[pathOutputRel] = true
-	writtenOutputUrls[url] = true
+	writtenOutputUrls[url]            = true
 
 	assert(OUTPUT_CATEGORY_SET[category], category)
 	_G.outputFileCount          = outputFileCount            + 1
@@ -1417,7 +1421,7 @@ end
 
 
 
--- generateFromTemplate( page, template [, modificationTime ] )
+-- generateFromTemplate( page, template, modificationTime=now )
 function _G.generateFromTemplate(page, template, modTime)
 	assert(type(page)     == "table")
 	assert(type(template) == "string")
@@ -1522,22 +1526,22 @@ function _G.generateRedirection(url, targetUrl)
 				<head>
 					<meta charset="utf-8">
 					<meta name="robots" content="noindex">
-					<meta http-equiv="refresh" content="0; url=:urlPercent:">
+					<meta http-equiv="refresh" content="0; url=:urlAbsPercent:">
 					<title>:url:</title>
-					<link rel="canonical" href=":urlPercent:">
+					<link rel="canonical" href=":urlAbsPercent:">
 				</head>
 				<body>
 					<p>Page has moved. If you are not redirected automatically,
-					click <a href=":urlPercent:">here</a>.</p>
+					click <a href=":urlAbsPercent:">here</a>.</p>
 				</body>
 			</html>
 		]=], {
-			url        = encodeHtmlEntities(              targetUrl ),
-			urlPercent = encodeHtmlEntities(toUrlAbsolute(targetUrl)),
+			url           = encodeHtmlEntities(              targetUrl ),
+			urlAbsPercent = encodeHtmlEntities(toUrlAbsolute(targetUrl)),
 		}
 	)
 
-	writeOutputFile("page", pathRel, url, contents)
+	writeOutputFile("page", pathRel, url, contents, nil)
 	writtenRedirects[url] = targetUrl
 end
 
@@ -1713,20 +1717,34 @@ function _G.popContext(ctxName)
 	table.remove(contextStack)
 end
 
--- assertContext( contextName [, functionContext, errorLevel=2 ] )
+-- assertContext( contextName  [, functionContext, errorLevel=2 ] )
+-- assertContext( contextNames [, functionContext, errorLevel=2 ] )
 function _G.assertContext(ctxName, funcContext, errLevel)
 	local ctx = contextStack[#contextStack]
-	if not ctx or ctx._name ~= ctxName then
-		errLevel = (errLevel or 2) + 1
-		if funcContext then
-			errorf(errLevel, "[%s] Context is wrong. (Expected '%s', but is '%s')", funcContext, ctxName, (ctx and ctx._name or "none"))
-		else
-			errorf(errLevel,      "Context is wrong. (Expected '%s', but is '%s')",              ctxName, (ctx and ctx._name or "none"))
+
+	if type(ctxName) == "table" then
+		if not (ctx and isAny(ctx._name, unpack(ctxName))) then
+			errLevel = (errLevel or 2) + 1
+			if funcContext then
+				errorf(errLevel, "[%s] Context is wrong. (Expected '%s', but is '%s')", funcContext, table.concat(ctxName, "' or '"), (ctx and ctx._name or "none"))
+			else
+				errorf(errLevel,      "Context is wrong. (Expected '%s', but is '%s')",              table.concat(ctxName, "' or '"), (ctx and ctx._name or "none"))
+			end
+		end
+	else
+		if not (ctx and ctx._name == ctxName) then
+			errLevel = (errLevel or 2) + 1
+			if funcContext then
+				errorf(errLevel, "[%s] Context is wrong. (Expected '%s', but is '%s')", funcContext, ctxName, (ctx and ctx._name or "none"))
+			else
+				errorf(errLevel,      "Context is wrong. (Expected '%s', but is '%s')",              ctxName, (ctx and ctx._name or "none"))
+			end
 		end
 	end
 end
 
--- context = getContext( [ requiredContextName=any ] )
+-- context = getContext( [ requiredContextName=any  ] )
+-- context = getContext( [ requiredContextNames=any ] )
 function _G.getContext(ctxName)
 	if ctxName then  assertContext(ctxName)  end
 	return contextStack[#contextStack] or error("There is no context.", 2)
@@ -1874,7 +1892,7 @@ do
 			errorf("Invalid template extension '%s'. (You may want to specify config.types[\"%s\"])", extLower, extLower)
 		end
 
-		local isPage  = isAny(fileTypes[extLower], "markdown", "html")
+		local isPage  = isAny(fileTypes[extLower], "markdown","html")
 		local isIndex = isPage  and getBasename(filename) == "index"
 		local isHome  = isIndex and pathRel == filename
 
@@ -1891,7 +1909,7 @@ do
 			=  (not isPage and permalinkRel)
 			or (permalinkRel == "" and "" or permalinkRel).."index.html"
 
-		local isSpecial =
+		local isSpecial = (
 			not isPage
 			or attributeWithAny(
 				htaErrors,
@@ -1900,6 +1918,7 @@ do
 				"/"..rewriteOutputPath(pathRelOut),
 				"/"..removeIndexFilename(rewriteOutputPath(pathRelOut))
 			) ~= nil
+		)
 
 		local page; page = {
 			_readonly = false,
@@ -2107,31 +2126,20 @@ end
 
 
 function _G.urlExists(url)
+	-- @Robustness: A URL may not exist yet, but will soon. Should we only allow calling this in config.validate (and maybe config.after)?
 	if not url:find"^/" then
 		errorf(2, "Local URLs must begin with a '/'. (%s)", url)
 	end
-
 	return writtenOutputUrls[url] == true
 end
 
 
 
 -- bool = isAny( valueToCompare, value1, ... )
--- bool = isAny( valueToCompare, arrayOfValues )
 function _G.isAny(v, ...)
-	local len = select("#", ...)
-
-	if len == 1 and type(...) == "table" then
-		for _, item in ipairs(...) do
-			if v == item then  return true  end
-		end
-
-	else
-		for i = 1, len do
-			if v == select(i, ...) then  return true  end
-		end
+	for i = 1, select("#", ...) do
+		if v == select(i, ...) then  return true  end
 	end
-
 	return false
 end
 
