@@ -76,20 +76,20 @@ local templateMetaprogramCache = {}
 function _G.traverseDirectory(dirPath, ignoreFolders, cb, _pathRelStart)
 	_pathRelStart = _pathRelStart or #dirPath+2
 
-	for name in lfs.dir(dirPath) do
-		local path = dirPath.."/"..name
+	for filename in lfs.dir(dirPath) do
+		local path = dirPath.."/"..filename
 
-		if name ~= "." and name ~= ".." then
+		if filename ~= "." and filename ~= ".." then
 			local mode = lfs.attributes(path, "mode")
 
 			if mode == "file" then
 				local pathRel = path:sub(_pathRelStart)
-				local abort   = cb(path, pathRel, name, "file")
+				local abort   = cb(path, pathRel, filename, "file")
 				if abort then  return true  end
 
-			elseif mode == "directory" and not (ignoreFolders and isStringMatchingAnyPattern(name, ignoreFolders)) then
+			elseif mode == "directory" and not (ignoreFolders and isStringMatchingAnyPattern(filename, ignoreFolders)) then
 				local pathRel = path:sub(_pathRelStart)
-				local abort   = cb(path, pathRel, name, "directory")
+				local abort   = cb(path, pathRel, filename, "directory")
 				if abort then  return true  end
 
 				local abort = traverseDirectory(path, ignoreFolders, cb, _pathRelStart)
@@ -104,19 +104,19 @@ end
 function _G.traverseFiles(dirPath, ignoreFolders, cb, _pathRelStart)
 	_pathRelStart = _pathRelStart or #dirPath+2
 
-	for name in lfs.dir(dirPath) do
-		local path = dirPath.."/"..name
+	for filename in lfs.dir(dirPath) do
+		local path = dirPath.."/"..filename
 
-		if name ~= "." and name ~= ".." then
+		if filename ~= "." and filename ~= ".." then
 			local mode = lfs.attributes(path, "mode")
 
 			if mode == "file" then
 				local pathRel  = path:sub(_pathRelStart)
-				local extLower = getExtension(name):lower()
-				local abort    = cb(path, pathRel, name, extLower)
+				local extLower = getExtension(filename):lower()
+				local abort    = cb(path, pathRel, filename, extLower)
 				if abort then  return true  end
 
-			elseif mode == "directory" and not (ignoreFolders and isStringMatchingAnyPattern(name, ignoreFolders)) then
+			elseif mode == "directory" and not (ignoreFolders and isStringMatchingAnyPattern(filename, ignoreFolders)) then
 				local abort = traverseFiles(path, ignoreFolders, cb, _pathRelStart)
 				if abort then  return true  end
 			end
@@ -841,17 +841,17 @@ function _G.createDirectory(path)
 end
 
 function _G.isDirectoryEmpty(dirPath)
-	for name in lfs.dir(dirPath) do
-		if name ~= "." and name ~= ".." then  return false  end
+	for filename in lfs.dir(dirPath) do
+		if filename ~= "." and filename ~= ".." then  return false  end
 	end
 	return true
 end
 
 function _G.removeEmptyDirectories(dirPath)
-	for name in lfs.dir(dirPath) do
-		local path = dirPath.."/"..name
+	for filename in lfs.dir(dirPath) do
+		local path = dirPath.."/"..filename
 
-		if name ~= "." and name ~= ".." and isDirectory(path) then
+		if filename ~= "." and filename ~= ".." and isDirectory(path) then
 			removeEmptyDirectories(path)
 			if isDirectoryEmpty(path) then
 				timestampPrintVerbose("Removing empty folder: %s", path)
@@ -1316,17 +1316,20 @@ end
 function _G.preloadData(dataFolderReader)
 	if dataIsPreloaded[dataFolderReader] then  return dataFolderReader  end
 
-	for name in lfs.dir(dataReaderPaths[dataFolderReader]) do
-		local path     = dataReaderPaths[dataFolderReader].."/"..name
-		local basename = getBasename(name)
+	for filename in lfs.dir(dataReaderPaths[dataFolderReader]) do
+		if not (filename == "." or filename == "..") then
+			local path     = dataReaderPaths[dataFolderReader] .. "/" .. filename
+			local basename = getBasename(filename)
 
-		if
-			not rawget(dataFolderReader, basename) and name ~= "." and name ~= ".." and (
-				(isFile(path)      and not isStringMatchingAnyPattern(name, ignoreFiles  )) or
-				(isDirectory(path) and not isStringMatchingAnyPattern(name, ignoreFolders))
-			)
-		then
-			if indexOf(DATA_FILE_EXTENSIONS, getExtension(name)) then
+			if
+				not rawget(dataFolderReader, basename)
+				and indexOf(DATA_FILE_EXTENSIONS, getExtension(filename))
+				and (
+					-- Not sure these ignore* checks belong here. Seems like a mistake. 2021-04-27
+					(isFile(path)      --[[and not (ignoreFiles  [1] and isStringMatchingAnyPattern(filename, ignoreFiles  ))]]) or
+					(isDirectory(path) --[[and not (ignoreFolders[1] and isStringMatchingAnyPattern(filename, ignoreFolders))]])
+				)
+			then
 				local _ = dataFolderReader[basename]
 			end
 		end

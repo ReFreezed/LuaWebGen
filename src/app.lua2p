@@ -114,7 +114,7 @@ if command == "new" then
 					}
 				]=], {
 					title = F("%q", title),
-					host  = title:find"^[%w.]+%.%a+$" and title:lower() or "example.com",
+					host  = title:find"^%w[-.%w]*%.%a+$" and title:lower() or "example.com",
 				}
 			)
 
@@ -990,6 +990,7 @@ local function buildWebsite()
 
 	_G.ignoreFiles         = getA("ignoreFiles",       ignoreFiles,           "string")
 	_G.ignoreFolders       = getA("ignoreFolders",     ignoreFolders,         "string")
+	_G.ignorePaths         = getA("ignorePaths",       ignorePaths,           "string")
 
 	_G.fileTypes           = getT("types",             fileTypes,             "string", "string")
 	_G.fileProcessors      = getT("processors",        fileProcessors,        "string", "function")
@@ -1082,7 +1083,10 @@ local function buildWebsite()
 
 	-- Generate output.
 	traverseFiles(DIR_CONTENT, ignoreFolders, function(path, pathRel, filename, extLower)
-		if isStringMatchingAnyPattern(filename, ignoreFiles) then
+		if
+			(ignoreFiles[1] and isStringMatchingAnyPattern(filename,                ignoreFiles)) or
+			(ignorePaths[1] and isStringMatchingAnyPattern(pathToSitePath(pathRel), ignorePaths))
+		then
 			-- Ignore.
 
 		elseif fileTypes[extLower] == "othertemplate" then
@@ -1343,7 +1347,7 @@ if autobuild then
 	while true do
 		sleep(AUTOBUILD_MIN_INTERVAL)
 
-		local dirTree = {}
+		local dirTree          = {--[[ [path1]=modificationTime1, ... ]]}
 		local somethingChanged = false
 
 		local function checkFile(path, silent)
@@ -1358,12 +1362,13 @@ if autobuild then
 		end
 
 		local function checkDirectory(dir, silent)
-			traverseDirectory(dir, ignoreFolders, function(path, pathRel, name, itemType)
+			traverseDirectory(dir, ignoreFolders, function(path, pathRel, filename, itemType)
 				if itemType == "directory" then
 					dirTree[path] = -1
 
 				elseif itemType == "file" then
-					if isStringMatchingAnyPattern(name, ignoreFiles) then  return  end
+					if ignoreFiles[1] and isStringMatchingAnyPattern(filename,                ignoreFiles) then  return  end
+					if ignorePaths[1] and isStringMatchingAnyPattern(pathToSitePath(pathRel), ignorePaths) then  return  end
 					checkFile(path, silent)
 				end
 
@@ -1379,10 +1384,10 @@ if autobuild then
 		-- Check for additions and modifications.
 		checkFile("config.lua")
 		local configChanged = somethingChanged
-		checkDirectory(DIR_CONTENT)
-		checkDirectory(DIR_DATA)
-		checkDirectory(DIR_LAYOUTS)
-		checkDirectory(DIR_SCRIPTS)
+		checkDirectory(DIR_CONTENT, false)
+		checkDirectory(DIR_DATA,    false)
+		checkDirectory(DIR_LAYOUTS, false)
+		checkDirectory(DIR_SCRIPTS, false)
 
 		-- Check for removals.
 		if lastDirTree and not somethingChanged then

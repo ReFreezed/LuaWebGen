@@ -106,8 +106,9 @@ function _G.resetSiteVariables()
 		},
 	}
 
-	_G.ignoreFiles                = {--[[ pathPattern1, ... ]]}
-	_G.ignoreFolders              = {--[[ pathPattern1, ... ]]}
+	_G.ignoreFiles                = {--[[ filenamePattern1, ... ]]}
+	_G.ignoreFolders              = {--[[ filenamePattern1, ... ]]}
+	_G.ignorePaths                = {--[[ pathPattern1, ... ]]}
 
 	_G.fileTypes                  = {["md"]="markdown", ["html"]="html", ["css"]="othertemplate"}
 	_G.fileProcessors             = {--[[ [extension1]=function(data, sitePath), ... ]]}
