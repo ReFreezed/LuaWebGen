@@ -133,7 +133,7 @@ function _G.resetSiteVariables()
 	_G.writtenOutputFiles         = {--[[ [pathOutputRel1]=true, pathOutputRel1, ... ]]}
 	_G.writtenOutputUrls          = {--[[ [url1]=true,           url1,           ... ]]}
 	_G.writtenRedirects           = {--[[ [url1]=targetUrl1, ... ]]}
-	_G.unwrittenRedirects         = {--[[ [url1]=targetUrl1, ... ]]}
+	_G.unwrittenRedirects         = {--[[ [url1]=targetUrl1, ... ]]} -- We use this for redirection of special URLs in .htaccess (e.g. URLs with queries).
 	_G.outputFileCount            = 0
 	_G.outputFileCounts           = {--[[ [category1]=count1, ... ]]}
 	_G.outputFileByteCount        = 0

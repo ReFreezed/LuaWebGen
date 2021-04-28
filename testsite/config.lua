@@ -11,8 +11,9 @@ local config = {
 	-- autoLockPages = true,
 
 	redirections  = {
-		["/also-first/"] = "/first/",
-		["/duck/"]       = "https://duckduckgo.com/",
+		["/blog/original-first/"]         = "/blog/first/",         -- Internal redirect.
+		["/duck/"]                        = "http://duck.example/", -- External redirect.
+		["/index.php?page=dogs&dog=fido"] = "/dogs/fido/",          -- Redirect with query. (Requires .htaccess file to work.)
 	},
 
 	-- Enable special .htaccess file handling.
@@ -32,7 +33,7 @@ end
 
 
 
--- Before generation.
+-- Before regular generation.
 local dogPageTemplate = [[
 {{
 page.title = "A Dog of Mine: "..P.dog.name
@@ -51,15 +52,19 @@ end
 
 
 
--- After generation.
+-- After regular generation.
 config.after = function()
 	print("We did it!")
 end
 
+
+
+-- After all generation.
 config.validate = function()
-	print("All URLs:")
+	print("Written files:")
+	printf("  %-30s %-40s %s", "SOURCE", "PATH", "URL")
 	for _, fileInfo in ipairs(getOutputtedFiles()) do
-		printf("  %s", fileInfo.url)
+		printf("  %-30s %-40s %s", fileInfo.sourcePath, fileInfo.path, fileInfo.url)
 	end
 end
 

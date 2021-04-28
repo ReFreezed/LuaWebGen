@@ -11,7 +11,6 @@
 --============================================================]]
 
 printf!("==== LuaWebGen v"..getReleaseVersion().." ====")
-print(os.date"%Y-%m-%d")
 
 
 
@@ -20,8 +19,21 @@ print(os.date"%Y-%m-%d")
 
 local i = 1
 
-local command = args[i] or errorLine("Arguments: Missing command.")
+local command = args[i]
 i             = i + 1
+
+if not command then
+	print("Usage:")
+	print("  cd path/to/siteroot")
+	print("  webgen.exe command [options]")
+	print("or")
+	print("  cd path/to/siteroot")
+	print("  lua webgen.lua command [options]")
+	print()
+	return
+end
+
+print(os.date"%Y-%m-%d")
 
 ----------------------------------------------------------------
 
@@ -749,9 +761,9 @@ _G.scriptEnvironmentGlobals = {
 		assertContext("template", "subpages")
 
 		local pageCurrent = getContext().page
-		local dir = getDirectory(pageCurrent._path)
+		local dir         = getDirectory(pageCurrent._path)
+		local subpages    = {}
 
-		local subpages = {}
 		for _, page in ipairs(pages) do
 			if (page ~= pageCurrent or allowCurrentPage) and page._path:sub(1, #dir) == dir then
 				if not page._isGenerated then
@@ -953,13 +965,14 @@ local function buildWebsite()
 
 			kLast = k
 			tLast = v
-			v = v[k]
+			v     = v[k]
+
 			if v == nil then  return default  end
 		end
 
 		assertFunc(v, ...)
 
-		tLast[kLast] = nil
+		tLast[kLast] = nil -- Helps us find extra/unknown fields.
 		return v
 	end
 
@@ -1016,7 +1029,7 @@ local function buildWebsite()
 	local onValidate       = getV("validate",          nil,                   "function")
 
 	_G.autoLockPages       = getV("autoLockPages",     false,                 "boolean")
-	_G.noTrailingSlash     = getV("removeTrailingSlashFromPermalinks", false, "boolean") -- @Doc? @Hack?
+	_G.noTrailingSlash     = getV("removeTrailingSlashFromPermalinks", false, "boolean") -- @Doc? @Hack? Also, this affects page.url too now. 2021-04-28
 
 	for k in pairs(config) do
 		timestampPrintWarning("Unknown config field '%s'.", k)
@@ -1060,7 +1073,7 @@ local function buildWebsite()
 		errorLine("config.lua: Invalid scheme in config.baseUrl (Expected http or https, got '%s')", parsedUrl.scheme)
 
 	elseif not (parsedUrl.path or ""):find"/$" then
-		errorLine("config.lua: config.baseUrl must end with a '/'. (%s)", site.baseUrl.v)
+		errorLine("config.lua: config.baseUrl must end with '/'. (%s)", site.baseUrl.v)
 
 	elseif parsedUrl.query then
 		errorLine("config.lua: config.baseUrl Cannot contain a query. (%s)", site.baseUrl.v)
@@ -1085,7 +1098,9 @@ local function buildWebsite()
 		popContext("config")
 	end
 
-	-- Generate output.
+	--
+	-- Generate output
+	--
 	traverseFiles(DIR_CONTENT, ignoreFolders, function(path, pathRel, filename, extLower)
 		if
 			(ignoreFiles[1] and isStringMatchingAnyPattern(filename,                ignoreFiles)) or
@@ -1134,22 +1149,68 @@ local function buildWebsite()
 		popContext("config")
 	end
 
-	-- Redirects.
+	--
+	-- Redirections
+	--
+
+	-- Note: If the same key in allRedirections is set multiple times then we have
+	-- duplicate redirections and generateRedirection() will raise an error.
+	local allRedirections = {--[[ [url1]=targetUrl1, ... ]]}
+
 	for _, page in ipairs(pages) do
 		if page.isPage.v and not page._isSkipped then
 			assert(page._isGenerated)
 
 			for _, url in ipairs(page.aliases.v) do
-				generateRedirection(url, page.permalink.v, page._path)
+				generateRedirection(url, page.url.v, page._path)
+				allRedirections[url] = page.url.v
 			end
 		end
+	end
+
+	for url, targetUrl in pairs(site.redirections.v) do
+		allRedirections[url] = targetUrl
+	end
+
+	-- Fast-forward indirect redirections.
+	for url, targetUrl in pairsSorted(site.redirections.v) do
+		while allRedirections[targetUrl] do
+			targetUrl = allRedirections[targetUrl]
+
+			if targetUrl == url then
+				local buffer = {"Redirection loop found:\n  -> ", url}
+				targetUrl    = site.redirections.v[url]
+
+				while targetUrl ~= url do
+					table.insert(buffer, "\n     ")
+					table.insert(buffer, targetUrl)
+					targetUrl = allRedirections[targetUrl]
+				end
+
+				table.insert(buffer, "\n  -> ")
+				table.insert(buffer, url)
+
+				errorLine(table.concat(buffer))
+			end
+		end
+
+		allRedirections[url] = targetUrl
 	end
 
 	for url, targetUrl in pairsSorted(site.redirections.v) do
 		generateRedirection(url, targetUrl, "")
 	end
 
-	-- Htaccess.
+	-- Validate targets.
+	for url, targetUrl in pairsSorted(allRedirections) do
+		if targetUrl:find"^/" and not writtenOutputUrls[targetUrl] then
+			errorLine("Missing target page for redirection: %s -> %s", url, targetUrl)
+		end
+	end
+
+	--
+	-- Htaccess
+	--
 	if handleHtaccess then
 		local contents    = getFileContents(DIR_CONTENT.."/.htaccess")
 		local fileExisted = (contents ~= nil)
@@ -1237,6 +1298,16 @@ local function buildWebsite()
 			end
 
 			b("\n")
+
+		elseif not htaRedirect and next(unwrittenRedirects) then
+			local count = #getKeys(unwrittenRedirects)
+			timestampPrintWarning("%d URL redirection%s could not be satisfied:", count, (count == 1 and "" or "s")) -- @Incomplete: Issue this warning if handleHtaccess==false.
+
+			for url, targetUrl in pairsSorted(unwrittenRedirects) do
+				local s = F("    %s", url, targetUrl)
+				io.stderr:write(s, "\n")
+				log(s)
+			end
 		end
 
 		if noTrailingSlash then
@@ -1304,7 +1375,9 @@ local function buildWebsite()
 		popContext("validation")
 	end
 
-	-- Cleanup old generated stuff.
+	--
+	-- Clean up old generated files and folders
+	--
 	traverseFiles(DIR_OUTPUT, nil, function(path, pathOutputRel, filename, extLower)
 		if not writtenOutputFiles[pathOutputRel] then
 			timestampPrintVerbose("Removing: %s", path)
