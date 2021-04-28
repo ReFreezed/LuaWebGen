@@ -1198,7 +1198,18 @@ local function buildWebsite()
 	end
 
 	for url, targetUrl in pairsSorted(site.redirections.v) do
-		generateRedirection(url, targetUrl, "")
+		local sourcePath = ""
+
+		if targetUrl:find"^/" then
+			for _, page in ipairs(pages) do
+				if page.url.v == targetUrl then
+					sourcePath = page._path
+					break
+				end
+			end
+		end
+
+		generateRedirection(url, targetUrl, sourcePath)
 	end
 
 	-- Validate targets.
