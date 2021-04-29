@@ -11,13 +11,17 @@
 
 **LuaWebGen** - static website generator, powered by Lua. Somewhat inspired by [Hugo](https://gohugo.io/).
 
-Webpages are generated using HTML and markdown *templates* with embedded Lua code. CSS files can also include code.
+Webpages are generated using HTML and Markdown *templates* with embedded Lua code.
+CSS files can also include code.
 
-Download: [latest release](https://github.com/ReFreezed/LuaWebGen/releases/latest)
+[**Download latest release**](https://github.com/ReFreezed/LuaWebGen/releases/latest)
 
 - [Why?](#why)
 - [Example](#example)
 - [Installation / Usage](#installation--usage)
+	- [Windows](#windows)
+	- [Universal](#universal)
+	- [Build Website](#build-website)
 - [Documentation](https://github.com/ReFreezed/LuaWebGen/wiki)
 
 
@@ -49,36 +53,37 @@ local foot = "not hand"
 Lorem ipsum dolor sit amet, consectetur adipiscing elit.
 Duis nec justo mollis, varius nulla sed, commodo nibh.
 
-Foot is {{foot}}<br>
-1 + 2 * 3 = {{1+2*3}}<br>
-Current year is {{os.date"%Y"}}
+Foot is {{ foot }}<br>
+1 + 2 * 3 = {{ 1+2*3 }}<br>
+Current year is {{ os.date"%Y" }}
 
 ## List of Cats
 
-{{for i, cat in ipairs(data.myCats)}}
-- Cat {{i}} is named {{cat.name}}.
-{{end}}
+{{ for i, cat in ipairs(data.myCats) }}
+- Cat {{ i }} is named {{ cat.name }}.
+{{ end }}
 
 ![Cute cat]({{ getCatImageUrl() }})
 ```
 
-Page template, `page.html`:
+Page layout template, `page.html`:
 
 ```html
-{{include"header"}}
-{{include"navigation"}}
+{{ include"header" }}
+{{ include"navigation" }}
 
 <main>
-	<h1 id="{{urlize(page.title)}}">{{page.title}}</h1>
-	{{page.content}}
+	<h1 id="{{ urlize(page.title) }}">{{ page.title }}</h1>
+	{{ page.content }}
 </main>
 
-{{include"footer"}}
+{{ include"footer" }}
 ```
 
 
 
 ## Installation / Usage
+
 There are two versions of LuaWebGen: Windows and universal.
 Begin by [downloading](https://github.com/ReFreezed/LuaWebGen/releases/latest) and unzipping the program somewhere.
 
@@ -127,32 +132,32 @@ lua path/to/webgen.lua command [options]
 
 
 ### Build Website
-To generate a website, run this from the [command line](https://github.com/ReFreezed/LuaWebGen/wiki/Command-Line):
+
+To generate a new empty website, run something like this from the
+[command line](https://github.com/ReFreezed/LuaWebGen/wiki/Command-Line):
 
 ```batch
-cd path/to/siteroot
+webgen new site "my-website"
+cd "my-website"
+webgen new page "blog/first-post.md"
 webgen build
 ```
 
-LuaWebGen expects this folder hierarchy:
+LuaWebGen uses this folder structure for a website project:
 
 ```
-site-root/
+my-website/             -- Root of the website project.
     content/            -- All website content, including pages, images, CSS and JavaScript files.
         index.(html|md) -- Homepage/root index page.
     data/               -- Optional data folder. Can contain Lua, TOML and XML files.
     layouts/            -- All HTML layout templates.
-        page.html       -- Default page template.
-    logs/               -- Automatically created log file folder.
-    output/             -- Automatically created output folder.
+        page.html       -- Default page layout template.
+    output/             -- Where the built website ends up.
     scripts/            -- Optional Lua script folder. Scripts must return a function.
     config.lua          -- Site-wide configurations.
 ```
 
 Everything in the *content* folder will be processed and end up in the *output* folder.
-
-> **Warning:** The *output* folder is automatically cleaned from files and folders that do not exist in the *content* folder,
-> so don't save any files in the *output* folder!
 
 See the [wiki](https://github.com/ReFreezed/LuaWebGen/wiki) for the full documentation.
 

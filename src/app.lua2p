@@ -33,8 +33,6 @@ if not command then
 	return
 end
 
-print(os.date"%Y-%m-%d")
-
 ----------------------------------------------------------------
 
 if command == "new" then
@@ -146,25 +144,25 @@ if command == "new" then
 			local contents = formatTemplate(
 				[=[
 					<!DOCTYPE html>
-					<html lang="{{site.languageCode}}">
+					<html lang="{{ site.languageCode }}">
 					<head>
 						<meta charset="utf-8">
 
 						<meta name="viewport" content="width=device-width, initial-scale=1">
-						{{generatorMeta()}}
+						{{ generatorMeta() }}
 
-						<base href="{{site.baseUrl}}">
+						<base href="{{ url(site.baseUrl) }}">
 
 						<title>
-							{{page.title ~= "" and page.title.." |" or ""}}
-							{{site.title}}
+							{{ echo(page.title ~= "" and page.title.." -" or "") }}
+							{{ echo(site.title) }}
 						</title>
 
-						<link rel="canonical" href="{{page.permalink}}">
+						<link rel="canonical" href="{{ url(page.permalink) }}">
 					</head>
 
 					<body>
-						{{page.content}}
+						{{ page.content }}
 					</body>
 
 					</html>
@@ -234,6 +232,8 @@ elseif command == "build" then
 		errorLine("The current folder doesn't seem to contain a site.")
 	end
 
+	print(os.date"%Y-%m-%d")
+
 	if options[1] then
 		printf("Options: %s", table.concat(options, ", "))
 	end
@@ -257,13 +257,13 @@ do
 		if not ok then  errorLine(err)  end
 	end
 
-	local basePath = DIR_LOGS..os.date"/%Y%m%d_%H%M%S"
+	local basePath = DIR_LOGS .. os.date"/%Y-%m-%d_%H-%M-%S"
 	local i        = 1
-	_G.logPath     = basePath..".log"
+	_G.logPath     = basePath .. ".log"
 
 	while isFile(logPath) do
 		i          = i + 1
-		_G.logPath = basePath.."_"..i..".log"
+		_G.logPath = basePath .. "_" .. i .. ".log"
 	end
 
 	_G.logFile = io.open(logPath, "w")
@@ -1101,20 +1101,28 @@ local function buildWebsite()
 	--
 	-- Generate output
 	--
+	local nonPagePages = {}
+
 	traverseFiles(DIR_CONTENT, ignoreFolders, function(path, pathRel, filename, extLower)
+		-- Ignored.
 		if
 			(ignoreFiles[1] and isStringMatchingAnyPattern(filename,                ignoreFiles)) or
 			(ignorePaths[1] and isStringMatchingAnyPattern(pathToSitePath(pathRel), ignorePaths))
 		then
-			-- Ignore.
+			-- void
 
-		elseif fileTypes[extLower] == "othertemplate" then
-			generateFromTemplateFile(newPage(pathRel))
-
+		-- Template.
 		elseif fileTypes[extLower] then
-			table.insert(pages, newPage(pathRel)) -- Generate later.
+			-- Generate these later so e.g. urlExists() works better.
+			local pagesArray = (fileTypes[extLower] == "othertemplate" and nonPagePages or pages)
+			table.insert(pagesArray, newPage(pathRel))
 
-		elseif not (handleHtaccess and pathRel == ".htaccess") then
+		-- Special.
+		elseif pathRel == ".htaccess" and handleHtaccess then
+			-- void  Ignore for now. We handle this file later.
+
+		-- Other.
+		else
 			local modTime       = lfs.attributes(path, "modification")
 			local pathOutputRel = rewriteOutputPath(pathRel)
 
@@ -1131,11 +1139,12 @@ local function buildWebsite()
 				local contents = assert(getFileContents(path))
 				writeOutputFile("raw", pathRel, "/"..pathRel, contents, modTime, pathRel)
 			end
-
-		else
-			-- Ignore file.
 		end
 	end)
+
+	for _, page in ipairs(nonPagePages) do
+		generateFromTemplateFile(page)
+	end
 
 	for _, page in ipairs(pages) do
 		if not (page._isGenerated or page._isSkipped) then
