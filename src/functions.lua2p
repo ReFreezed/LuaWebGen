@@ -1462,12 +1462,17 @@ function _G.generateFromTemplate(page, template, modTime)
 			return
 		end
 
-		page.content.v = pageContent
+		if page.layout.v == "" then
+			result = pageContent
 
-		local layoutTemplate, layoutPath = getLayoutTemplate(page)
-		result                           = parseAndRunTemplate(page, layoutPath, layoutTemplate, "html", true)
+		else
+			page.content.v = pageContent
 
-		page.content.v = "" -- We don't need this anymore.
+			local layoutTemplate, layoutPath = getLayoutTemplate(page)
+			result                           = parseAndRunTemplate(page, layoutPath, layoutTemplate, "html", true)
+
+			page.content.v = "" -- We don't need this anymore.
+		end
 
 	else
 		result = parseAndRunTemplate(page, page._pathForError, template, nil, false)
