@@ -275,9 +275,10 @@ end
 --==============================================================
 
 _G.scriptEnvironmentGlobals = {
-	_WEBGEN_VERSION      = WEBGEN_VERSION,
+	_WEBGEN_VERSION      = WEBGEN_VERSION, -- @Depricated
 	DATA_FILE_EXTENSIONS = DATA_FILE_EXTENSIONS,
 	IMAGE_EXTENSIONS     = IMAGE_EXTENSIONS,
+	WEBGEN_VERSION       = WEBGEN_VERSION,
 
 	-- Lua globals.
 	_G             = nil, -- Deny direct access to the script environment.
@@ -609,7 +610,7 @@ _G.scriptEnvironmentGlobals = {
 	end,
 
 	getCompleteOutputPath = function(sitePath)
-		local pathRel = sitePathToPath(sitePath)
+		local pathRel       = sitePathToPath(sitePath)
 		local pathOutputRel = rewriteOutputPath(pathRel)
 		return DIR_OUTPUT.."/"..pathOutputRel
 	end,
@@ -710,7 +711,7 @@ _G.scriptEnvironmentGlobals = {
 		assertArg(3, params,      "table","nil")
 
 		local pathRel = sitePathToPath(sitePathRel)
-		local page    = newPage(pathRel)
+		local page    = newPage(pathRel, false)
 
 		if params then
 			page.params.v = params
@@ -1031,6 +1032,8 @@ local function buildWebsite()
 	_G.autoLockPages       = getV("autoLockPages",     false,                 "boolean")
 	_G.noTrailingSlash     = getV("removeTrailingSlashFromPermalinks", false, "boolean") -- @Doc? @Hack? Also, this affects page.url too now. 2021-04-28
 
+	_G.redirectionLayout   = getV("redirectionLayout", redirectionLayout,     "string") -- @Doc
+
 	for k in pairs(config) do
 		timestampPrintWarning("Unknown config field '%s'.", k)
 	end
@@ -1115,7 +1118,7 @@ local function buildWebsite()
 		elseif fileTypes[extLower] then
 			-- Generate these later so e.g. urlExists() works better.
 			local pagesArray = (fileTypes[extLower] == "othertemplate" and nonPagePages or pages)
-			table.insert(pagesArray, newPage(pathRel))
+			table.insert(pagesArray, newPage(pathRel, false))
 
 		-- Special.
 		elseif pathRel == ".htaccess" and handleHtaccess then
@@ -1166,19 +1169,18 @@ local function buildWebsite()
 	-- duplicate redirections and generateRedirection() will raise an error.
 	local allRedirections = {--[[ [url1]=targetUrl1, ... ]]}
 
+	for url, targetUrl in pairs(site.redirections.v) do
+		allRedirections[url] = targetUrl
+	end
+
 	for _, page in ipairs(pages) do
 		if page.isPage.v and not page._isSkipped then
 			assert(page._isGenerated)
 
 			for _, url in ipairs(page.aliases.v) do
-				generateRedirection(url, page.url.v, page._path)
 				allRedirections[url] = page.url.v
 			end
 		end
-	end
-
-	for url, targetUrl in pairs(site.redirections.v) do
-		allRedirections[url] = targetUrl
 	end
 
 	-- Fast-forward indirect redirections.
@@ -1203,7 +1205,24 @@ local function buildWebsite()
 			end
 		end
 
-		allRedirections[url] = targetUrl
+		allRedirections[url]     = targetUrl
+		site.redirections.v[url] = targetUrl
+	end
+
+	-- Validate targets.
+	for url, targetUrl in pairsSorted(allRedirections) do
+		if targetUrl:find"^/" and not writtenOutputUrls[targetUrl] then
+			errorLine("Missing target page for redirection: %s -> %s", url, targetUrl)
+		end
+	end
+
+	-- Write redirections.
+	for _, page in ipairs(pages) do
+		if page.isPage.v and not page._isSkipped then
+			for _, url in ipairs(page.aliases.v) do
+				generateRedirection(url, page.url.v, page._path)
+			end
+		end
 	end
 
 	for url, targetUrl in pairsSorted(site.redirections.v) do
@@ -1219,13 +1238,6 @@ local function buildWebsite()
 		end
 
 		generateRedirection(url, targetUrl, sourcePath)
-	end
-
-	-- Validate targets.
-	for url, targetUrl in pairsSorted(allRedirections) do
-		if targetUrl:find"^/" and not writtenOutputUrls[targetUrl] then
-			errorLine("Missing target page for redirection: %s -> %s", url, targetUrl)
-		end
 	end
 
 	--

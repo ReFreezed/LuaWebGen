@@ -647,6 +647,8 @@ do
 
 	-- stringResult = parseAndRunTemplate( page, path, template, fileType=fromPage, useCache )
 	function _G.parseAndRunTemplate(page, path, template, fileType, useCache)
+		if template == "" then  return ""  end
+
 		fileType = (fileType or fileTypes[page._extension])
 
 		!local PRINT_RESULT = DEV and 1==0
@@ -1436,7 +1438,7 @@ function _G.generateFromTemplate(page, template, modTime)
 		errorf(2, "Recursive page generation detected. (You may want to call lock() in '%s')", page._path)
 	end
 
-	page._isGenerating = true
+	page._isGenerating             = true
 	pagesGenerating[page._pathOut] = true
 
 	local pathRel  = page._path
@@ -1449,6 +1451,9 @@ function _G.generateFromTemplate(page, template, modTime)
 	if page.isPage.v then
 		local pageContent = parseAndRunTemplate(page, page._pathForError, template, nil, false)
 
+		page._isLocked = true
+		page._readonly = true
+
 		if
 			(page.isDraft.v and not includeDrafts            ) or -- Is draft?
 			(datetimeToTime(page.publishDate:g()) > os.time())    -- Is in future?
@@ -1456,9 +1461,8 @@ function _G.generateFromTemplate(page, template, modTime)
 			page._isSkipped               = true
 			_G.outputFileSkippedPageCount = outputFileSkippedPageCount + 1
 
+			page._isGenerating             = false
 			pagesGenerating[page._pathOut] = nil
-			page._isGenerating = false
-			page._readonly     = true
 			return
 		end
 
@@ -1475,15 +1479,17 @@ function _G.generateFromTemplate(page, template, modTime)
 		end
 
 	else
+		page._isLocked = true
+		page._readonly = true
+
 		result = parseAndRunTemplate(page, page._pathForError, template, nil, false)
 	end
 
 	writeOutputFile(page._category, page._pathOut, page.url.v, result, modTime, page._path)
 	page._isGenerated = true
 
+	page._isGenerating             = false
 	pagesGenerating[page._pathOut] = nil
-	page._isGenerating = false
-	page._readonly     = true
 end
 
 function _G.generateFromTemplateFile(page)
@@ -1511,7 +1517,8 @@ function _G.generateRedirection(url, targetUrl, sourcePath)
 
 	if url:find("?", 1, true) or not url:find"/$" then
 		if unwrittenRedirects[url] == targetUrl then
-			errorLine("Duplicate redirect from '%s' to '%s'.", url, targetUrl)
+			timestampPrintWarning("Duplicate redirect from '%s' to '%s'.", url, targetUrl)
+			return
 		elseif unwrittenRedirects[url] then
 			errorLine("Duplicate redirect from '%s' (to different targets).", url)
 		end
@@ -1522,34 +1529,61 @@ function _G.generateRedirection(url, targetUrl, sourcePath)
 
 	-- @Copypaste from above.
 	if writtenRedirects[url] == targetUrl then
-		errorLine("Duplicate redirect from '%s' to '%s'.", url, targetUrl)
+		timestampPrintWarning("Duplicate redirect from '%s' to '%s'.", url, targetUrl)
+		return
 	elseif writtenRedirects[url] then
 		errorLine("Duplicate redirect from '%s' (to different targets).", url)
 	end
 
-	local pathRel  = url:gsub("/?$", "/index.html", 1):gsub("^/", "")
-	local contents = formatTemplate(
-		[=[
-			<!DOCTYPE html>
-			<html>
-				<head>
-					<meta charset="utf-8">
-					<meta name="robots" content="noindex, follow">
-					<meta http-equiv="refresh" content="3; url=:urlAbsPercent:">
-					<title>:url:</title>
-				</head>
-				<body>
-					<p>Page has moved. If you are not redirected automatically,
-					click <a href=":urlAbsPercent:">here</a>.</p>
-				</body>
-			</html>
-		]=], {
-			url           = encodeHtmlEntities(              toUrlAbsolute(targetUrl) ),
-			urlAbsPercent = encodeHtmlEntities(toUrlAbsolute(toUrlAbsolute(targetUrl))),
-		}
-	)
+	if redirectionLayout ~= "" then
+		--
+		-- We're doing things a bit backwards here with the page's path
+		-- because we don't have a real source page file and thus no source
+		-- path. We have to trick the system to do what we want. @Cleanup
+		--
+		-- Example:
+		--   If the URL is          /blog/post1/
+		--   then we want to write  /blog/post1/index.html
+		--   so the path must be    /blog/post1.html
+		--
+		-- Note that the output path may still get rewritten before the
+		-- writing, but that doesn't concern us because URLs are determined
+		-- from unrewritten paths.
+		--
+		local pathRel = url:gsub("/?$", ".html", 1):gsub("^/", "")
+		local page    = newPage(pathRel, true)
 
-	writeOutputFile("page", pathRel, url, contents, nil, sourcePath)
+		page.layout.v            = redirectionLayout
+		page.redirectionTarget.v = targetUrl
+
+		generateFromTemplate(page, "", nil) -- The content for this super special page is always empty - we only want to process the layout!
+
+	else
+		local contents = formatTemplate(
+			[=[
+				<!DOCTYPE html>
+				<html>
+					<head>
+						<meta charset="utf-8">
+						<meta name="robots" content="noindex, follow">
+						<meta http-equiv="refresh" content="3; url=:urlAbsPercent:">
+						<title>:url:</title>
+					</head>
+					<body>
+						<p>Page has moved. If you are not redirected automatically,
+						click <a href=":urlAbsPercent:">here</a>.</p>
+					</body>
+				</html>
+			]=], {
+				url           = encodeHtmlEntities(              toUrlAbsolute(targetUrl) ),
+				urlAbsPercent = encodeHtmlEntities(toUrlAbsolute(toUrlAbsolute(targetUrl))),
+			}
+		)
+
+		local pathRel = url:gsub("/?$", "/index.html", 1):gsub("^/", "")
+		writeOutputFile("page", pathRel, url, contents, nil, sourcePath)
+	end
+
 	writtenRedirects[url] = targetUrl
 end
 
@@ -1889,8 +1923,9 @@ do
 		return sitePathToPath(sitePath)
 	end
 
-	function _G.newPage(pathRel)
-		assertArg(1, pathRel, "string")
+	function _G.newPage(pathRel, isRedirection)
+		assertArg(1, pathRel,       "string")
+		assertArg(2, isRedirection, "boolean")
 
 		local filename = getFilename(pathRel)
 		local ext      = getExtension(filename)
@@ -1901,7 +1936,7 @@ do
 		end
 
 		local isPage  = isAny(fileTypes[extLower], "markdown","html")
-		local isIndex = isPage  and getBasename(filename) == "index"
+		local isIndex = isPage  and getBasename(filename) == "index" and not isRedirection
 		local isHome  = isIndex and pathRel == filename
 
 		local category = isPage and "page" or "template"
@@ -1910,15 +1945,14 @@ do
 			not isPage and pathRel
 			or isHome  and ""
 			or isIndex and pathRel:sub(1, -#filename-1)
-			or pathRel:sub(1, -#ext-2).."/"
+			or pathRel:sub(1, -#ext-2) .. "/"
 		)
 
-		local pathRelOut
-			=  (not isPage and permalinkRel)
-			or (permalinkRel == "" and "" or permalinkRel).."index.html"
+		local pathRelOut = (not isPage and permalinkRel or permalinkRel.."index.html")
 
 		local isSpecial = (
 			not isPage
+			or isRedirection
 			or attributeWithAny(
 				htaErrors,
 				"/"..permalinkRel,
@@ -1935,7 +1969,7 @@ do
 			_isGenerating = false,
 			_isGenerated  = false,
 			_isSkipped    = false,
-			_isLocked     = false,
+			_isLocked     = false, -- @Cleanup: Is this always synced with _readonly? If so, just remove _isLocked.
 			_path         = pathRel,
 			_pathOut      = pathRelOut,
 			_pathForError = F("%s/%s", DIR_CONTENT, pathRel),
@@ -2010,6 +2044,10 @@ do
 			},
 			rssLink = {
 				v = "", -- @Incomplete @Doc
+				g = function(field)  return field.v  end,
+			},
+			redirectionTarget = {
+				v = "",
 				g = function(field)  return field.v  end,
 			},
 
