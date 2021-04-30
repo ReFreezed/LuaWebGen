@@ -2069,10 +2069,10 @@ do
 				v = site.baseUrl.v .. (noTrailingSlash and permalinkRel:gsub("/$", "") or permalinkRel),
 				g = function(field)  return field.v  end,
 			},
-			-- rssLink = { -- @Incomplete @Doc
-			-- 	v = "",
-			-- 	g = function(field)  return field.v  end,
-			-- },
+			rssLink = { -- @Incomplete @Doc
+				v = "",
+				g = function(field)  return field.v  end,
+			},
 			redirectionTarget = {
 				v = "",
 				g = function(field)  return field.v  end,

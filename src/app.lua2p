@@ -1243,6 +1243,8 @@ local function buildWebsite()
 	--
 	-- Htaccess
 	--
+	local handlingSpecialRedirections = false
+
 	if handleHtaccess then
 		local contents    = getFileContents(DIR_CONTENT.."/.htaccess")
 		local fileExisted = (contents ~= nil)
@@ -1297,6 +1299,7 @@ local function buildWebsite()
 		end
 
 		if htaRedirect and (next(writtenRedirects) or next(unwrittenRedirects)) then
+			handlingSpecialRedirections = true
 			b("\t# Redirect moved resources.\n")
 
 			for url, targetUrl in pairsSorted(writtenRedirects) do
@@ -1330,16 +1333,6 @@ local function buildWebsite()
 			end
 
 			b("\n")
-
-		elseif not htaRedirect and next(unwrittenRedirects) then
-			local count = #getKeys(unwrittenRedirects)
-			timestampPrintWarning("%d URL redirection%s could not be satisfied:", count, (count == 1 and "" or "s")) -- @Incomplete: Issue this warning if handleHtaccess==false.
-
-			for url, targetUrl in pairsSorted(unwrittenRedirects) do
-				local s = F("    %s", url, targetUrl)
-				io.stderr:write(s, "\n")
-				log(s)
-			end
 		end
 
 		if noTrailingSlash then
@@ -1400,6 +1393,17 @@ local function buildWebsite()
 
 		writeOutputFile("raw", ".htaccess", "/.htaccess", contents, nil, (fileExisted and ".htaccess" or ""))
 	end--if handleHtaccess
+
+	if not handlingSpecialRedirections and next(unwrittenRedirects) then
+		local count = #getKeys(unwrittenRedirects)
+		timestampPrintWarning("%d URL redirection%s could not be satisfied:", count, (count == 1 and "" or "s"))
+
+		for url, targetUrl in pairsSorted(unwrittenRedirects) do
+			local s = F("    %s", url, targetUrl)
+			io.stderr:write(s, "\n")
+			log(s)
+		end
+	end
 
 	if onValidate then
 		pushContext("validation")
