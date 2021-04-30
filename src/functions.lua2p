@@ -484,6 +484,7 @@ do
 
 			-- do (...) end
 			elseif blockContents:find!("^ *do"..PATTERN_IDENT_END) then
+				-- @Polish: Make sure there's no garbage at the end of blockContents.
 				table.insert(out, "do ")
 
 				local scopeEndBlockI1, scopeEndBlockI2, scopeEndBlockContents = templateToLua(out, path, template, pos, tcsLevel+1, blockI1)
@@ -556,7 +557,7 @@ do
 
 			-- repeat (...) until <condition>
 			elseif blockContents:find!("^ *repeat"..PATTERN_IDENT_END) then
-				-- @Incomplete: Make sure there's no garbage afterwards.
+				-- @Polish: Make sure there's no garbage at the end of blockContents.
 				table.insert(out, "repeat ")
 
 				local scopeEndBlockI1, scopeEndBlockI2, scopeEndBlockContents = templateToLua(out, path, template, pos, tcsLevel+1, blockI1)
@@ -581,6 +582,7 @@ do
 				blockContents:find!("^ *else"  ..PATTERN_IDENT_END) or
 				blockContents:find!("^ *elseif"..PATTERN_IDENT_END)
 			then
+				-- @Polish: Make sure there's no garbage at the end of blockContents.
 				if tcsLevel == 1 then
 					fileError(path, template, blockI1, "Unexpected templateified '%s'.", blockContents:match"%a+")
 				end
@@ -1536,6 +1538,8 @@ function _G.generateRedirection(url, targetUrl, sourcePath)
 
 	if not url:find"^/" then
 		errorLine("Redirection URLs must begin with '/'. (%s)", url)
+	elseif url:find("#", 1, true) then
+		errorLine("Redirection URLs cannot have fragments. (%s)", url)
 	end
 
 	if url:find("?", 1, true) or not url:find"/$" then
@@ -2065,10 +2069,10 @@ do
 				v = site.baseUrl.v .. (noTrailingSlash and permalinkRel:gsub("/$", "") or permalinkRel),
 				g = function(field)  return field.v  end,
 			},
-			rssLink = {
-				v = "", -- @Incomplete @Doc
-				g = function(field)  return field.v  end,
-			},
+			-- rssLink = { -- @Incomplete @Doc
+			-- 	v = "",
+			-- 	g = function(field)  return field.v  end,
+			-- },
 			redirectionTarget = {
 				v = "",
 				g = function(field)  return field.v  end,
