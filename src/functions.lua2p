@@ -164,17 +164,24 @@ do
 		["["] = "]",
 	}
 
-	local function findEndOfLuaCodeBlock(path, template, blockStart, pos)
+	local function findEndOfBlockContents(path, template, pos)
 		!local PRINT_PROGRESS = DEV and 1==0
 		!if PRINT_PROGRESS then  __LUA`printf("%s(%d):%d: >>>>>>>>", path, pos, getLineNumber(template, pos))`  end
+
+		local blockContentsI1 = pos
 
 		local bracketBalance        = 0
 		local bracketStartPositions = {}
 		local bracketEndCharacters  = {}
 
 		while true do
+			--
+			-- Note: We don't need to match every Lua token - only those that could
+			-- intercept our search for the "}}" at the end of the code block.
+			--
 			-- @Speed? Positions can sometimes be cached between iterations.
-			local posBlockEnd     = bracketBalance == 0 and template:find("}}", pos, true) or nil
+			--
+			local posBlockEnd     = bracketBalance == 0 and template:find("%*?}}", pos) or nil
 			local posComment      = template:find("--",     pos, true)
 			local posStringShort  = template:find("[\"']",  pos, false)
 			local posStringLong   = template:find("%[=*%[", pos, false)
@@ -205,7 +212,11 @@ do
 					local _, i2 = template:find("%]"..longStringLevel.."%]", pos)
 
 					if not i2 then
-						fileError(path, template, pos, "Incomplete long comment. (Code block starting at line %d)", getLineNumber(template, blockStart))
+						fileError(
+							path, template, pos,
+							"Incomplete long comment. (Code block starting at line %d)",
+							getLineNumber(template, blockContentsI1)
+						)
 					end
 
 					pos = i2+1
@@ -225,7 +236,11 @@ do
 				while true do
 					local i, _, c = template:find(pat, pos)
 					if not i then
-						fileError(path, template, posStringShort, "Missing end quote for string. (Code block starting at line %d)", getLineNumber(template, blockStart))
+						fileError(
+							path, template, posStringShort,
+							"Missing end quote for string. (Code block starting at line %d)",
+							getLineNumber(template, blockContentsI1)
+						)
 					end
 					pos = i + 1
 					if c == "\\" then
@@ -244,7 +259,11 @@ do
 				local _, i2 = template:find("%]"..longStringLevel.."%]", pos)
 
 				if not i2 then
-					fileError(path, template, pos, "Incomplete long string. (Code block starting at line %d)", getLineNumber(template, blockStart))
+					fileError(
+						path, template, pos,
+						"Incomplete long string. (Code block starting at line %d)",
+						getLineNumber(template, blockContentsI1)
+					)
 				end
 
 				pos = i2 + 1
@@ -267,7 +286,7 @@ do
 					fileError(
 						path, template, pos,
 						"Unexpected '%s'. Too many end brackets. (Code block starting at line %d)",
-						template:sub(pos, pos), getLineNumber(template, blockStart)
+						template:sub(pos, pos), getLineNumber(template, blockContentsI1)
 					)
 				end
 
@@ -280,7 +299,7 @@ do
 						bracketEndChar,
 						getLineNumber(template, bracketStartPositions[bracketBalance]),
 						template:sub(pos, pos),
-						getLineNumber(template, blockStart)
+						getLineNumber(template, blockContentsI1)
 					)
 				end
 
@@ -295,11 +314,15 @@ do
 					fileError(
 						path, template, bracketStartPositions[bracketBalance],
 						"Missing '%s'. Unbalanced brackets in code. (Code block starting at line %d)",
-						bracketEndCharacters[bracketBalance], getLineNumber(template, blockStart)
+						bracketEndCharacters[bracketBalance], getLineNumber(template, blockContentsI1)
 					)
 				end
 
-				fileError(path, template, pos, "Missing end of code block. (Code block starting at line %d)", getLineNumber(template, blockStart))
+				fileError(
+					path, template, pos,
+					"Missing end of code block. (Code block starting at line %d)",
+					getLineNumber(template, blockContentsI1)
+				)
 			end
 		end
 
@@ -312,35 +335,45 @@ do
 		table.insert(out, "\n")
 	end
 
-	-- endBlockStart, endBlockEnd = templateToLua( luaOutputBuffer, path, template, position, levelOfTemplateifiedControlStructure )
-	local function templateToLua(out, path, template, pos, level)
+	-- endBlockI1, endBlockI2, endBlockContents = templateToLua( luaOutputBuffer, path, template, position, templateifiedControlStructureLevel, templateifiedControlStructurePosition )
+	local function templateToLua(out, path, template, pos, tcsLevel, tcsPos)
 		!local PATTERN_IDENT       = "[%a_][%w_]*"
 		!local PATTERN_IDENT_BEGIN = "%f[%w_]"
 		!local PATTERN_IDENT_END   = "%f[^%w_]"
 
-		local posAtStartOfParsing = pos
-
 		while pos <= #template do
-			local blockStart = template:find("{{", pos, true)
-			if not blockStart then  break  end
+			local blockI1Trimmed, blockI1, doTrim, blockContentsI1 = template:match(!(NOSPACE"() %s* () {{ (%*?) ()"), pos)
+			if not blockI1 then  break  end
 
-			if blockStart > pos then
-				local plainSegment = template:sub(pos, blockStart-1)
-				local luaStatement = F("echoRaw(%q)", plainSegment) --:gsub("\\\n", "\\n")
-				table.insert(out, luaStatement)
+			local autoLock = (autoLockPages and blockI1Trimmed == 1)
+			doTrim         = (doTrim == "*")
+			local echoI2   = (doTrim and blockI1Trimmed or blockI1) - 1
+
+			if pos <= echoI2 then
+				local plainSegment  = template:sub(pos, echoI2)
+				local echoStatement = F("echoRaw(%q)", plainSegment) --:gsub("\\\n", "\\n")
+				table.insert(out, echoStatement)
 			end
 
-			local autoLock = (autoLockPages and blockStart == 1)
-
-			pos = blockStart
-			pos = pos + 2 -- Eat "{{".
+			pos = blockContentsI1
 
 			local ln = getLineNumber(template, pos)
 			addLineNumberIndicator(out, ln)
 
-			local blockEnd = findEndOfLuaCodeBlock(path, template, blockStart, pos) + 2
-			local block    = template:sub(blockStart+2, blockEnd-2) -- Without "{{" and "}}".
-			-- print("BLOCK: "..trim(block))
+			local blockContentsI2 = findEndOfBlockContents(path, template, pos)
+			local blockContents   = template:sub(blockContentsI1, blockContentsI2)
+			pos                   = blockContentsI2 + 1
+
+			!if DEV and 1==0 then
+				print("BLOCK: "..trim(blockContents))
+			!end
+
+			doTrim, pos = template:match(!(NOSPACE"^(%*?) }} ()"), pos)
+			doTrim      = (doTrim == "*")
+
+			if doTrim then
+				pos = template:match("^%s*()", pos)
+			end
 
 			----------------------------------------------------------------
 
@@ -348,18 +381,18 @@ do
 
 			-- fori [<] item in <array> (...) end
 			-- fori [<] <array> (...) end
-			if block:find!("^ *fori"..PATTERN_IDENT_END) then
-				local             reverse, ident, expr = block:match!(NOSPACE("^ %s* fori %s* (< ) %s* ("..PATTERN_IDENT..") %s+ in "..PATTERN_IDENT_END.." %s* (%S.*)"))
-				if not expr then           ident, expr = block:match!(NOSPACE("^ %s* fori %s+          ("..PATTERN_IDENT..") %s+ in "..PATTERN_IDENT_END.." %s* (%S.*)"))
-				if not expr then  reverse,        expr = block:match!(NOSPACE("^ %s* fori %s* (<?) %s*                                                          (%S.*)"))
+			if blockContents:find!("^ *fori"..PATTERN_IDENT_END) then
+				local             reverse, ident, expr = blockContents:match!(NOSPACE("^ %s* fori %s* (< ) %s* ("..PATTERN_IDENT..") %s+ in "..PATTERN_IDENT_END.." %s* (%S.*)"))
+				if not expr then           ident, expr = blockContents:match!(NOSPACE("^ %s* fori %s+          ("..PATTERN_IDENT..") %s+ in "..PATTERN_IDENT_END.." %s* (%S.*)"))
+				if not expr then  reverse,        expr = blockContents:match!(NOSPACE("^ %s* fori %s* (<?) %s*                                                          (%S.*)"))
 				if not expr then
-					fileError(path, template, pos, "Invalid 'fori' statement.")
+					fileError(path, template, blockI1, "Invalid 'fori' statement.")
 				end end end
 
 				reverse = (reverse == "<")
 
 				if not loadstring("_=("..expr.."\n)") then
-					fileError(path, template, pos, "Invalid value expression for 'fori' loop: %s", trim(expr)) -- @UX: Better error message.
+					fileError(path, template, blockI1, "Invalid value expression for 'fori' loop: %s", trim(expr)) -- @UX: Better error message.
 				end
 
 				table.insert(out, "for i, ")
@@ -370,51 +403,49 @@ do
 				table.insert(out, expr)
 				table.insert(out, "\n) do ")
 
-				local innerEndBlockStart, innerEndBlockEnd = templateToLua(out, path, template, blockEnd+1, level+1)
-				local innerEndBlock                        = template:sub(innerEndBlockStart+2, innerEndBlockEnd-2)
+				local scopeEndBlockI1, scopeEndBlockI2, scopeEndBlockContents = templateToLua(out, path, template, pos, tcsLevel+1, blockI1)
 
-				if not innerEndBlock:find!("^ *end"..PATTERN_IDENT_END) then
+				if not scopeEndBlockContents:find!("^ *end"..PATTERN_IDENT_END) then
 					fileError(
-						path, template, innerEndBlockStart,
+						path, template, scopeEndBlockI1,
 						"Expected 'end' for 'fori' loop starting at line %d.",
-						getLineNumber(template, pos)
+						getLineNumber(template, blockI1)
 					)
 				end
 
 				table.insert(out, "end ")
-				blockEnd = innerEndBlockEnd
+				pos = scopeEndBlockI2 + 1
 
 			-- for index [, item, ... ] in <expression> (...) end
 			-- for index = <from>, <to> [, <step> ] (...) end
 			elseif
-				block:find!("^ *for%s+"..PATTERN_IDENT.."%s*[,=]") or
-				block:find!("^ *for%s+"..PATTERN_IDENT.."%s+in"..PATTERN_IDENT_END)
+				blockContents:find!("^ *for%s+"..PATTERN_IDENT.."%s*[,=]") or
+				blockContents:find!("^ *for%s+"..PATTERN_IDENT.."%s+in"..PATTERN_IDENT_END)
 			then
-				table.insert(out, block)
+				table.insert(out, blockContents)
 				table.insert(out, "\ndo ")
 
-				local innerEndBlockStart, innerEndBlockEnd = templateToLua(out, path, template, blockEnd+1, level+1)
-				local innerEndBlock                        = template:sub(innerEndBlockStart+2, innerEndBlockEnd-2)
+				local scopeEndBlockI1, scopeEndBlockI2, scopeEndBlockContents = templateToLua(out, path, template, pos, tcsLevel+1, blockI1)
 
-				if not innerEndBlock:find!("^ *end"..PATTERN_IDENT_END) then
+				if not scopeEndBlockContents:find!("^ *end"..PATTERN_IDENT_END) then
 					fileError(
-						path, template, innerEndBlockStart,
+						path, template, scopeEndBlockI1,
 						"Expected 'end' for 'for' loop starting at line %d.",
-						getLineNumber(template, pos)
+						getLineNumber(template, blockI1)
 					)
 				end
 
 				table.insert(out, "\nend ")
-				blockEnd = innerEndBlockEnd
+				pos = scopeEndBlockI2 + 1
 
 			-- for [<] <to> (...) end
-			elseif block:find!("^ *for"..PATTERN_IDENT_END) then
+			elseif blockContents:find!("^ *for"..PATTERN_IDENT_END) then
 				-- for < <to>
-				if block:find"^ *for%s*<" then
-					local expr = block:gsub("for%s*<", "", 1)
+				if blockContents:find"^ *for%s*<" then
+					local expr = blockContents:gsub("for%s*<", "", 1)
 
 					if not loadstring("_=("..expr.."\n)") then
-						fileError(path, template, pos, "Invalid value expression for simplified 'for' loop: %s", trim(expr)) -- @UX: Better error message.
+						fileError(path, template, blockI1, "Invalid value expression for simplified 'for' loop: %s", trim(expr)) -- @UX: Better error message.
 					end
 
 					table.insert(out, "for i = (")
@@ -425,10 +456,10 @@ do
 
 				-- for <to>
 				else
-					local expr = block:gsub("for", "", 1)
+					local expr = blockContents:gsub("for", "", 1)
 
 					if not loadstring("_=("..expr.."\n)") then
-						fileError(path, template, pos, "Invalid value expression for simplified 'for' loop: %s", trim(expr)) -- @UX: Better error message.
+						fileError(path, template, blockI1, "Invalid value expression for simplified 'for' loop: %s", trim(expr)) -- @UX: Better error message.
 					end
 
 					table.insert(out, "for i = 1, (")
@@ -438,143 +469,137 @@ do
 					table.insert(out, ") do ")
 				end
 
-				local innerEndBlockStart, innerEndBlockEnd = templateToLua(out, path, template, blockEnd+1, level+1)
-				local innerEndBlock                        = template:sub(innerEndBlockStart+2, innerEndBlockEnd-2)
+				local scopeEndBlockI1, scopeEndBlockI2, scopeEndBlockContents = templateToLua(out, path, template, pos, tcsLevel+1, blockI1)
 
-				if not innerEndBlock:find!("^ *end"..PATTERN_IDENT_END) then
+				if not scopeEndBlockContents:find!("^ *end"..PATTERN_IDENT_END) then
 					fileError(
-						path, template, innerEndBlockStart,
+						path, template, scopeEndBlockI1,
 						"Expected 'end' for 'for' loop starting at line %d.",
-						getLineNumber(template, pos)
+						getLineNumber(template, blockI1)
 					)
 				end
 
 				table.insert(out, "\nend ")
-				blockEnd = innerEndBlockEnd
+				pos = scopeEndBlockI2 + 1
 
 			-- do (...) end
-			elseif block:find!("^ *do"..PATTERN_IDENT_END) then
+			elseif blockContents:find!("^ *do"..PATTERN_IDENT_END) then
 				table.insert(out, "do ")
 
-				local innerEndBlockStart, innerEndBlockEnd = templateToLua(out, path, template, blockEnd+1, level+1)
-				local innerEndBlock                        = template:sub(innerEndBlockStart+2, innerEndBlockEnd-2)
+				local scopeEndBlockI1, scopeEndBlockI2, scopeEndBlockContents = templateToLua(out, path, template, pos, tcsLevel+1, blockI1)
 
-				if not innerEndBlock:find!("^ *end"..PATTERN_IDENT_END) then
+				if not scopeEndBlockContents:find!("^ *end"..PATTERN_IDENT_END) then
 					fileError(
-						path, template, innerEndBlockStart,
+						path, template, scopeEndBlockI1,
 						"Expected 'end' for 'do' starting at line %d.",
-						getLineNumber(template, pos)
+						getLineNumber(template, blockI1)
 					)
 				end
 
 				table.insert(out, "\nend ")
-				blockEnd = innerEndBlockEnd
+				pos = scopeEndBlockI2 + 1
 
 			-- if <condition> (...) end
-			elseif block:find!("^ *if"..PATTERN_IDENT_END) then
-				table.insert(out, block)
+			elseif blockContents:find!("^ *if"..PATTERN_IDENT_END) then
+				table.insert(out, blockContents)
 				table.insert(out, "\nthen ")
 
-				local innerEndBlockStart, innerEndBlockEnd = templateToLua(out, path, template, blockEnd+1, level+1)
-				local innerEndBlock                        = template:sub(innerEndBlockStart+2, innerEndBlockEnd-2)
+				local scopeEndBlockI1, scopeEndBlockI2, scopeEndBlockContents = templateToLua(out, path, template, pos, tcsLevel+1, blockI1)
 
-				addLineNumberIndicator(out, getLineNumber(template, innerEndBlockStart))
+				addLineNumberIndicator(out, getLineNumber(template, scopeEndBlockI1))
 
-				while innerEndBlock:find!("^ *elseif"..PATTERN_IDENT_END) do
-					table.insert(out, innerEndBlock)
+				while scopeEndBlockContents:find!("^ *elseif"..PATTERN_IDENT_END) do
+					table.insert(out, scopeEndBlockContents)
 					table.insert(out, "\nthen ")
 
-					innerEndBlockStart, innerEndBlockEnd = templateToLua(out, path, template, innerEndBlockEnd+1, level+1)
-					innerEndBlock                        = template:sub(innerEndBlockStart+2, innerEndBlockEnd-2)
+					scopeEndBlockI1, scopeEndBlockI2, scopeEndBlockContents = templateToLua(out, path, template, scopeEndBlockI2+1, tcsLevel+1, scopeEndBlockI1)
 
-					addLineNumberIndicator(out, getLineNumber(template, innerEndBlockStart))
+					addLineNumberIndicator(out, getLineNumber(template, scopeEndBlockI1))
 				end
 
-				if innerEndBlock:find!("^ *else"..PATTERN_IDENT_END) then
+				if scopeEndBlockContents:find!("^ *else"..PATTERN_IDENT_END) then
 					table.insert(out, "else ")
 
-					innerEndBlockStart, innerEndBlockEnd = templateToLua(out, path, template, innerEndBlockEnd+1, level+1)
-					innerEndBlock                        = template:sub(innerEndBlockStart+2, innerEndBlockEnd-2)
+					scopeEndBlockI1, scopeEndBlockI2, scopeEndBlockContents = templateToLua(out, path, template, scopeEndBlockI2+1, tcsLevel+1, scopeEndBlockI1)
 
-					addLineNumberIndicator(out, getLineNumber(template, innerEndBlockStart))
+					addLineNumberIndicator(out, getLineNumber(template, scopeEndBlockI1))
 				end
 
-				if not innerEndBlock:find!("^ *end"..PATTERN_IDENT_END) then
+				if not scopeEndBlockContents:find!("^ *end"..PATTERN_IDENT_END) then
 					fileError(
-						path, template, innerEndBlockStart,
+						path, template, scopeEndBlockI1,
 						"Expected 'end' for 'if' starting at line %d.",
-						getLineNumber(template, pos)
+						getLineNumber(template, blockI1)
 					)
 				end
 
 				table.insert(out, "end ")
-				blockEnd = innerEndBlockEnd
+				pos = scopeEndBlockI2 + 1
 
 			-- while <condition> (...) end
-			elseif block:find!("^ *while"..PATTERN_IDENT_END) then
-				table.insert(out, block)
+			elseif blockContents:find!("^ *while"..PATTERN_IDENT_END) then
+				table.insert(out, blockContents)
 				table.insert(out, "\ndo ")
 
-				local innerEndBlockStart, innerEndBlockEnd = templateToLua(out, path, template, blockEnd+1, level+1)
-				local innerEndBlock                        = template:sub(innerEndBlockStart+2, innerEndBlockEnd-2)
+				local scopeEndBlockI1, scopeEndBlockI2, scopeEndBlockContents = templateToLua(out, path, template, pos, tcsLevel+1, blockI1)
 
-				if not innerEndBlock:find!("^ *end"..PATTERN_IDENT_END) then
+				if not scopeEndBlockContents:find!("^ *end"..PATTERN_IDENT_END) then
 					fileError(
-						path, template, innerEndBlockStart,
+						path, template, scopeEndBlockI1,
 						"Expected 'end' for 'while' loop starting at line %d.",
-						getLineNumber(template, pos)
+						getLineNumber(template, blockI1)
 					)
 				end
 
 				table.insert(out, "end ")
-				blockEnd = innerEndBlockEnd
+				pos = scopeEndBlockI2 + 1
 
 			-- repeat (...) until <condition>
-			elseif block:find!("^ *repeat"..PATTERN_IDENT_END) then
+			elseif blockContents:find!("^ *repeat"..PATTERN_IDENT_END) then
 				-- @Incomplete: Make sure there's no garbage afterwards.
 				table.insert(out, "repeat ")
 
-				local innerEndBlockStart, innerEndBlockEnd = templateToLua(out, path, template, blockEnd+1, level+1)
-				local innerEndBlock                        = template:sub(innerEndBlockStart+2, innerEndBlockEnd-2)
+				local scopeEndBlockI1, scopeEndBlockI2, scopeEndBlockContents = templateToLua(out, path, template, pos, tcsLevel+1, blockI1)
 
-				if not innerEndBlock:find!("^ *until" ..PATTERN_IDENT_END) then
+				if not scopeEndBlockContents:find!("^ *until" ..PATTERN_IDENT_END) then
 					fileError(
-						path, template, innerEndBlockStart,
+						path, template, scopeEndBlockI1,
 						"Expected 'until' for 'repeat' loop starting at line %d.",
-						getLineNumber(template, pos)
+						getLineNumber(template, blockI1)
 					)
 				end
 
-				addLineNumberIndicator(out, getLineNumber(template, innerEndBlockStart))
-				table.insert(out, innerEndBlock)
+				addLineNumberIndicator(out, getLineNumber(template, scopeEndBlockI1))
+				table.insert(out, scopeEndBlockContents)
 				table.insert(out, "\n")
-				blockEnd = innerEndBlockEnd
+				pos = scopeEndBlockI2 + 1
 
 			-- End block + elseif.
 			elseif
-				block:find!("^ *end"   ..PATTERN_IDENT_END) or
-				block:find!("^ *until" ..PATTERN_IDENT_END) or
-				block:find!("^ *else"  ..PATTERN_IDENT_END) or
-				block:find!("^ *elseif"..PATTERN_IDENT_END)
+				blockContents:find!("^ *end"   ..PATTERN_IDENT_END) or
+				blockContents:find!("^ *until" ..PATTERN_IDENT_END) or
+				blockContents:find!("^ *else"  ..PATTERN_IDENT_END) or
+				blockContents:find!("^ *elseif"..PATTERN_IDENT_END)
 			then
-				if level == 1 then
-					fileError(path, template, pos, "Unexpected templateified '%s'.", (block:match"%a+"))
+				if tcsLevel == 1 then
+					fileError(path, template, blockI1, "Unexpected templateified '%s'.", blockContents:match"%a+")
 				end
-				return blockStart, blockEnd
+				local blockI2 = pos - 1
+				return blockI1, blockI2, blockContents
 
 			-- URL short-form.
-			elseif block:find"^ */" or block:find"^ *%a+:/" then
-				table.insert(out, F("echo(url%q)", trim(block)))
+			elseif blockContents:find"^ */" or blockContents:find"^ *%a+:/" then
+				table.insert(out, F("echo(url%q)", trim(blockContents)))
 
 			-- Value expression.
-			elseif insertLuaForEchoingIfExpression(out, block) then
-				if block:find"^%s*function%s*%(" then -- We do allow echoing functions, but this specifically is probably an error made by the user.
-					fileError(path, template, blockStart, "Invalid value expression.")
+			elseif insertLuaForEchoingIfExpression(out, blockContents) then
+				if blockContents:find"^%s*function%s*%(" then -- We do allow echoing functions, but this specifically is probably an error made by the user.
+					fileError(path, template, blockI1, "Invalid value expression.")
 				end
 
 			-- Any other Lua code.
 			else
-				table.insert(out, block)
+				table.insert(out, blockContents)
 				table.insert(out, "\n")
 			end
 
@@ -583,21 +608,19 @@ do
 			if autoLock then
 				table.insert(out, "lock()")
 			end
-
-			pos = blockEnd + 1
-		end
-
-		if level > 1 then
-			fileError(path, template, posAtStartOfParsing, "Templateified control structure doesn't have an end.")
 		end
 
 		if pos <= #template then
-			local plainSegment = template:sub(pos)
-			local luaStatement = F("echoRaw(%q)", plainSegment) --:gsub("\\\n", "\\n")
-			table.insert(out, luaStatement)
+			local plainSegment  = template:sub(pos)
+			local echoStatement = F("echoRaw(%q)", plainSegment) --:gsub("\\\n", "\\n")
+			table.insert(out, echoStatement)
 		end
 
-		return #template+1, #template -- These return values should never actually be used if everything is working correctly.
+		if tcsLevel > 1 then
+			fileError(path, template, tcsPos, "Templateified control structure doesn't have an end.")
+		end
+
+		return #template+1, #template, "", false -- These return values should never actually be used if everything is working correctly.
 	end
 
 	local function _parseAndRunTemplate(page, path, template, useCache, enableHtmlEncoding)
@@ -606,7 +629,7 @@ do
 
 		if not luaCode then
 			local luaBuffer = {}
-			templateToLua(luaBuffer, path, template, 1, 1)
+			templateToLua(luaBuffer, path, template, 1, 1, 1)
 
 			luaCode = table.concat(luaBuffer)
 			if useCache then  templateMetaprogramCache[path] = luaCode  end

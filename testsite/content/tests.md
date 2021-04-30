@@ -80,6 +80,15 @@ print("This code will run!")
 }}
 -->
 
+All {{ "Spaces" }} Allowed
+
+{{ "No"  }} {{* "Spaces" *}} {{  "Allowed" }}
+{{ "No" *}} {{  "Spaces"  }} {{* "Allowed" }}
+{{ "No" *}} {{* "Spaces" *}} {{* "Allowed" }}
+
+One {{  "Space" *}} Allowed
+One {{* "Space"  }} Allowed
+
 
 
 ## Value Expressions
