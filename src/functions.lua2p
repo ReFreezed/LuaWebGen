@@ -2336,27 +2336,38 @@ do
 		return isErrorObject(err) and err or makeError(tostring(err), 2)
 	end
 
+	local function fixLineNumber(luaCode, ln)
+		local lnInTemplate = 0
+
+		for line in luaCode:gmatch"([^\n]*)\n?" do
+			ln                = ln - 1
+			local mappedLnStr = line:match"^%-%- @LINE(%d+)$"
+			lnInTemplate      = (mappedLnStr and tonumber(mappedLnStr)-1 or lnInTemplate+1)
+
+			if ln == 0 then  break  end
+		end
+
+		return lnInTemplate
+	end
+
 	local function fixLineNumbers(s)
 		s = s:gsub("([^\n]*)\n?", function(sLine)
 			if sLine == "" then  return  end
 
 			local path, lnPos, lnStr = sLine:match"(%S*%.[%w_]+):()(%d+): " -- Not robust at all, but should work in most cases, at least for internally constructed error messages.
+			local luaCode            = templateMetaprogramCache[path]
 
-			local luaCode = templateMetaprogramCache[path]
 			if not luaCode then  return  end
 
-			local ln           = tonumber(lnStr)
-			local lnInTemplate = 0
+			local lnInTemplate = fixLineNumber(luaCode, tonumber(lnStr))
+			sLine              = sLine:sub(1, lnPos-1) .. lnInTemplate .. sLine:sub(lnPos+#lnStr)
 
-			for line in luaCode:gmatch"([^\n]*)\n?" do
-				ln                = ln - 1
-				local mappedLnStr = line:match"^%-%- @LINE(%d+)$"
-				lnInTemplate      = (mappedLnStr and tonumber(mappedLnStr)-1 or lnInTemplate+1)
-
-				if ln == 0 then  break  end
+			lnPos, lnStr = sLine:match"'%a+' expected %(to close '%a+' at line ()(%d+)%) near '[^']+'"
+			if lnPos then
+				lnInTemplate = fixLineNumber(luaCode, tonumber(lnStr))
+				sLine        = sLine:sub(1, lnPos-1) .. lnInTemplate .. sLine:sub(lnPos+#lnStr)
 			end
 
-			sLine = sLine:sub(1, lnPos-1) .. lnInTemplate .. sLine:sub(lnPos+#lnStr)
 			return sLine
 		end)
 
