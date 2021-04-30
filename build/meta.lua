@@ -258,13 +258,12 @@ end
 
 -- copyFilesInDirectory( fromDirectory, toDirectory [, filenamePattern ] )
 function _G.copyFilesInDirectory(dirIn, dirOut, filenamePat)
-	makeDirectoryRecursive(dirOut)
-
 	for filename in lfs.dir(dirIn) do
 		if not (filename == "." or filename == ".." or (filenamePat and not filename:find(filenamePat))) then
 			local path = dirIn.."/"..filename
 
 			if isFile(path) then
+				makeDirectoryRecursive(dirOut)
 				copyFile(path, dirOut.."/"..filename)
 			end
 		end
@@ -273,13 +272,12 @@ end
 
 -- copyDirectoryRecursive( fromDirectory, toDirectory [, filenamesToIgnore ] )
 function _G.copyDirectoryRecursive(dirIn, dirOut, ignores)
-	makeDirectoryRecursive(dirOut)
-
 	for filename in lfs.dir(dirIn) do
 		if not (filename == "." or filename == ".." or (ignores and indexOf(ignores, filename))) then
 			local path = dirIn.."/"..filename
 
 			if isFile(path) then
+				makeDirectoryRecursive(dirOut)
 				copyFile(path, dirOut.."/"..filename)
 			elseif isDirectory(path) then
 				copyDirectoryRecursive(path, dirOut.."/"..filename, ignores)

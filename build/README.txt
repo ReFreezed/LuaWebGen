@@ -73,30 +73,30 @@ Run the program like this:
 Build Website
 ------------------------------------------------------------------------------
 
-To generate a website, run this from the command line:
+To generate a new empty website, run something like this from the command line:
 
-    cd path/to/siteroot
+    webgen new site "my-website"
+    cd "my-website"
+    webgen new page "blog/first-post.md"
     webgen build
 
-LuaWebGen expects this folder hierarchy:
+LuaWebGen uses this folder structure for a website project:
 
-    site-root/
+    my-website/             -- Root of the website project.
         content/            -- All website content, including pages, images, CSS and JavaScript files.
             index.(html|md) -- Homepage/root index page.
         data/               -- Optional data folder. Can contain Lua, TOML and XML files.
         layouts/            -- All HTML layout templates.
-            page.html       -- Default page template.
-        logs/               -- Automatically created log file folder.
-        output/             -- Automatically created output folder.
+            page.html       -- Default page layout template.
+        output/             -- Where the built website ends up.
         scripts/            -- Optional Lua script folder. Scripts must return a function.
         config.lua          -- Site-wide configurations.
 
 Everything in the 'content' folder will be processed and end up in the
 'output' folder.
 
-(Note: The 'output' folder is automatically cleaned from files and folders
-that do not exist in the 'content' folder, so it's not a good idea to save
-files in the 'output' folder.)
+(Note: The 'output' folder is automatically cleaned from files and folders that
+do not exist in the 'content' folder, so don't save files in the 'output' folder!)
 
 See the wiki for the full documentation:
 https://github.com/ReFreezed/LuaWebGen/wiki

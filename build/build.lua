@@ -246,6 +246,7 @@ if doRelease then
 		-- Add remaining files.
 		do
 			copyDirectoryRecursive("bin",      outputDir.."/bin")
+			copyDirectoryRecursive("lib",      outputDir.."/lib")
 			copyDirectoryRecursive("srcgen",   outputDir.."/srcgen")
 			copyDirectoryRecursive("testsite", outputDir.."/testsite", {".gitignore","output","logs"--[[,"Build.cmd"]]})
 			copyFile("temp/app.exe",        values.exePath)
@@ -262,6 +263,7 @@ if doRelease then
 		removeDirectoryRecursive(outputDir)
 		makeDirectoryRecursive(outputDir)
 
+		copyDirectoryRecursive("lib",      outputDir.."/lib")
 		copyDirectoryRecursive("srcgen",   outputDir.."/srcgen")
 		copyDirectoryRecursive("testsite", outputDir.."/testsite", {".gitignore","output","logs","Build.cmd"})
 		copyFile("webgen.lua",          outputDir.."/webgen.lua")
