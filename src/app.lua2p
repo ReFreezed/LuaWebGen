@@ -623,8 +623,9 @@ _G.scriptEnvironmentGlobals = {
 	end,
 
 	validateUrls = function(urls)
-		-- @Robustness: Should we restrict context here?
+		-- @Robustness: Should we restrict context here? (I think not. 2021-05-01)
 		local ok = true
+
 		for _, url in ipairs(urls) do
 			if not urlExists(url) then
 				timestampPrintError("URL is missing: %s", url)
@@ -1044,7 +1045,7 @@ local function buildWebsite()
 	_G.autoLockPages       = getV("autoLockPages",     false,                 "boolean")
 	_G.noTrailingSlash     = getV("removeTrailingSlashFromPermalinks", false, "boolean") -- @Doc? @Hack? Also, this affects page.url too now. 2021-04-28
 
-	_G.redirectionLayout   = getV("redirectionLayout", redirectionLayout,     "string") -- @Doc
+	_G.redirectionLayout   = getV("redirectionLayout", redirectionLayout,     "string")
 
 	for k in pairs(config) do
 		timestampPrintWarning("Unknown config field '%s'.", k)
@@ -1527,7 +1528,7 @@ if autobuild then
 			end
 		end
 
-		if somethingChanged then  buildWebsite()  end -- @UX: Should we pcall this?
+		if somethingChanged then  buildWebsite()  end -- @UX: Should we pcall this? Probably!
 
 		if configChanged then
 			-- Recheck everything in case config.ignore* changed.

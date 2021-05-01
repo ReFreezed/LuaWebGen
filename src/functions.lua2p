@@ -428,7 +428,7 @@ do
 				blockContents:find!("^ *for%s+"..PATTERN_IDENT.."%s*[,=]") or
 				blockContents:find!("^ *for%s+"..PATTERN_IDENT.."%s+in"..PATTERN_IDENT_END)
 			then
-				table.insert(out, blockContents) -- @Robustness: Surround value in parenthesis.
+				table.insert(out, blockContents) -- @Robustness: Surround value in parenthesis, when possible.
 				table.insert(out, " do ")
 
 				!!(TRIM_POS_AFTER_BLOCK)
@@ -684,8 +684,8 @@ do
 		if not ok then  error(errObj)  end
 
 		local templateResult = (table.concat(ctx.out)
-			:gsub("[ \t]+\n", "\n"  ) -- :Beautify
-			:gsub("\n\n\n+",  "\n\n") -- :Beautify  @UX Not sure if this line is actually good.
+			:gsub("[ \t]+\n", "\n"  ) -- :Beautify spaces at the end of lines.
+			:gsub("\n\n\n+",  "\n\n") -- :Beautify empty lines.  @Robustness: Not sure this is actually good. Might mess up <pre> tag contents.
 		)
 
 		return templateResult
@@ -774,15 +774,7 @@ end
 
 
 function _G.getLineNumber(s, pos)
-	local lineCount = 1
-	for posCurrent in s:gmatch"()\n" do -- @Speed
-		if posCurrent < pos then
-			lineCount = lineCount+1
-		else
-			break
-		end
-	end
-	return lineCount
+	return 1 + countSubStrings(s, 1, pos-1, "\n", true)
 end
 
 
@@ -1906,7 +1898,7 @@ do
 		local modTimeThumb = lfs.attributes(DIR_OUTPUT.."/"..pathThumbOutputRel, "modification")
 
 		if modTimeImage and modTimeImage == modTimeThumb and not ignoreModificationTimes then
-			-- @Note: This will bypass any file processor for JPG files. Not sure if OK. 2018-06-30
+			-- Note: This will bypass any file processor for JPG files. Not sure if OK. 2018-06-30 @Consistency
 			preserveExistingOutputFile("raw", pathThumbRel, "/"..pathThumbRel, pathImageRel)
 
 		else
@@ -2427,7 +2419,7 @@ function _G.cleanupPath(someKindOfPath)
 
 	repeat
 		local count
-		path, count = path:gsub("/[^/]+/%.%./", "/", 1) -- Not completely fool proof! @Robustness
+		path, count = path:gsub("/[^/]+/%.%./", "/", 1) -- Not completely fool proof! We may need to properly parse the path, I think. @Robustness
 	until count == 0
 
 	return path
@@ -2561,7 +2553,7 @@ do
 			socket.sleep(duration)
 		else
 			local endTime = getTimeBetter() + duration
-			repeat until getTimeBetter() >= endTime -- @Incomplete: Do something to waste time?
+			repeat until getTimeBetter() >= endTime -- Should we do some better operation to waste time?
 		end
 	end
 end
