@@ -89,6 +89,12 @@ All {{ "Spaces" }} Allowed
 One {{  "Space" *}} Allowed
 One {{* "Space"  }} Allowed
 
+{{ "No" }}
+
+{{* "Newlines" *}}
+
+{{ "Allowed" }}
+
 
 
 ## Value Expressions

@@ -13,7 +13,7 @@
 	assertArg
 	attributeWith, attributeWithAny
 	cleanupPath
-	countStrings
+	countStrings, countSubStrings
 	createDirectory, isDirectoryEmpty, removeEmptyDirectories
 	createThumbnail
 	datetimeToTime, getDatetime
@@ -68,6 +68,8 @@
 	xpcallErrorHandler, makeError, makeErrorf, isErrorObject
 
 --============================================================]]
+
+!local PRINT_METAPROGRAMS = DEV and 1==0
 
 local templateMetaprogramCache = {}
 
@@ -151,7 +153,7 @@ end
 do
 	-- isValueExpression = insertLuaForEchoingIfExpression( luaOutputBuffer, luaCode )
 	local function insertLuaForEchoingIfExpression(out, luaCode)
-		local doBlock = F("do  local v = (%s\n)  if type(v) == 'string' and v:find'^%%s*<[!%%a].*>%%s*$' then  echoRaw(v)  elseif v ~= nil then  echo(v)  end end ", luaCode)
+		local doBlock = F("do  local v = (%s)  if type(v) == 'string' and v:find'^%%s*<[!%%a].*>%%s*$' then  echoRaw(v)  elseif v ~= nil then  echo(v)  end end ", luaCode)
 		if not loadstring(doBlock) then  return false  end
 
 		table.insert(out, doBlock)
@@ -329,12 +331,6 @@ do
 		assert(false)
 	end
 
-	local function addLineNumberIndicator(out, ln)
-		table.insert(out, "\n-- @LINE")
-		table.insert(out, ln)
-		table.insert(out, "\n")
-	end
-
 	-- endBlockI1, endBlockI2, endBlockContents = templateToLua( luaOutputBuffer, path, template, position, templateifiedControlStructureLevel, templateifiedControlStructurePosition )
 	local function templateToLua(out, path, template, pos, tcsLevel, tcsPos)
 		!local PATTERN_IDENT       = "[%a_][%w_]*"
@@ -349,16 +345,20 @@ do
 			doTrim         = (doTrim == "*")
 			local echoI2   = (doTrim and blockI1Trimmed or blockI1) - 1
 
+			if doTrim and blockI1 > blockI1Trimmed then
+				table.insert(out, ("\n"):rep(countSubStrings(template, blockI1Trimmed, blockI1-1, "\n", true)))
+			end
+
 			if pos <= echoI2 then
-				local plainSegment  = template:sub(pos, echoI2)
-				local echoStatement = F("echoRaw(%q)", plainSegment) --:gsub("\\\n", "\\n")
-				table.insert(out, echoStatement)
+				local plainSegment = template:sub(pos, echoI2)
+				table.insert(out, 'echoRaw"')
+				table.insert(out, (plainSegment:gsub("[\\\"\n]", "\\%0")))
+				table.insert(out, '"')
 			end
 
 			pos = blockContentsI1
 
-			local ln = getLineNumber(template, pos)
-			addLineNumberIndicator(out, ln)
+			table.insert(out, "do end ") -- Statement divider.
 
 			local blockContentsI2 = findEndOfBlockContents(path, template, pos)
 			local blockContents   = template:sub(blockContentsI1, blockContentsI2)
@@ -371,9 +371,14 @@ do
 			doTrim, pos = template:match(!(NOSPACE"^(%*?) }} ()"), pos)
 			doTrim      = (doTrim == "*")
 
+			!local TRIM_POS_AFTER_BLOCK = `
 			if doTrim then
-				pos = template:match("^%s*()", pos)
+				local posAfterBlock;posAfterBlock, pos = template:match("^()%s*()", pos)
+				if pos > posAfterBlock then
+					table.insert(out, ("\n"):rep(countSubStrings(template, posAfterBlock, pos, "\n", true)))
+				end
 			end
+			`
 
 			----------------------------------------------------------------
 
@@ -391,7 +396,7 @@ do
 
 				reverse = (reverse == "<")
 
-				if not loadstring("_=("..expr.."\n)") then
+				if not loadstring("_=("..expr..")") then
 					fileError(path, template, blockI1, "Invalid value expression for 'fori' loop: %s", trim(expr)) -- @UX: Better error message.
 				end
 
@@ -401,8 +406,9 @@ do
 				table.insert(out, (reverse and "ipairsr" or "ipairs"))
 				table.insert(out, "(")
 				table.insert(out, expr)
-				table.insert(out, "\n) do ")
+				table.insert(out, ") do ")
 
+				!!(TRIM_POS_AFTER_BLOCK)
 				local scopeEndBlockI1, scopeEndBlockI2, scopeEndBlockContents = templateToLua(out, path, template, pos, tcsLevel+1, blockI1)
 
 				if not scopeEndBlockContents:find!("^ *end"..PATTERN_IDENT_END) then
@@ -422,9 +428,10 @@ do
 				blockContents:find!("^ *for%s+"..PATTERN_IDENT.."%s*[,=]") or
 				blockContents:find!("^ *for%s+"..PATTERN_IDENT.."%s+in"..PATTERN_IDENT_END)
 			then
-				table.insert(out, blockContents)
-				table.insert(out, "\ndo ")
+				table.insert(out, blockContents) -- @Robustness: Surround value in parenthesis.
+				table.insert(out, " do ")
 
+				!!(TRIM_POS_AFTER_BLOCK)
 				local scopeEndBlockI1, scopeEndBlockI2, scopeEndBlockContents = templateToLua(out, path, template, pos, tcsLevel+1, blockI1)
 
 				if not scopeEndBlockContents:find!("^ *end"..PATTERN_IDENT_END) then
@@ -435,7 +442,7 @@ do
 					)
 				end
 
-				table.insert(out, "\nend ")
+				table.insert(out, " end ")
 				pos = scopeEndBlockI2 + 1
 
 			-- for [<] <to> (...) end
@@ -444,31 +451,28 @@ do
 				if blockContents:find"^ *for%s*<" then
 					local expr = blockContents:gsub("for%s*<", "", 1)
 
-					if not loadstring("_=("..expr.."\n)") then
+					if not loadstring("_=("..expr..")") then
 						fileError(path, template, blockI1, "Invalid value expression for simplified 'for' loop: %s", trim(expr)) -- @UX: Better error message.
 					end
 
 					table.insert(out, "for i = (")
 					table.insert(out, expr)
-					table.insert(out, "\n")
-					addLineNumberIndicator(out, ln+countStrings(expr, "\n", true))
 					table.insert(out, "), 1, -1 do ")
 
 				-- for <to>
 				else
 					local expr = blockContents:gsub("for", "", 1)
 
-					if not loadstring("_=("..expr.."\n)") then
+					if not loadstring("_=("..expr..")") then
 						fileError(path, template, blockI1, "Invalid value expression for simplified 'for' loop: %s", trim(expr)) -- @UX: Better error message.
 					end
 
 					table.insert(out, "for i = 1, (")
 					table.insert(out, expr)
-					table.insert(out, "\n")
-					addLineNumberIndicator(out, ln+countStrings(expr, "\n", true))
 					table.insert(out, ") do ")
 				end
 
+				!!(TRIM_POS_AFTER_BLOCK)
 				local scopeEndBlockI1, scopeEndBlockI2, scopeEndBlockContents = templateToLua(out, path, template, pos, tcsLevel+1, blockI1)
 
 				if not scopeEndBlockContents:find!("^ *end"..PATTERN_IDENT_END) then
@@ -479,7 +483,7 @@ do
 					)
 				end
 
-				table.insert(out, "\nend ")
+				table.insert(out, " end ")
 				pos = scopeEndBlockI2 + 1
 
 			-- do (...) end
@@ -487,6 +491,7 @@ do
 				-- @Polish: Make sure there's no garbage at the end of blockContents.
 				table.insert(out, "do ")
 
+				!!(TRIM_POS_AFTER_BLOCK)
 				local scopeEndBlockI1, scopeEndBlockI2, scopeEndBlockContents = templateToLua(out, path, template, pos, tcsLevel+1, blockI1)
 
 				if not scopeEndBlockContents:find!("^ *end"..PATTERN_IDENT_END) then
@@ -497,33 +502,28 @@ do
 					)
 				end
 
-				table.insert(out, "\nend ")
+				table.insert(out, " end ")
 				pos = scopeEndBlockI2 + 1
 
 			-- if <condition> (...) end
 			elseif blockContents:find!("^ *if"..PATTERN_IDENT_END) then
-				table.insert(out, blockContents)
-				table.insert(out, "\nthen ")
+				table.insert(out, blockContents) -- @Robustness: Surround value in parenthesis.
+				table.insert(out, " then ")
 
+				!!(TRIM_POS_AFTER_BLOCK)
 				local scopeEndBlockI1, scopeEndBlockI2, scopeEndBlockContents = templateToLua(out, path, template, pos, tcsLevel+1, blockI1)
-
-				addLineNumberIndicator(out, getLineNumber(template, scopeEndBlockI1))
 
 				while scopeEndBlockContents:find!("^ *elseif"..PATTERN_IDENT_END) do
 					table.insert(out, scopeEndBlockContents)
-					table.insert(out, "\nthen ")
+					table.insert(out, " then ")
 
 					scopeEndBlockI1, scopeEndBlockI2, scopeEndBlockContents = templateToLua(out, path, template, scopeEndBlockI2+1, tcsLevel+1, scopeEndBlockI1)
-
-					addLineNumberIndicator(out, getLineNumber(template, scopeEndBlockI1))
 				end
 
 				if scopeEndBlockContents:find!("^ *else"..PATTERN_IDENT_END) then
 					table.insert(out, "else ")
 
 					scopeEndBlockI1, scopeEndBlockI2, scopeEndBlockContents = templateToLua(out, path, template, scopeEndBlockI2+1, tcsLevel+1, scopeEndBlockI1)
-
-					addLineNumberIndicator(out, getLineNumber(template, scopeEndBlockI1))
 				end
 
 				if not scopeEndBlockContents:find!("^ *end"..PATTERN_IDENT_END) then
@@ -539,9 +539,10 @@ do
 
 			-- while <condition> (...) end
 			elseif blockContents:find!("^ *while"..PATTERN_IDENT_END) then
-				table.insert(out, blockContents)
-				table.insert(out, "\ndo ")
+				table.insert(out, blockContents) -- @Robustness: Surround value in parenthesis.
+				table.insert(out, " do ")
 
+				!!(TRIM_POS_AFTER_BLOCK)
 				local scopeEndBlockI1, scopeEndBlockI2, scopeEndBlockContents = templateToLua(out, path, template, pos, tcsLevel+1, blockI1)
 
 				if not scopeEndBlockContents:find!("^ *end"..PATTERN_IDENT_END) then
@@ -560,6 +561,7 @@ do
 				-- @Polish: Make sure there's no garbage at the end of blockContents.
 				table.insert(out, "repeat ")
 
+				!!(TRIM_POS_AFTER_BLOCK)
 				local scopeEndBlockI1, scopeEndBlockI2, scopeEndBlockContents = templateToLua(out, path, template, pos, tcsLevel+1, blockI1)
 
 				if not scopeEndBlockContents:find!("^ *until" ..PATTERN_IDENT_END) then
@@ -570,9 +572,8 @@ do
 					)
 				end
 
-				addLineNumberIndicator(out, getLineNumber(template, scopeEndBlockI1))
 				table.insert(out, scopeEndBlockContents)
-				table.insert(out, "\n")
+				table.insert(out, " ")
 				pos = scopeEndBlockI2 + 1
 
 			-- End block + elseif.
@@ -586,26 +587,32 @@ do
 				if tcsLevel == 1 then
 					fileError(path, template, blockI1, "Unexpected templateified '%s'.", blockContents:match"%a+")
 				end
+				!!(TRIM_POS_AFTER_BLOCK)
 				local blockI2 = pos - 1
 				return blockI1, blockI2, blockContents
 
 			-- URL short-form.
 			elseif blockContents:find"^ */" or blockContents:find"^ *%a+:/" then
 				table.insert(out, F("echo(url%q)", trim(blockContents)))
+				!!(TRIM_POS_AFTER_BLOCK)
 
 			-- Value expression.
 			elseif insertLuaForEchoingIfExpression(out, blockContents) then
 				if blockContents:find"^%s*function%s*%(" then -- We do allow echoing functions, but this specifically is probably an error made by the user.
 					fileError(path, template, blockI1, "Invalid value expression.")
 				end
+				!!(TRIM_POS_AFTER_BLOCK)
 
 			-- Any other Lua code.
 			else
 				table.insert(out, blockContents)
-				table.insert(out, "\n")
+				table.insert(out, " ")
+				!!(TRIM_POS_AFTER_BLOCK)
 			end
 
 			----------------------------------------------------------------
+
+			table.insert(out, "do end ") -- Statement divider.
 
 			if autoLock then
 				table.insert(out, "lock()")
@@ -613,9 +620,10 @@ do
 		end
 
 		if pos <= #template then
-			local plainSegment  = template:sub(pos)
-			local echoStatement = F("echoRaw(%q)", plainSegment) --:gsub("\\\n", "\\n")
-			table.insert(out, echoStatement)
+			local plainSegment = template:sub(pos)
+			table.insert(out, 'echoRaw"')
+			table.insert(out, (plainSegment:gsub("[\\\"\n]", "\\%0")))
+			table.insert(out, '"')
 		end
 
 		if tcsLevel > 1 then
@@ -636,10 +644,12 @@ do
 			luaCode = table.concat(luaBuffer)
 			if useCache then  templateMetaprogramCache[path] = luaCode  end
 
-			!if DEV and 1==0 then
-				print("-- LUA "..path.." --")
-				print(luaCode)
-				print("-- /LUA --")
+			!if PRINT_METAPROGRAMS then
+				-- if path:find"test" then
+					print("-- LUA "..path.." --")
+					print(luaCode)
+					print("-- /LUA --")
+				-- end
 			!end
 		end
 
@@ -2336,44 +2346,6 @@ do
 		return isErrorObject(err) and err or makeError(tostring(err), 2)
 	end
 
-	local function fixLineNumber(luaCode, ln)
-		local lnInTemplate = 0
-
-		for line in luaCode:gmatch"([^\n]*)\n?" do
-			ln                = ln - 1
-			local mappedLnStr = line:match"^%-%- @LINE(%d+)$"
-			lnInTemplate      = (mappedLnStr and tonumber(mappedLnStr)-1 or lnInTemplate+1)
-
-			if ln == 0 then  break  end
-		end
-
-		return lnInTemplate
-	end
-
-	local function fixLineNumbers(s)
-		s = s:gsub("([^\n]*)\n?", function(sLine)
-			if sLine == "" then  return  end
-
-			local path, lnPos, lnStr = sLine:match"(%S*%.[%w_]+):()(%d+): " -- Not robust at all, but should work in most cases, at least for internally constructed error messages.
-			local luaCode            = templateMetaprogramCache[path]
-
-			if not luaCode then  return  end
-
-			local lnInTemplate = fixLineNumber(luaCode, tonumber(lnStr))
-			sLine              = sLine:sub(1, lnPos-1) .. lnInTemplate .. sLine:sub(lnPos+#lnStr)
-
-			lnPos, lnStr = sLine:match"'%a+' expected %(to close '%a+' at line ()(%d+)%) near '[^']+'"
-			if lnPos then
-				lnInTemplate = fixLineNumber(luaCode, tonumber(lnStr))
-				sLine        = sLine:sub(1, lnPos-1) .. lnInTemplate .. sLine:sub(lnPos+#lnStr)
-			end
-
-			return sLine
-		end)
-
-		return s
-	end
-
 	function _G.makeError(message, level)
 		assertArg(1, message, "string")
 		assertArg(2, level,   "number","nil")
@@ -2412,7 +2384,7 @@ do
 					b(" in <%s:%d>", getFilename(sourceName), info.linedefined)
 				end
 
-				table.insert(stack, fixLineNumbers(b()))
+				table.insert(stack, b())
 			end
 
 			while stack[#stack] == "[C]: ?" do
@@ -2420,7 +2392,7 @@ do
 			end
 		end
 
-		message = fixLineNumbers(message:gsub("^.-:%d+: ", cleanupPath))
+		message = message:gsub("^.-:%d+: ", cleanupPath)
 
 		local errObj = setmetatable({message=message, stack=stack}, errMt)
 		return errObj
@@ -2600,7 +2572,22 @@ function _G.countStrings(s, needle, plain)
 	while true do
 		local _, i2 = s:find(needle, pos, plain)
 		if not i2 then  return count  end
-		pos = i2 + 1
+
+		count = count + 1
+		pos   = i2    + 1
+	end
+end
+
+-- count = countSubStrings( string, startPosition, endPosition, needle [, plain=false ] )
+function _G.countSubStrings(s, pos, posEnd, needle, plain)
+	local count = 0
+
+	while true do
+		local _, i2 = s:find(needle, pos, plain)
+		if not i2 or i2 > posEnd then  return count  end
+
+		count = count + 1
+		pos   = i2    + 1
 	end
 end
 
