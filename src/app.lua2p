@@ -190,9 +190,9 @@ if command == "new" then
 
 elseif command == "build" then
 	local SHORT_TO_LONG_FORM = {
-		["-f"] = "--force",
 		["-a"] = "--autobuild",
 		["-d"] = "--drafts",
+		["-f"] = "--force",
 		["-v"] = "--verbose",
 	}
 
@@ -213,6 +213,9 @@ elseif command == "build" then
 
 		elseif arg == "--verbose" then
 			_G.verbosePrint = true
+
+		elseif arg == "--meta" then
+			_G.outputMetaprograms = true
 
 		elseif arg == "--nogc" then
 			_G.enableGc = false

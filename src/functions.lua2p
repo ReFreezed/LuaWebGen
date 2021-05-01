@@ -351,9 +351,9 @@ do
 
 			if pos <= echoI2 then
 				local plainSegment = template:sub(pos, echoI2)
-				table.insert(out, 'echoRaw__"')
-				table.insert(out, (plainSegment:gsub("[\\\"\n]", "\\%0")))
-				table.insert(out, '"')
+				table.insert(out, "echoRaw__'") -- Note: Templates will probably have more double quotes than single, that's why we use single quotes here - for nicer metaprogram output.
+				table.insert(out, (plainSegment:gsub("[\\'\n]", "\\%0")))
+				table.insert(out, "'")
 			end
 
 			pos = blockContentsI1
@@ -635,7 +635,6 @@ do
 	end
 
 	local function _parseAndRunTemplate(page, path, template, useCache, enableHtmlEncoding)
-		useCache      = true -- We need all these for correcting file numbers in error messages! @Cleanup
 		local luaCode = useCache and templateMetaprogramCache[path] or nil
 
 		if not luaCode then
@@ -644,6 +643,17 @@ do
 
 			luaCode = table.concat(luaBuffer)
 			if useCache then  templateMetaprogramCache[path] = luaCode  end
+
+			if outputMeta or 1 then
+				local metaPath = "temp/meta/" .. path:gsub("/", "__") .. ".lua"
+				timestampPrintVerbose("Writing: %s", metaPath)
+
+				createDirectory("temp/meta")
+
+				local file     = assert(io.open(metaPath, "wb"))
+				file:write(luaCode)
+				file:close()
+			end
 
 			!if PRINT_METAPROGRAMS then
 				-- if path:find"test" then

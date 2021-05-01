@@ -61,6 +61,7 @@ _G.autobuild               = false
 _G.enableGc                = true
 _G.ignoreModificationTimes = false
 _G.includeDrafts           = false
+_G.outputMetaprograms      = false
 _G.verbosePrint            = false
 
 _G.scriptEnvironment        = nil
