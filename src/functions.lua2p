@@ -153,7 +153,7 @@ end
 do
 	-- isValueExpression = insertLuaForEchoingIfExpression( luaOutputBuffer, luaCode )
 	local function insertLuaForEchoingIfExpression(out, luaCode)
-		local doBlock = F("do  local v = (%s)  if type__(v) == 'string' and v:find'^%%s*<[!%%a].*>%%s*$' then  echoRaw__(v)  elseif v ~= nil then  echo__(v)  end end ", luaCode)
+		local doBlock = F("do  local v = (%s)  if type__(v) == 'string' and v:find'^%%s*<[!%%a/].*>%%s*$' then  echoRaw__(v)  elseif v ~= nil then  echo__(v)  end end ", luaCode)
 		if not loadstring(doBlock) then  return false  end
 
 		table.insert(out, doBlock)
