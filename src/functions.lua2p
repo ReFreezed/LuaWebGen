@@ -644,7 +644,7 @@ do
 			luaCode = table.concat(luaBuffer)
 			if useCache then  templateMetaprogramCache[path] = luaCode  end
 
-			if outputMeta or 1 then
+			if outputMetaprograms then
 				local metaPath = "temp/meta/" .. path:gsub("/", "__") .. ".lua"
 				timestampPrintVerbose("Writing: %s", metaPath)
 
