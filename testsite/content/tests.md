@@ -95,6 +95,10 @@ One {{* "Space"  }} Allowed
 
 {{ "Allowed" }}
 
+{{fori {5,99,- -8}}}
+- {{it}}
+{{end}}
+
 
 
 ## Value Expressions

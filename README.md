@@ -143,7 +143,7 @@ webgen new page "blog/first-post.md"
 webgen build
 ```
 
-LuaWebGen uses this folder structure for a website project:
+LuaWebGen uses this [folder structure](https://github.com/ReFreezed/LuaWebGen/wiki/Home#folder-structure) for a website project:
 
 ```
 my-website/             -- Root of the website project.

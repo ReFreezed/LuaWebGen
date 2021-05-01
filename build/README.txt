@@ -128,7 +128,7 @@ A blog post, my-first-post.md:
 
     ![Cute cat]({{ getCatImageUrl() }})
 
-Page template, page.html:
+Page layout template, page.html:
 
     {{include"header"}}
     {{include"navigation"}}

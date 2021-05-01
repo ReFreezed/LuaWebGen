@@ -1,6 +1,33 @@
 Changelog
 LuaWebGen
 
+v1.0 (2021-05-01)
+Embedded code:
+- Whitespace around code blocks can be trimmed away with '{{*' and '*}}'.
+- Code block parsing is a lot more robust (e.g. '{{fori {8,4,11}}}' now works).
+- Code blocks like '{{--foo}}' are no longer valid as '}}' is now part of the Lua comment.
+- Added '{{for < n}}' and 'fori < arr' for iterating backwards.
+- Removed '{{for -n}}' (which used to iterate backwards).
+- Fixed '{{some-url-here}}' not working with absolute URLs.
+API:
+- Added config.redirectionLayout for customizing redirection pages.
+- Added config.ignorePaths .
+- Added getOutputtedFiles().
+- generateFromTemplate() can now take page parameters as an argument. (This reduces the need for formatTemplate().)
+- Pages can use no layout by setting page.layout to an empty string.
+- The check for whether '{{expression}}' results in HTML or text is now stricter (i.e. resulting in text more often).
+- config.ignoreFiles and config.ignoreFolders no longer match things in the 'data' folder.
+- Removed 'isAny(valueToCompare,arrayOfValues)' variant. Calls need to be changed into 'isAny(valueToCompare,unpack(arrayOfValues))'.
+- Redirection functionality is more robust.
+- Updated generated HTML for redirection pages.
+- Renamed _WEBGEN_VERSION to WEBGEN_VERSION.
+- Fixed simplified 'for' loop only accepting numerals. It now accepts any value expression.
+- Fixed accessing valid globals in the main chunk in config.lua resulting in context error.
+- Fixed page properties being writable in layouts.
+- Fixed line numbers being wrong in some error messages.
+- Fixed possibility for internally generated Lua code to break because of function name shadowing.
+- Smaller bug fixes.
+
 v0.20 (2021-04-22)
 - First "proper" release.
 - Small fixes.

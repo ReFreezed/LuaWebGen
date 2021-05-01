@@ -248,7 +248,7 @@ if doRelease then
 			copyDirectoryRecursive("bin",      outputDir.."/bin")
 			copyDirectoryRecursive("lib",      outputDir.."/lib")
 			copyDirectoryRecursive("srcgen",   outputDir.."/srcgen")
-			copyDirectoryRecursive("testsite", outputDir.."/testsite", {".gitignore","output","logs"--[[,"Build.cmd"]]})
+			copyDirectoryRecursive("testsite", outputDir.."/testsite", {".gitignore","logs","output","temp"--[[,"Build.cmd"]]})
 			copyFile("temp/app.exe",        values.exePath)
 			copyFile("webgen.lua",          outputDir.."/webgen.lua")
 			copyFile("build/Changelog.txt", outputDir.."/_Changelog.txt")
@@ -265,7 +265,7 @@ if doRelease then
 
 		copyDirectoryRecursive("lib",      outputDir.."/lib")
 		copyDirectoryRecursive("srcgen",   outputDir.."/srcgen")
-		copyDirectoryRecursive("testsite", outputDir.."/testsite", {".gitignore","output","logs","Build.cmd"})
+		copyDirectoryRecursive("testsite", outputDir.."/testsite", {".gitignore","logs","output","temp","Build.cmd"})
 		copyFile("webgen.lua",          outputDir.."/webgen.lua")
 		copyFile("build/Changelog.txt", outputDir.."/_Changelog.txt")
 		copyFile("build/README.txt",    outputDir.."/_README.txt")

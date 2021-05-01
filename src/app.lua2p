@@ -278,7 +278,7 @@ end
 --==============================================================
 
 _G.scriptEnvironmentGlobals = {
-	_WEBGEN_VERSION      = WEBGEN_VERSION, -- @Depricated
+	_WEBGEN_VERSION      = WEBGEN_VERSION, -- @Deprecated
 	DATA_FILE_EXTENSIONS = DATA_FILE_EXTENSIONS,
 	IMAGE_EXTENSIONS     = IMAGE_EXTENSIONS,
 	WEBGEN_VERSION       = WEBGEN_VERSION,
