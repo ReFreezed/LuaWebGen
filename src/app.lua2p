@@ -794,7 +794,7 @@ _G.scriptEnvironmentGlobals = {
 	lock = function()
 		assertContext("template", "lock")
 
-		local page = getContext().page
+		local page     = getContext().page
 		page._isLocked = true -- Note: It's OK for this function to be called multiple times.
 		page._readonly = true
 	end,
@@ -868,6 +868,15 @@ _G.scriptEnvironmentGlobals = {
 
 	----------------------------------------------------------------
 }
+
+-- These functions are used by metaprograms.
+scriptEnvironmentGlobals.echo__        = scriptEnvironmentGlobals.echo
+scriptEnvironmentGlobals.echoRaw__     = scriptEnvironmentGlobals.echoRaw
+scriptEnvironmentGlobals.fori__        = ipairs
+scriptEnvironmentGlobals.foriReverse__ = ipairsr
+scriptEnvironmentGlobals.lock__        = scriptEnvironmentGlobals.lock
+scriptEnvironmentGlobals.type__        = type
+scriptEnvironmentGlobals.url__         = toUrl
 
 
 

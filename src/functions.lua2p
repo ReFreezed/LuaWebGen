@@ -153,7 +153,7 @@ end
 do
 	-- isValueExpression = insertLuaForEchoingIfExpression( luaOutputBuffer, luaCode )
 	local function insertLuaForEchoingIfExpression(out, luaCode)
-		local doBlock = F("do  local v = (%s)  if type(v) == 'string' and v:find'^%%s*<[!%%a].*>%%s*$' then  echoRaw(v)  elseif v ~= nil then  echo(v)  end end ", luaCode)
+		local doBlock = F("do  local v = (%s)  if type__(v) == 'string' and v:find'^%%s*<[!%%a].*>%%s*$' then  echoRaw__(v)  elseif v ~= nil then  echo__(v)  end end ", luaCode)
 		if not loadstring(doBlock) then  return false  end
 
 		table.insert(out, doBlock)
@@ -346,12 +346,12 @@ do
 			local echoI2   = (doTrim and blockI1Trimmed or blockI1) - 1
 
 			if doTrim and blockI1 > blockI1Trimmed then
-				table.insert(out, ("\n"):rep(countSubStrings(template, blockI1Trimmed, blockI1-1, "\n", true)))
+				table.insert(out, ("\n"):rep(countSubStrings(template, blockI1Trimmed, blockI1-1, "\n", true))) -- :TrimBlocks
 			end
 
 			if pos <= echoI2 then
 				local plainSegment = template:sub(pos, echoI2)
-				table.insert(out, 'echoRaw"')
+				table.insert(out, 'echoRaw__"')
 				table.insert(out, (plainSegment:gsub("[\\\"\n]", "\\%0")))
 				table.insert(out, '"')
 			end
@@ -375,7 +375,7 @@ do
 			if doTrim then
 				local posAfterBlock;posAfterBlock, pos = template:match("^()%s*()", pos)
 				if pos > posAfterBlock then
-					table.insert(out, ("\n"):rep(countSubStrings(template, posAfterBlock, pos, "\n", true)))
+					table.insert(out, ("\n"):rep(countSubStrings(template, posAfterBlock, pos, "\n", true))) -- :TrimBlocks
 				end
 			end
 			`
@@ -403,7 +403,7 @@ do
 				table.insert(out, "for i, ")
 				table.insert(out, (ident or "it"))
 				table.insert(out, " in ")
-				table.insert(out, (reverse and "ipairsr" or "ipairs"))
+				table.insert(out, (reverse and "foriReverse__" or "fori__"))
 				table.insert(out, "(")
 				table.insert(out, expr)
 				table.insert(out, ") do ")
@@ -593,7 +593,8 @@ do
 
 			-- URL short-form.
 			elseif blockContents:find"^ */" or blockContents:find"^ *%a+:/" then
-				table.insert(out, F("echo(url%q)", trim(blockContents)))
+				table.insert(out, F("echo__(url__%q)", trim(blockContents)))
+				-- @Incomplete: Fix line numbers if blockContents has newlines (which is probably rare).
 				!!(TRIM_POS_AFTER_BLOCK)
 
 			-- Value expression.
@@ -615,13 +616,13 @@ do
 			table.insert(out, "do end ") -- Statement divider.
 
 			if autoLock then
-				table.insert(out, "lock()")
+				table.insert(out, "lock__()")
 			end
 		end
 
 		if pos <= #template then
 			local plainSegment = template:sub(pos)
-			table.insert(out, 'echoRaw"')
+			table.insert(out, 'echoRaw__"')
 			table.insert(out, (plainSegment:gsub("[\\\"\n]", "\\%0")))
 			table.insert(out, '"')
 		end
@@ -1206,14 +1207,12 @@ end
 
 do
 	local function formatValue(t, out, isDeep--[[, errLevel]])
+		-- Note: We are not serializing - just pretty-printing!
 		if isDeep and type(t) == "string" then
 			table.insert(out, '"')
 			table.insert(out, t)
 			table.insert(out, '"')
 			return
-
-		-- elseif type(t) == "function" or type(t) == "thread" or type(t) == "userdata" then
-		-- 	errorf(errLevel, "Cannot serialize values of type '%s'.", type(t))
 
 		elseif type(t) ~= "table" then
 			table.insert(out, tostring(t))
@@ -2427,6 +2426,7 @@ end
 
 
 function _G.ipairsr(t)
+	assertArg(1, t, "table")
 	return iprev, t, #t+1
 end
 
