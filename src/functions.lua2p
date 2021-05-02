@@ -24,7 +24,7 @@
 	generatorMeta
 	getCwd
 	getDirectory, getFilename, getExtension, getBasename
-	getFileContents
+	getFileContentsBinary, getFileContentsText
 	getKeys
 	getLayoutTemplate
 	getLineNumber
@@ -48,7 +48,7 @@
 	pairsSorted
 	parseAndRunTemplate
 	pathToSitePath, sitePathToPath
-	printNoLog, printfNoLog, log, print, printOnce, printf, printfOnce, timestampPrint, timestampPrintOnce, timestampPrintVerbose, timestampPrintError, timestampPrintWarning, timestampPrintWarningOnce, printobj
+	printNoLog, printfNoLog, log, print, printOnce, printf, printfOnce, timestampPrint, timestampPrintOnce, timestampPrintVerbose, timestampPrintError, timestampPrintWarning, timestampPrintWarningOnce, printObject
 	pushContext, popContext, assertContext, getContext
 	removeItem
 	rewriteOutputPath
@@ -139,12 +139,27 @@ end
 
 
 
-function _G.getFileContents(path)
+function _G.getFileContentsBinary(path)
 	local file, err = io.open(path, "rb")
 	if not file then  return nil, err  end
 
-	local contents = file:read("*all")
+	local contents = file:read"*a"
 	file:close()
+
+	return contents
+end
+
+function _G.getFileContentsText(path)
+	local file, err = io.open(path, "r")
+	if not file then  return nil, err  end
+
+	local contents = file:read"*a"
+	file:close()
+
+	if contents:find("\r", 1, true) then
+		contents = contents:gsub("\n?\r\n?", "\n")
+	end
+
 	return contents
 end
 
@@ -153,6 +168,9 @@ end
 do
 	-- isValueExpression = insertLuaForEchoingIfExpression( luaOutputBuffer, luaCode )
 	local function insertLuaForEchoingIfExpression(out, luaCode)
+		-- Note: echo() and echoRaw() do the same thing in e.g. CSS files, so we
+		-- can output the same code here no matter what file is being processed.
+		-- It is a thing we can optimize though. @Speed
 		local doBlock = F("do  local v = (%s)  if type__(v) == 'string' and v:find'^%%s*<[!%%a/].*>%%s*$' then  echoRaw__(v)  elseif v ~= nil then  echo__(v)  end end ", luaCode)
 		if not loadstring(doBlock) then  return false  end
 
@@ -351,7 +369,7 @@ do
 
 			if pos <= echoI2 then
 				local plainSegment = template:sub(pos, echoI2)
-				table.insert(out, "echoRaw__'") -- Note: Templates will probably have more double quotes than single, that's why we use single quotes here - for nicer metaprogram output.
+				table.insert(out, "echoRaw__'") -- Note: Templates will probably have more double quotes than single, that's why we use single quotes here - for nicer metaprogram output. :TemplateOutputQuotes
 				table.insert(out, (plainSegment:gsub("[\\'\n]", "\\%0")))
 				table.insert(out, "'")
 			end
@@ -622,9 +640,9 @@ do
 
 		if pos <= #template then
 			local plainSegment = template:sub(pos)
-			table.insert(out, 'echoRaw__"')
-			table.insert(out, (plainSegment:gsub("[\\\"\n]", "\\%0")))
-			table.insert(out, '"')
+			table.insert(out, "echoRaw__'") -- :TemplateOutputQuotes
+			table.insert(out, (plainSegment:gsub("[\\'\n]", "\\%0")))
+			table.insert(out, "'")
 		end
 
 		if tcsLevel > 1 then
@@ -1040,65 +1058,71 @@ function _G.timestampPrintWarningOnce(s, ...)
 	log(s)
 end
 
--- printobj( ... )
+-- printObject( value1, ... )
 -- Note: Does not write to log.
 do
 	local stdoutWrite = io.write
 
 	local function toStringBetter(v)
-		return (tostring(v):gsub("^table: ", ""))
+		local s = tostring(v)
+		return s:find"^table: "
+		       and s:gsub("^table: ", ""):gsub("^0x", ""):gsub("^%w+", string.upper)
+		       or  s
 	end
 
 	local function compareKeys(a, b)
 		return compareNatural(toStringBetter(a), toStringBetter(b))
 	end
 
-	local function _printobj(v, tables)
+	local function _printObject(v, printedTables, firstLevel)
 		local vType = type(v)
 
-		if vType == "table" then
-			if tables[v] then
-				stdoutWrite(toStringBetter(v), " ")
-				return
-			end
+		if printedTables[v] then
+			stdoutWrite(toStringBetter(v))
 
-			stdoutWrite(toStringBetter(v), "{ ")
-			tables[v] = true
+		elseif vType == "table" then
+			printedTables[v] = true
+			stdoutWrite(toStringBetter(v), (firstLevel and "{\n" or "{ "))
 
 			local indices = {}
 			for i = 1, #v do  indices[i] = true  end
 
 			for _, k in ipairs(sort(getKeys(v), compareKeys)) do
 				if not indices[k] then
+					if firstLevel then  stdoutWrite("\t")  end
 					stdoutWrite(toStringBetter(k), "=")
-					_printobj(v[k], tables)
+					_printObject(v[k], printedTables, false)
+					if firstLevel then  stdoutWrite("\n")  end
 				end
 			end
 
 			for i = 1, #v do
+				if firstLevel then  stdoutWrite("\t")  end
 				stdoutWrite(i, "=")
-				_printobj(v[i], tables)
+				_printObject(v[i], printedTables, false)
+				if firstLevel then  stdoutWrite("\n")  end
 			end
 
-			stdoutWrite("} ")
+			stdoutWrite("}")
 
 		elseif vType == "number" then
-			stdoutWrite(F("%g ", v))
+			stdoutWrite(tostring(v))
 
 		elseif vType == "string" then
-			stdoutWrite('"', v:gsub("%z", "\\0"):gsub("\n", "\\n"), '" ')
+			stdoutWrite('"', v:gsub("%z", "\\0"):gsub("\n", "\\n"), '"')
 
 		else
-			stdoutWrite(toStringBetter(v), " ")
+			stdoutWrite(toStringBetter(v))
 		end
 
+		if not firstLevel then  stdoutWrite(" ")  end
 	end
 
-	function _G.printobj(...)
+	function _G.printObject(...)
 		for i = 1, select("#", ...) do
 			if i > 1 then  stdoutWrite("\t")  end
 
-			_printobj(select(i, ...), {})
+			_printObject(select(i, ...), {}, true)
 		end
 		stdoutWrite("\n")
 	end
@@ -1321,12 +1345,12 @@ function _G.newDataFolderReader(path, checkDirExistance)
 
 			elseif isFile(F("%s/%s.toml", path, k)) then
 				local filePath = F("%s/%s.toml", path, k)
-				local contents = assert(getFileContents(filePath))
+				local contents = assert(getFileContentsText(filePath))
 				dataObj        = assert(tomlLib.parse(contents))
 
 			elseif isFile(F("%s/%s.xml", path, k)) then
 				local filePath = F("%s/%s.xml", path, k)
-				local contents = assert(getFileContents(filePath))
+				local contents = assert(getFileContentsText(filePath))
 				dataObj        = assert(xmlLib.parse(contents, false))
 
 			elseif isDirectory(F("%s/%s", path, k)) then
@@ -1533,7 +1557,7 @@ function _G.generateFromTemplateFile(page)
 	if page._isGenerating and page._isLocked then  return  end -- Allowed recursion.
 
 	local path     = DIR_CONTENT.."/"..page._path
-	local template = assert(getFileContents(path))
+	local template = assert(getFileContentsText(path))
 	local modTime  = lfs.attributes(path, "modification")
 
 	if modTime then
@@ -1721,7 +1745,7 @@ function _G.getLayoutTemplate(page)
 	local template = layoutTemplates[path]
 	if template then  return template, path  end
 
-	local template, err = getFileContents(path)
+	local template, err = getFileContentsText(path)
 	if not template then
 		errorf("%s: Could not load layout '%s'. (%s)", page._path, page.layout.v, err)
 	end
@@ -2257,6 +2281,7 @@ end
 
 
 -- removeItem( array, value1, ... )
+-- @Incomplete: Change into this: anythingGotRemoved = removeItem( array, value1, ... )
 function _G.removeItem(t, ...)
 	for i = 1, select("#", ...) do
 		local iToRemove = indexOf(t, select(i, ...))

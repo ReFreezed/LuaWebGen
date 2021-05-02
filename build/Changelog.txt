@@ -6,7 +6,7 @@ Embedded code:
 - Whitespace around code blocks can be trimmed away with '{{*' and '*}}'.
 - Code block parsing is a lot more robust (e.g. '{{fori {8,4,11}}}' now works).
 - Code blocks like '{{--foo}}' are no longer valid as '}}' is now part of the Lua comment.
-- Added '{{for < n}}' and 'fori < arr' for iterating backwards.
+- Added '{{for < n}}' and '{{fori < arr}}' for iterating backwards.
 - Removed '{{for -n}}' (which used to iterate backwards).
 - Fixed '{{some-url-here}}' not working with absolute URLs.
 API:

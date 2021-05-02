@@ -373,6 +373,7 @@ _G.scriptEnvironmentGlobals = {
 	prettyUrl        = toPrettyUrl,
 	printf           = printf,
 	printfOnce       = printfOnce,
+	printObject      = printObject, -- @Doc
 	printOnce        = printOnce,
 	removeItem       = removeItem,
 	round            = round,
@@ -670,10 +671,10 @@ _G.scriptEnvironmentGlobals = {
 		s = tostringForTemplates(s)
 
 		local ctx = getContext"template"
-
 		if ctx.enableHtmlEncoding then
 			s = encodeHtmlEntities(s)
 		end
+
 		table.insert(ctx.out, s)
 	end,
 
@@ -684,11 +685,13 @@ _G.scriptEnvironmentGlobals = {
 
 	echof = function(s, ...)
 		assertContext("template", "echof")
+		assertArg(1, s, "string")
 		scriptEnvironmentGlobals.echo(s:format(...))
 	end,
 
 	echofRaw = function(s, ...)
 		assertContext("template", "echofRaw")
+		assertArg(1, s, "string")
 		scriptEnvironmentGlobals.echoRaw(s:format(...))
 	end,
 
@@ -699,7 +702,7 @@ _G.scriptEnvironmentGlobals = {
 		end
 
 		local path = F("%s/%s.html", DIR_LAYOUTS, htmlFileBasename)
-		local template, err = getFileContents(path)
+		local template, err = getFileContentsText(path)
 		if not template then
 			errorf(2, "Could not read file '%s': %s", path, err)
 		end
@@ -1152,7 +1155,7 @@ local function buildWebsite()
 			if modTime and modTime == oldModTime then
 				preserveExistingOutputFile("raw", pathRel, "/"..pathRel, pathRel)
 			else
-				local contents = assert(getFileContents(path))
+				local contents = assert(getFileContentsBinary(path))
 				writeOutputFile("raw", pathRel, "/"..pathRel, contents, modTime, pathRel)
 			end
 		end
@@ -1259,7 +1262,7 @@ local function buildWebsite()
 	local handlingSpecialRedirections = false
 
 	if handleHtaccess then
-		local contents    = getFileContents(DIR_CONTENT.."/.htaccess")
+		local contents    = getFileContentsText(DIR_CONTENT.."/.htaccess")
 		local fileExisted = (contents ~= nil)
 		contents          = contents or ""
 
