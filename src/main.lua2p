@@ -29,6 +29,12 @@ require"functions"
 io.stdout:setvbuf("no")
 io.stderr:setvbuf("no")
 
+!if DEV and 1==0 then
+	-- Test XML parsing.
+	print(xmlLib.parse('<?xml version="1.0" encoding="UTF-8"?>\n<xml>foo<![CDATA[bar]]></xml>', false))
+	os.exit(2)
+!end
+
 local ok, err = xpcall(
 	function()
 		require"app"
