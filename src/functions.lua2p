@@ -652,8 +652,12 @@ do
 		return #template+1, #template, "", false -- These return values should never actually be used if everything is working correctly.
 	end
 
-	local function _parseAndRunTemplate(page, path, template, useCache, enableHtmlEncoding)
-		local luaCode = useCache and templateMetaprogramCache[path] or nil
+	local function _parseAndRunTemplate(page, path, template, useCache, onPageInit, enableHtmlEncoding)
+		local luaCode = (
+			template == "" and ""
+			or useCache    and templateMetaprogramCache[path]
+			or                 nil
+		)
 
 		if not luaCode then
 			local luaBuffer = {}
@@ -695,7 +699,19 @@ do
 		ctx.out                              = {}
 		ctx.enableHtmlEncoding               = enableHtmlEncoding
 
-		local ok, errObj = xpcall(chunk, xpcallErrorHandler)
+		local ok = true
+		local errObj
+
+		if onPageInit then
+			ok, errObj = xpcall(function()
+				-- Note: We don't strictly need to have the page as an argument for this
+				-- callback because globals work as usual - it's just in case there's a
+				-- problem with name shadowing for the user.
+				onPageInit(ctx._scriptEnvironmentGlobals.page)
+			end, xpcallErrorHandler)
+		end
+
+		if ok then  ok, errObj = xpcall(chunk, xpcallErrorHandler)  end
 
 		popContext("template")
 
@@ -709,9 +725,10 @@ do
 		return templateResult
 	end
 
-	-- stringResult = parseAndRunTemplate( page, path, template, fileType=fromPage, useCache )
-	function _G.parseAndRunTemplate(page, path, template, fileType, useCache)
-		if template == "" then  return ""  end
+	-- stringResult = parseAndRunTemplate( page, path, template, fileType=fromPage, useCache, onPageInit=nil )
+	-- onPageInit   = function( wrappedPage )
+	function _G.parseAndRunTemplate(page, path, template, fileType, useCache, onPageInit)
+		if template == "" and not onPageInit then  return ""  end
 
 		fileType = (fileType or fileTypes[page._extension])
 
@@ -719,18 +736,18 @@ do
 		local result
 
 		if fileType == "markdown" then
-			result = _parseAndRunTemplate(page, path, template, useCache, true)
+			result = _parseAndRunTemplate(page, path, template, useCache, onPageInit, true)
 			result = markdownToHtml(result)
 			result = trimNewlines(result).."\n" -- :Beautify
 			!if PRINT_RESULT then  __LUA` print"-- HTML --" print(result) print"-- /HTML --" `  end
 
 		elseif fileType == "html" then
-			result = _parseAndRunTemplate(page, path, template, useCache, true)
+			result = _parseAndRunTemplate(page, path, template, useCache, onPageInit, true)
 			result = trimNewlines(result).."\n" -- :Beautify
 			!if PRINT_RESULT then  __LUA` print"-- HTML --" print(result) print"-- /HTML --" `  end
 
 		else
-			result = _parseAndRunTemplate(page, path, template, useCache, false)
+			result = _parseAndRunTemplate(page, path, template, useCache, onPageInit, false)
 			result = trimNewlines(result).."\n" -- :Beautify
 			!if PRINT_RESULT then  __LUA` print"-- result --" print(result) print"-- /result --" `  end
 		end
@@ -1486,8 +1503,9 @@ end
 
 
 
--- generateFromTemplate( page, template, modificationTime=now )
-function _G.generateFromTemplate(page, template, modTime)
+-- generateFromTemplate( page, template, modificationTime=now, onPageInit=nil )
+-- onPageInit = function( wrappedPage )
+function _G.generateFromTemplate(page, template, modTime, onPageInit)
 	assert(type(page)     == "table")
 	assert(type(template) == "string")
 
@@ -1509,7 +1527,7 @@ function _G.generateFromTemplate(page, template, modTime)
 	local result
 
 	if page.isPage.v then
-		local pageContent = parseAndRunTemplate(page, page._pathForError, template, nil, false)
+		local pageContent = parseAndRunTemplate(page, page._pathForError, template, nil, false, onPageInit)
 
 		page._isLocked = true
 		page._readonly = true
@@ -1533,7 +1551,7 @@ function _G.generateFromTemplate(page, template, modTime)
 			page.content.v = pageContent
 
 			local layoutTemplate, layoutPath = getLayoutTemplate(page)
-			result                           = parseAndRunTemplate(page, layoutPath, layoutTemplate, "html", true)
+			result                           = parseAndRunTemplate(page, layoutPath, layoutTemplate, "html", true, nil)
 
 			page.content.v = "" -- We don't need this anymore.
 		end
@@ -1542,7 +1560,7 @@ function _G.generateFromTemplate(page, template, modTime)
 		page._isLocked = true
 		page._readonly = true
 
-		result = parseAndRunTemplate(page, page._pathForError, template, nil, false)
+		result = parseAndRunTemplate(page, page._pathForError, template, nil, false, onPageInit)
 	end
 
 	writeOutputFile(page._category, page._pathOut, page.url.v, result, modTime, page._path)
@@ -1564,7 +1582,7 @@ function _G.generateFromTemplateFile(page)
 		page.date.v = getDatetime(modTime) -- Default value.
 	end
 
-	generateFromTemplate(page, template, modTime)
+	generateFromTemplate(page, template, modTime, nil)
 end
 
 function _G.generateRedirection(url, targetUrl, sourcePath)
@@ -1618,7 +1636,7 @@ function _G.generateRedirection(url, targetUrl, sourcePath)
 		page.layout.v            = redirectionLayout
 		page.redirectionTarget.v = targetUrl
 
-		generateFromTemplate(page, "", nil) -- The content for this super special page is always empty - we only want to process the layout!
+		generateFromTemplate(page, "", nil, nil) -- The content for this super special page is always empty - we only want to process the layout!
 
 	else
 		local contents = formatTemplate(

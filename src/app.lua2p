@@ -707,24 +707,25 @@ _G.scriptEnvironmentGlobals = {
 			errorf(2, "Could not read file '%s': %s", path, err)
 		end
 
-		local html = parseAndRunTemplate(getContext().page, path, template, "html", true)
+		local html = parseAndRunTemplate(getContext().page, path, template, "html", true, nil)
 		return html
 	end,
 
-	generateFromTemplate = function(sitePathRel, template, params)
+	generateFromTemplate = function(sitePathRel, template, paramsOrInit)
 		assertContext("config", "generateFromTemplate")
-		assertArg(1, sitePathRel, "string")
-		assertArg(2, template,    "string")
-		assertArg(3, params,      "table","nil")
+		assertArg(1, sitePathRel,  "string")
+		assertArg(2, template,     "string")
+		assertArg(3, paramsOrInit, "table","function","nil")
 
 		local pathRel = sitePathToPath(sitePathRel)
 		local page    = newPage(pathRel, false)
 
-		if params then
-			page.params.v = params
+		if type(paramsOrInit) == "table" then
+			page.params.v = paramsOrInit
 		end
 
-		generateFromTemplate(page, template, nil)
+		local onPageInit = (type(paramsOrInit) == "function") and paramsOrInit or nil
+		generateFromTemplate(page, template, nil, onPageInit)
 
 		if page.isPage.v and not page._isSkipped then
 			table.insert(pages, page)
