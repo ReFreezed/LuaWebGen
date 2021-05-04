@@ -151,8 +151,6 @@ if command == "new" then
 						<meta name="viewport" content="width=device-width, initial-scale=1">
 						{{ generatorMeta() }}
 
-						<base href="{{ url(site.baseUrl) }}">
-
 						<title>
 							{{ echo(page.title ~= "" and page.title.." -" or "") }}
 							{{ echo(site.title) }}
