@@ -318,9 +318,8 @@ _G.scriptEnvironmentGlobals = {
 
 	pairs = function(t)
 		if isDataFolderReader(t) then
-			return pairsSorted(preloadData(t))
+			return (pairsSorted(preloadData(t)))
 		end
-
 		return pairs(t)
 	end,
 
@@ -398,26 +397,28 @@ _G.scriptEnvironmentGlobals = {
 	end,
 
 	chooseExistingImage = function(sitePathWithoutExt)
-		return scriptEnvironmentGlobals.chooseExistingFile(sitePathWithoutExt, IMAGE_EXTENSIONS)
+		return (scriptEnvironmentGlobals.chooseExistingFile(sitePathWithoutExt, IMAGE_EXTENSIONS))
 	end,
 
 	fileExists = function(sitePath)
 		local pathRel = sitePathToPath(sitePath)
-		return isFile(DIR_CONTENT.."/"..pathRel)
+		return (isFile(DIR_CONTENT.."/"..pathRel))
 	end,
 
 	fileExistsInOutput = function(sitePath, skipRewriting)
 		local pathRel       = sitePathToPath(sitePath)
 		local pathOutputRel = skipRewriting and pathRel or rewriteOutputPath(pathRel)
-		return isFile(DIR_OUTPUT.."/"..pathOutputRel)
+		return (isFile(DIR_OUTPUT.."/"..pathOutputRel))
 	end,
 
 	getExtension = function(genericPath)
-		return getExtension(getFilename(genericPath))
+		local getExtension_internal = getExtension -- :BetterNameForRedirectedFunctionInErrorMessage
+		return (getExtension_internal(getFilename(genericPath)))
 	end,
 
 	getBasename = function(genericPath)
-		return getBasename(getFilename(genericPath))
+		local getBasename_internal = getBasename -- :BetterNameForRedirectedFunctionInErrorMessage
+		return (getBasename_internal(getFilename(genericPath)))
 	end,
 
 	X = function(node, tagName) -- @Doc
@@ -618,7 +619,8 @@ _G.scriptEnvironmentGlobals = {
 	end,
 
 	pairsSorted = function(t)
-		return pairsSorted(isDataFolderReader(t) and preloadData(t) or t)
+		local pairsSorted_internal = pairsSorted -- :BetterNameForRedirectedFunctionInErrorMessage
+		return (pairsSorted_internal(isDataFolderReader(t) and preloadData(t) or t))
 	end,
 
 	validateUrls = function(urls)
@@ -638,7 +640,9 @@ _G.scriptEnvironmentGlobals = {
 	end,
 
 	getImageDimensions = function(sitePath)
-		return getImageDimensions(sitePathToPath(sitePath))
+		local getImageDimensions_internal = getImageDimensions -- :BetterNameForRedirectedFunctionInErrorMessage
+		local wOrNil, hOrErr              = getImageDimensions_internal(sitePathToPath(sitePath))
+		return wOrNil, hOrErr
 	end,
 
 	getOutputtedFiles = function()
@@ -723,13 +727,13 @@ _G.scriptEnvironmentGlobals = {
 		end
 
 		local onPageInit = (type(paramsOrInit) == "function") and paramsOrInit or nil
-		generateFromTemplate(page, template, nil, onPageInit)
+		generateFromTemplateString(page, template, nil, onPageInit)
 
 		if page.isPage.v and not page._isSkipped then
 			table.insert(pages, page)
 		end
 
-		return getProtectionWrapper(page, "page")
+		return (getProtectionWrapper(page, "page"))
 	end,
 
 	outputRaw = function(sitePathRel, contents)
@@ -760,7 +764,7 @@ _G.scriptEnvironmentGlobals = {
 	end,
 
 	isCurrentUrlBelow = function(urlPrefix)
-		assertContext("template", "isCurrentUrl")
+		assertContext("template", "isCurrentUrlBelow")
 		return getContext().page.url.v:sub(1, #urlPrefix) == urlPrefix
 	end,
 
@@ -1014,41 +1018,42 @@ local function buildWebsite()
 		)
 	end
 
-	site.title.v           = getV("title",             "",                    "string")
-	site.baseUrl.v         = getV("baseUrl",           "",                    "string")
-	site.languageCode.v    = getV("languageCode",      "",                    "string")
-	site.defaultLayout.v   = getV("defaultLayout",     "page",                "string")
+	site.title.v                  = getV("title",             "",                    "string")
+	site.baseUrl.v                = getV("baseUrl",           "",                    "string")
+	site.languageCode.v           = getV("languageCode",      "",                    "string")
+	site.defaultLayout.v          = getV("defaultLayout",     "page",                "string")
 
-	site.redirections.v    = getT("redirections",      site.redirections.v,   "string", "string")
+	site.redirections.v           = getT("redirections",      site.redirections.v,   "string", "string")
 
-	_G.ignoreFiles         = getA("ignoreFiles",       ignoreFiles,           "string")
-	_G.ignoreFolders       = getA("ignoreFolders",     ignoreFolders,         "string")
-	_G.ignorePaths         = getA("ignorePaths",       ignorePaths,           "string")
+	_G.ignoreFiles                = getA("ignoreFiles",       ignoreFiles,           "string")
+	_G.ignoreFolders              = getA("ignoreFolders",     ignoreFolders,         "string")
+	_G.ignorePaths                = getA("ignorePaths",       ignorePaths,           "string")
 
-	_G.fileTypes           = getT("types",             fileTypes,             "string", "string")
-	_G.fileProcessors      = getT("processors",        fileProcessors,        "string", "function")
-	local customDataParsers= getT("dataParsers",       {},                    "string", "function") -- @Doc
+	_G.fileTypes                  = getT("types",             fileTypes,             "string", "string")
+	_G.fileProcessors             = getT("processors",        fileProcessors,        "string", "function")
+	local customDataTextParsers   = getT("dataTextParsers",   {},                    "string", "function") -- @Doc
+	local customDataBinaryParsers = getT("dataBinaryParsers", {},                    "string", "function") -- @Doc
 
-	local htaRedirect      = getV("htaccess.redirect", false,                 "boolean")
-	local htaWww           = getV("htaccess.www",      false,                 "boolean")
-	_G.htaErrors           = getT("htaccess.errors",   htaErrors,             "number", "string")
-	local htaNoIndexes     = getV("htaccess.noIndexes",false,                 "boolean")
-	local htaPrettyUrlDir  = getV("htaccess.XXX_prettyUrlDirectory", "",      "string")
-	local htaDenyAccess    = getA("htaccess.XXX_denyDirectAccess",   {},      "string")
-	local htaccess         = getT("htaccess",          nil,                   "string")
-	local handleHtaccess   = htaccess ~= nil
+	local htaRedirect             = getV("htaccess.redirect", false,                 "boolean")
+	local htaWww                  = getV("htaccess.www",      false,                 "boolean")
+	_G.htaErrors                  = getT("htaccess.errors",   htaErrors,             "number", "string")
+	local htaNoIndexes            = getV("htaccess.noIndexes",false,                 "boolean")
+	local htaPrettyUrlDir         = getV("htaccess.XXX_prettyUrlDirectory", "",      "string")
+	local htaDenyAccess           = getA("htaccess.XXX_denyDirectAccess",   {},      "string")
+	local htaccess                = getT("htaccess",          nil,                   "string")
+	local handleHtaccess          = htaccess ~= nil
 
-	_G.outputPathFormat    = get("rewriteOutputPath", "%s", NOOP)
-	_G.rewriteExcludes     = getA("rewriteExcludes",   rewriteExcludes,       "string")
+	_G.outputPathFormat           = get("rewriteOutputPath", "%s", NOOP)
+	_G.rewriteExcludes            = getA("rewriteExcludes",   rewriteExcludes,       "string")
 
-	local onBefore         = getV("before",            nil,                   "function")
-	local onAfter          = getV("after",             nil,                   "function")
-	local onValidate       = getV("validate",          nil,                   "function")
+	local onBefore                = getV("before",            nil,                   "function")
+	local onAfter                 = getV("after",             nil,                   "function")
+	local onValidate              = getV("validate",          nil,                   "function")
 
-	_G.autoLockPages       = getV("autoLockPages",     false,                 "boolean")
-	_G.noTrailingSlash     = getV("removeTrailingSlashFromPermalinks", false, "boolean") -- @Doc? @Hack? Also, this affects page.url too now. 2021-04-28
+	_G.autoLockPages              = getV("autoLockPages",     false,                 "boolean")
+	_G.noTrailingSlash            = getV("removeTrailingSlashFromPermalinks", false, "boolean") -- @Doc? @Hack? Also, this affects page.url too now. 2021-04-28
 
-	_G.redirectionLayout   = getV("redirectionLayout", redirectionLayout,     "string")
+	_G.redirectionLayout          = getV("redirectionLayout", redirectionLayout,     "string")
 
 	for k in pairs(config) do
 		timestampPrintWarning("Unknown config field '%s'.", k)
@@ -1101,8 +1106,22 @@ local function buildWebsite()
 	end
 
 	-- Final config handling.
-	for ext, customDataParser in pairs(customDataParsers) do
-		dataParsers[ext] = customDataParser
+	for ext, customDataParser in pairs(customDataTextParsers) do
+		dataParsers[ext]        = customDataParser
+		dataParserIsBinary[ext] = false
+
+		if customDataBinaryParsers[ext] then
+			errorLine("config.lua: Both config.dataTextParsers.%s and config.dataBinaryParsers.%s are defined.", ext, ext)
+		end
+	end
+
+	for ext, customDataParser in pairs(customDataBinaryParsers) do
+		dataParsers[ext]        = customDataParser
+		dataParserIsBinary[ext] = true
+
+		if customDataTextParsers[ext] then
+			errorLine("config.lua: Both config.dataTextParsers.%s and config.dataBinaryParsers.%s are defined.", ext, ext)
+		end
 	end
 
 
@@ -1118,8 +1137,9 @@ local function buildWebsite()
 
 	if onBefore then
 		pushContext("config")
-		onBefore()
+		local ok, errObj = !XPCALL `onBefore()`
 		popContext("config")
+		if not ok then  error(errObj)  end
 	end
 
 	--
@@ -1178,8 +1198,9 @@ local function buildWebsite()
 
 	if onAfter then
 		pushContext("config")
-		onAfter()
+		local ok, errObj = !XPCALL `onAfter()`
 		popContext("config")
+		if not ok then  error(errObj)  end
 	end
 
 	--
@@ -1436,8 +1457,9 @@ local function buildWebsite()
 
 	if onValidate then
 		pushContext("validation")
-		onValidate()
+		local ok, errObj = !XPCALL `onValidate()`
 		popContext("validation")
+		if not ok then  error(errObj)  end
 	end
 
 	--

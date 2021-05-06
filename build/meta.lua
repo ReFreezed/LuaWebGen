@@ -24,6 +24,7 @@
 	toWindowsPath
 	traverseDirectory
 	utf16ToUtf8, utf8ToUtf16
+	XPCALL
 	zipDirectory, zipFiles
 
 --============================================================]]
@@ -367,6 +368,15 @@ end
 
 function _G.NOSPACE(s)
 	return (s:gsub(" +", ""))
+end
+
+
+
+-- ok, err = !XPCALL `lua`
+function XPCALL(lua)
+	__LUA"xpcall(function() "
+	__LUA(lua)
+	__LUA" end, xpcallErrorHandler)"
 end
 
 

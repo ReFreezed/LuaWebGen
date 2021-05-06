@@ -20,7 +20,7 @@
 	encodeHtmlEntities
 	error, errorf, fileError, errorLine
 	F, formatBytes, formatTemplate
-	generateFromTemplate, generateFromTemplateFile, generateRedirection
+	generateFromTemplateString, generateFromTemplateFile, generateRedirection
 	generatorMeta
 	getCwd
 	getDirectory, getFilename, getExtension, getBasename
@@ -730,7 +730,6 @@ do
 		if ok then  ok, errObj = xpcall(chunk, xpcallErrorHandler)  end
 
 		popContext("template")
-
 		if not ok then  error(errObj)  end
 
 		local templateResult = (table.concat(ctx.out)
@@ -843,8 +842,9 @@ function _G.writeOutputFile(category, pathRel, url, data, modTime, sourcePath)
 
 	if fileProcessors[extLower] then
 		pushContext("none")
-		data = fileProcessors[extLower](data)
+		local ok, errObj = !XPCALL `data = fileProcessors[extLower](data)`
 		popContext("none")
+		if not ok then  error(errObj)  end
 
 		if type(data) ~= "string" then
 			errorf("File processor for '%s' files did not return a string.", extLower)
@@ -1339,29 +1339,33 @@ end
 
 
 
-_G.dataParsers = {
-	lua = function(dataStr, path)
-		local chunk, err = loadstring(dataStr, "@"..path)
-		if not chunk then  errorf(3, "Error loading Lua data file: %s", err)  end
+_G.dataParsers        = {}
+_G.dataParserIsBinary = {}
 
-		setfenv(chunk, scriptEnvironment)
+dataParserIsBinary.lua = false
+function dataParsers.lua(dataStr, path)
+	local chunk, err = loadstring(dataStr, "@"..path)
+	if not chunk then  errorf(3, "Error loading Lua data file: %s", err)  end
 
-		local dataObj = chunk()
-		if dataObj == nil then
-			errorf(3, "Lua data file returned nothing. (%s)", path)
-		end
+	setfenv(chunk, scriptEnvironment)
 
-		return dataObj
-	end,
+	local dataObj = chunk()
+	if dataObj == nil then
+		errorf(3, "Lua data file returned nothing. (%s)", path)
+	end
 
-	toml = function(dataStr, path)
-		return (assert(tomlLib.parse(dataStr)))
-	end,
+	return dataObj
+end
 
-	xml = function(dataStr, path)
-		return (assert(xmlLib.parse(dataStr, false)))
-	end,
-}
+dataParserIsBinary.toml = false
+function dataParsers.toml(dataStr, path)
+	return (assert(tomlLib.parse(dataStr)))
+end
+
+dataParserIsBinary.xml = false
+function dataParsers.xml(dataStr, path)
+	return (assert(xmlLib.parse(dataStr, false)))
+end
 
 -- dataFolderReader = newDataFolderReader( directory [, isTop=false ] )
 function _G.newDataFolderReader(dir, checkDirExistance)
@@ -1393,11 +1397,12 @@ function _G.newDataFolderReader(dir, checkDirExistance)
 
 					if isFile(path) then
 						found         = true
-						local dataStr = assert(getFileContentsText(path))
+						local dataStr = assert((dataParserIsBinary[ext] and getFileContentsBinary or getFileContentsText)(path))
 
 						pushContext("none")
-						dataObj = dataParser(dataStr, path)
+						local ok, errObj = !XPCALL `dataObj = dataParser(dataStr, path)`
 						popContext("none")
+						if not ok then  error(errObj)  end
 
 						if dataObj == nil then
 							errorf(2, "Data parser for '%s' files returned nothing. (%s)", ext, path)
@@ -1542,9 +1547,9 @@ end
 
 
 
--- generateFromTemplate( page, template, modificationTime=now, onPageInit=nil )
+-- generateFromTemplateString( page, template, modificationTime=now, onPageInit=nil )
 -- onPageInit = function( wrappedPage )
-function _G.generateFromTemplate(page, template, modTime, onPageInit)
+function _G.generateFromTemplateString(page, template, modTime, onPageInit)
 	assert(type(page)     == "table")
 	assert(type(template) == "string")
 
@@ -1621,7 +1626,7 @@ function _G.generateFromTemplateFile(page)
 		page.date.v = getDatetime(modTime) -- Default value.
 	end
 
-	generateFromTemplate(page, template, modTime, nil)
+	generateFromTemplateString(page, template, modTime, nil)
 end
 
 function _G.generateRedirection(url, targetUrl, sourcePath)
@@ -1675,7 +1680,7 @@ function _G.generateRedirection(url, targetUrl, sourcePath)
 		page.layout.v            = redirectionLayout
 		page.redirectionTarget.v = targetUrl
 
-		generateFromTemplate(page, "", nil, nil) -- The content for this super special page is always empty - we only want to process the layout!
+		generateFromTemplateString(page, "", nil, nil) -- The content for this super special page is always empty - we only want to process the layout!
 
 	else
 		local contents = formatTemplate(
