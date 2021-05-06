@@ -99,6 +99,15 @@ One {{* "Space"  }} Allowed
 - {{it}}
 {{end}}
 
+URL: {{ /foo }}
+URL: {{ ./foo }}
+URL: {{ ../foo }}
+URL: {{ http://example.com/foo }}
+
+Markdown parsing, problematic link: [Snake!](https://en.wikipedia.org/wiki/Snake_(video_game_genre))
+
+Markdown parsing, solution: [Snake!](<https://en.wikipedia.org/wiki/Snake_(video_game_genre)>)
+
 
 
 ## Value Expressions

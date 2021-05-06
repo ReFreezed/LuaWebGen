@@ -5,7 +5,7 @@
 
 **Author:** Niklas Frykholm, <niklas@frykholm.se>
 **Date:** 31 May 2008
-**Edited by:** Marcus Thunström (2018-06-14)
+**Edited by:** Marcus Thunström (2018-06-14, 2021-05-06)
 
 This is an implementation of the popular text markup language Markdown in pure Lua.
 Markdown can convert documents written in a simple and easy to read text format
@@ -921,23 +921,35 @@ end
 function images(text)
 	local function reference_link(alt, id)
 		alt = encode_alt(alt:match("%b[]"):sub(2,-2))
-		id = id:match("%[(.*)%]"):lower()
-		if id == "" then id = text:lower() end
+		id  = id:match("%b[]"):sub(2,-2):lower() -- @Edit
+
+		if id == "" then  id = text:lower()  end
+
 		link_database[id] = link_database[id] or {}
-		if not link_database[id].url then return nil end
-		local url = link_database[id].url or id
-		url = encode_alt(url)
+		if not link_database[id].url then  return nil  end
+
+		local url   = link_database[id].url or id
+		url         = encode_alt(url)
 		local title = encode_alt(link_database[id].title)
-		if title then title = " title=\"" .. title .. "\"" else title = "" end
+		-- print(("images  reference_link  url=%-60s  title=%s"):format(url, tostring(title)) -- DEBUG
+
+		if title then
+			title = ' title="' .. title .. '"'
+		else
+			title = ""
+		end
+
 		return add_escape ('<img src="' .. url .. '" alt="' .. alt .. '"' .. title .. ">") -- @Edit
 	end
 
 	local function inline_link(alt, link)
-		alt = encode_alt(alt:match("%b[]"):sub(2,-2))
-		local url, title = link:match("%(<?(.-)>?[ \t]*['\"](.+)['\"]")
-		url = url or link:match("%(<?(.-)>?%)")
-		url = encode_alt(url)
-		title = encode_alt(title)
+		alt              = encode_alt(alt:match"%b[]":sub(2,-2))
+		local url, title = link:match"%(<?(.-)>?[ \t]*['\"](.+)['\"]"
+		url              = url or link:match"%(<(.-)>%)" or link:match"%((.-)%)" or "" -- @Edit
+		url              = encode_alt(url)
+		title            = encode_alt(title)
+		-- print(("images  inline_link     url=%-60s  title=%s"):format(url, tostring(title)) -- DEBUG
+
 		if title then
 			return add_escape('<img src="' .. url .. '" alt="' .. alt .. '" title="' .. title .. '">') -- @Edit
 		else
@@ -945,8 +957,14 @@ function images(text)
 		end
 	end
 
+	-- ![alt] [id]
 	text = text:gsub("!(%b[])[ \t]*\n?[ \t]*(%b[])", reference_link)
+	-- ![alt](link)
+	-- ![alt](<link>)
+	-- ![alt](link "title")
+	-- ![alt](<link> "title")
 	text = text:gsub("!(%b[])(%b())", inline_link)
+
 	return text
 end
 
@@ -954,32 +972,50 @@ end
 function anchors(text)
 	local function reference_link(text, id)
 		text = text:match("%b[]"):sub(2,-2)
-		id = id:match("%b[]"):sub(2,-2):lower()
-		if id == "" then id = text:lower() end
+		id   = id:match("%b[]"):sub(2,-2):lower()
+
+		if id == "" then  id = text:lower()  end
+
 		link_database[id] = link_database[id] or {}
-		if not link_database[id].url then return nil end
-		local url = link_database[id].url or id
-		url = encode_alt(url)
+		if not link_database[id].url then  return nil  end
+
+		local url   = link_database[id].url or id
+		url         = encode_alt(url)
 		local title = encode_alt(link_database[id].title)
-		if title then title = " title=\"" .. title .. "\"" else title = "" end
-		return add_escape("<a href=\"" .. url .. "\"" .. title .. ">") .. text .. add_escape("</a>")
+		-- print(("anchors reference_link  url=%-60s  title=%s"):format(url, tostring(title)) -- DEBUG
+
+		if title then
+			title = ' title="' .. title .. '"'
+		else
+			title = ""
+		end
+
+		return add_escape('<a href="' .. url .. '"' .. title .. ">") .. text .. add_escape("</a>")
 	end
 
 	local function inline_link(text, link)
-		text = text:match("%b[]"):sub(2,-2)
-		local url, title = link:match("%(<?(.-)>?[ \t]*['\"](.+)['\"]")
-		title = encode_alt(title)
-		url  = url or  link:match("%(<?(.-)>?%)") or ""
-		url = encode_alt(url)
+		text             = text:match"%b[]":sub(2,-2)
+		local url, title = link:match"%(<?(.-)>?[ \t]*['\"](.+)['\"]"
+		url              = url or link:match"%(<(.-)>%)" or link:match"%((.-)%)" or "" -- @Edit
+		url              = encode_alt(url)
+		title            = encode_alt(title)
+		-- print(("anchors inline_link     url=%-60s  title=%s"):format(url, tostring(title)) -- DEBUG
+
 		if title then
-			return add_escape("<a href=\"" .. url .. "\" title=\"" .. title .. "\">") .. text .. "</a>"
+			return add_escape('<a href="' .. url .. '" title="' .. title .. '">') .. text .. "</a>"
 		else
-			return add_escape("<a href=\"" .. url .. "\">") .. text .. add_escape("</a>")
+			return add_escape('<a href="' .. url .. '">') .. text .. add_escape("</a>")
 		end
 	end
 
+	-- [text] [id]
 	text = text:gsub("(%b[])[ \t]*\n?[ \t]*(%b[])", reference_link)
+	-- [text](link)
+	-- [text](<link>)
+	-- [text](link "title")
+	-- [text](<link> "title")
 	text = text:gsub("(%b[])(%b())", inline_link)
+
 	return text
 end
 
@@ -1127,9 +1163,9 @@ function strip_link_definitions(text)
 	end
 
 	local def_no_title = "\n ? ? ?(%b[]):[ \t]*\n?[ \t]*<?([^%s>]+)>?[ \t]*"
-	local def_title1 = def_no_title .. "[ \t]+\n?[ \t]*[\"'(]([^\n]+)[\"')][ \t]*"
-	local def_title2 = def_no_title .. "[ \t]*\n[ \t]*[\"'(]([^\n]+)[\"')][ \t]*"
-	local def_title3 = def_no_title .. "[ \t]*\n?[ \t]+[\"'(]([^\n]+)[\"')][ \t]*"
+	local def_title1   = def_no_title .. "[ \t]+\n?[ \t]*[\"'(]([^\n]+)[\"')][ \t]*"
+	local def_title2   = def_no_title .. "[ \t]*\n[ \t]*[\"'(]([^\n]+)[\"')][ \t]*"
+	local def_title3   = def_no_title .. "[ \t]*\n?[ \t]+[\"'(]([^\n]+)[\"')][ \t]*"
 
 	text = text:gsub(def_title1, link_def)
 	text = text:gsub(def_title2, link_def)

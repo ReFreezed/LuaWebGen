@@ -184,9 +184,25 @@ do
 		["["] = "]",
 	}
 
+	-- position, isUrlBlock = findEndOfBlockContents( path, template, position )
 	local function findEndOfBlockContents(path, template, pos)
 		!local PRINT_PROGRESS = DEV and 1==0
 		!if PRINT_PROGRESS then  __LUA`printf("%s(%d):%d: >>>>>>>>", path, pos, getLineNumber(template, pos))`  end
+
+		-- URL block:
+		--   /(...)
+		--   ./(...)
+		--   ../(...)
+		--   proto:/(...)
+		if template:find("^ *%.?%.?/", pos) or template:find("^ *%a%w*:/", pos) then
+			local i1 = template:find("%*?}}", pos)
+			if not i1 then
+				fileError(path, template, pos, "Incomplete URL block.")
+			end
+			return i1-1, true
+		end
+
+		-- Lua code block:
 
 		local blockContentsI1 = pos
 
@@ -220,7 +236,7 @@ do
 			if posNext == posBlockEnd then
 				!if PRINT_PROGRESS then  __LUA`printf("%s(%d):%d: <<<<<<<<", path, posNext, getLineNumber(template, posNext))`  end
 				pos = posBlockEnd - 1
-				return pos
+				return pos, false
 
 			elseif posNext == posComment then
 				!if PRINT_PROGRESS then  __LUA`printf("%s(%d):%d: Comment", path, posNext, getLineNumber(template, posNext))`  end
@@ -378,9 +394,9 @@ do
 
 			table.insert(out, "do end ") -- Statement divider.
 
-			local blockContentsI2 = findEndOfBlockContents(path, template, pos)
-			local blockContents   = template:sub(blockContentsI1, blockContentsI2)
-			pos                   = blockContentsI2 + 1
+			local blockContentsI2, isUrlBlock = findEndOfBlockContents(path, template, pos)
+			local blockContents               = template:sub(blockContentsI1, blockContentsI2)
+			pos                               = blockContentsI2 + 1
 
 			!if DEV and 1==0 then
 				print("BLOCK: "..trim(blockContents))
@@ -400,11 +416,17 @@ do
 
 			----------------------------------------------------------------
 
+			-- URL block.
+			if isUrlBlock then
+				table.insert(out, F("echo__(url__%q)", trim(blockContents)))
+				-- @Incomplete: Fix line numbers if blockContents has newlines (which is probably rare).
+				!!(TRIM_POS_AFTER_BLOCK)
+
 			-- Match custom keywords first so we don't confuse those with normal Lua identifiers later.
 
 			-- fori [<] item in <array> (...) end
 			-- fori [<] <array> (...) end
-			if blockContents:find!("^ *fori"..PATTERN_IDENT_END) then
+			elseif blockContents:find!("^ *fori"..PATTERN_IDENT_END) then
 				local             reverse, ident, expr = blockContents:match!(NOSPACE("^ %s* fori %s* (< ) %s* ("..PATTERN_IDENT..") %s+ in "..PATTERN_IDENT_END.." %s* (%S.*)"))
 				if not expr then           ident, expr = blockContents:match!(NOSPACE("^ %s* fori %s+          ("..PATTERN_IDENT..") %s+ in "..PATTERN_IDENT_END.." %s* (%S.*)"))
 				if not expr then  reverse,        expr = blockContents:match!(NOSPACE("^ %s* fori %s* (<?) %s*                                                          (%S.*)"))
@@ -608,12 +630,6 @@ do
 				!!(TRIM_POS_AFTER_BLOCK)
 				local blockI2 = pos - 1
 				return blockI1, blockI2, blockContents
-
-			-- URL short-form.
-			elseif blockContents:find"^ */" or blockContents:find"^ *%a+:/" then
-				table.insert(out, F("echo__(url__%q)", trim(blockContents)))
-				-- @Incomplete: Fix line numbers if blockContents has newlines (which is probably rare).
-				!!(TRIM_POS_AFTER_BLOCK)
 
 			-- Value expression.
 			elseif insertLuaForEchoingIfExpression(out, blockContents) then
