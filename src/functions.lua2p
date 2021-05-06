@@ -842,9 +842,9 @@ function _G.writeOutputFile(category, pathRel, url, data, modTime, sourcePath)
 	local extLower = getExtension(filename):lower()
 
 	if fileProcessors[extLower] then
-		pushContext("config")
+		pushContext("none")
 		data = fileProcessors[extLower](data)
-		popContext("config")
+		popContext("none")
 
 		if type(data) ~= "string" then
 			errorf("File processor for '%s' files did not return a string.", extLower)
@@ -1339,8 +1339,32 @@ end
 
 
 
--- dataFolderReader = newDataFolderReader( path [, isTop=false ] )
-function _G.newDataFolderReader(path, checkDirExistance)
+_G.dataParsers = {
+	lua = function(dataStr, path)
+		local chunk, err = loadstring(dataStr, "@"..path)
+		if not chunk then  errorf(3, "Error loading Lua data file: %s", err)  end
+
+		setfenv(chunk, scriptEnvironment)
+
+		local dataObj = chunk()
+		if dataObj == nil then
+			errorf(3, "Lua data file returned nothing. (%s)", path)
+		end
+
+		return dataObj
+	end,
+
+	toml = function(dataStr, path)
+		return (assert(tomlLib.parse(dataStr)))
+	end,
+
+	xml = function(dataStr, path)
+		return (assert(xmlLib.parse(dataStr, false)))
+	end,
+}
+
+-- dataFolderReader = newDataFolderReader( directory [, isTop=false ] )
+function _G.newDataFolderReader(dir, checkDirExistance)
 	local dataFolderReader = {}
 
 	setmetatable(dataFolderReader, {
@@ -1348,7 +1372,7 @@ function _G.newDataFolderReader(path, checkDirExistance)
 			if checkDirExistance then
 				checkDirExistance = false
 
-				if not isDirectory(path) then
+				if not isDirectory(dir) then
 					errorf(2, "No data directory.")
 				end
 			end
@@ -1361,37 +1385,36 @@ function _G.newDataFolderReader(path, checkDirExistance)
 			elseif k == "." or k == ".." then
 				errorf(2, "Bad data key '%s'.", k)
 
-			elseif isFile(F("%s/%s.lua", path, k)) then
-				local filePath   = F("%s/%s.lua", path, k)
-				local chunk, err = loadfile(filePath)
-				if not chunk then  errorf(2, "Error loading Lua data file '%s': %s", filePath, err)  end
+			else
+				local found = false
 
-				setfenv(chunk, scriptEnvironment)
+				for ext, dataParser in pairs(dataParsers) do
+					local path = F("%s/%s.%s", dir, k, ext)
 
-				pushContext("none")
-				dataObj = chunk()
-				popContext("none")
+					if isFile(path) then
+						found         = true
+						local dataStr = assert(getFileContentsText(path))
 
-				if dataObj == nil then
-					errorf(2, "Lua data file returned nothing. (%s)", filePath)
+						pushContext("none")
+						dataObj = dataParser(dataStr, path)
+						popContext("none")
+
+						if dataObj == nil then
+							errorf(2, "Data parser for '%s' files returned nothing. (%s)", ext, path)
+						end
+
+						break
+					end
 				end
 
-			elseif isFile(F("%s/%s.toml", path, k)) then
-				local filePath = F("%s/%s.toml", path, k)
-				local contents = assert(getFileContentsText(filePath))
-				dataObj        = assert(tomlLib.parse(contents))
-
-			elseif isFile(F("%s/%s.xml", path, k)) then
-				local filePath = F("%s/%s.xml", path, k)
-				local contents = assert(getFileContentsText(filePath))
-				dataObj        = assert(xmlLib.parse(contents, false))
-
-			elseif isDirectory(F("%s/%s", path, k)) then
-				dataObj = newDataFolderReader(F("%s/%s", path, k))
-
-			else
-				timestampPrintWarningOnce("Bad data path '%s/%s'.", path, k)
-				return nil
+				if found then
+					-- void
+				elseif isDirectory(F("%s/%s", dir, k)) then
+					dataObj = newDataFolderReader(F("%s/%s", dir, k))
+				else
+					timestampPrintWarningOnce("Bad data path '%s/%s'.", dir, k)
+					return nil
+				end
 			end
 
 			assert(dataObj ~= nil)
@@ -1400,7 +1423,7 @@ function _G.newDataFolderReader(path, checkDirExistance)
 		end,
 	})
 
-	dataReaderPaths[dataFolderReader] = path
+	dataReaderPaths[dataFolderReader] = dir
 	return dataFolderReader
 end
 

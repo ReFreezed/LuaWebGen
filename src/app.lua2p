@@ -1027,6 +1027,7 @@ local function buildWebsite()
 
 	_G.fileTypes           = getT("types",             fileTypes,             "string", "string")
 	_G.fileProcessors      = getT("processors",        fileProcessors,        "string", "function")
+	local customDataParsers= getT("dataParsers",       {},                    "string", "function") -- @Doc
 
 	local htaRedirect      = getV("htaccess.redirect", false,                 "boolean")
 	local htaWww           = getV("htaccess.www",      false,                 "boolean")
@@ -1097,6 +1098,11 @@ local function buildWebsite()
 		errorLine("config.lua: config.baseUrl Cannot contain a query. (%s)", site.baseUrl.v)
 	elseif parsedUrl.fragment then
 		errorLine("config.lua: config.baseUrl Cannot contain a fragment. (%s)", site.baseUrl.v)
+	end
+
+	-- Final config handling.
+	for ext, customDataParser in pairs(customDataParsers) do
+		dataParsers[ext] = customDataParser
 	end
 
 
