@@ -1283,7 +1283,15 @@ local function buildWebsite()
 
 			for errCode, target in pairsSorted(htaErrors) do
 				-- The target may be a URL or HTML code.
-				b('ErrorDocument %d %s\n', errCode, target)
+				--
+				-- @Incomplete: Does Apache rewrite URLs to error documents? I don't think v2.2 did, but maybe
+				-- that has changed. If so, we should test for multiple file locations. :ApacheErrorDocumentFile
+				--
+				if target:find"^/%S*$" and not isFile(DIR_OUTPUT..target) then
+					errorLine("Missing target page for error %d document (in output folder): %s%s", errCode, DIR_OUTPUT, target)
+				end
+
+				b("ErrorDocument %d %s\n", errCode, target)
 			end
 
 			contents = F("%s\n%s", contents, b())

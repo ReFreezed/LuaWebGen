@@ -2072,8 +2072,8 @@ do
 		local isSpecial = (
 			not isPage
 			or isRedirection
-			or attributeWithAny(
-				htaErrors,
+			or attributeWithAny(htaErrors,
+				-- Doing all these tests may be overkill. :ApacheErrorDocumentFile
 				"/"..permalinkRel,
 				"/"..pathRelOut,
 				"/"..rewriteOutputPath(pathRelOut),
