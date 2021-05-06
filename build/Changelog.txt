@@ -1,6 +1,15 @@
 Changelog
 LuaWebGen
 
+v1.1 (2021-05-06)
+- Added variant of generateFromTemplate() that takes a page initializer callback function.
+- Added printObject().
+- Line endings in read text files are normalized.
+- Better XML parsing in Windows version. (CDATA sections now work.) (Universal version users should install LuaExpat.)
+- Improved parsing of {{url}} blocks.
+- Fixed Markdown parsing issue for links using angle brackets: [text](<url>)
+- Removed usage of the <base> tag from new sites and pages.
+
 v1.0 (2021-05-01)
 Embedded code:
 - Whitespace around code blocks can be trimmed away with '{{*' and '*}}'.

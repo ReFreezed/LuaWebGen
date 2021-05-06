@@ -12,7 +12,7 @@ exec lua "$0" "$@"
 --============================================================]]
 
 local dirPrefix = debug.getinfo(1, "S").source :gsub("^@", "") :gsub("[^/\\]+$", "")
-package.path    = dirPrefix .. "srcgen/?.lua;" .. dirPrefix .. "lib/?.lua" !!(DEV and `` or `.. ";" .. package.path:gsub("^;+", "")`)
+package.path    = dirPrefix .. "srcgen/?.lua;" .. dirPrefix .. "lib/?.lua" !!(DEV and `` or `.. ";" .. package.path:gsub("^;+", "")`) -- Should we load system modules first? @UX @Robustness
 
 if package.cpath:find(".dll", 1, true) then
 	package.cpath = !!(DEV and `` or `package.cpath:gsub(";+$", "") .. ";" ..`) dirPrefix .. "bin/?.dll" -- System libraries first.

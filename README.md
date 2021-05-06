@@ -117,6 +117,7 @@ Some functionality also require these things:
 
 - [Lua-GD](https://ittner.github.io/lua-gd/) - required for image manipulation.
 - [LuaSocket](http://w3.impa.br/~diego/software/luasocket/home.html) - optional, for more CPU-friendly auto-builds.
+- [LuaExpat](http://matthewwild.co.uk/projects/luaexpat/index.html) - optional, for better XML parsing.
 
 > **Hint:** On Windows you can simply install [Lua for Windows](https://github.com/rjpcomputing/luaforwindows)
 > which includes everything that's needed in a neat package.
