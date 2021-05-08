@@ -335,6 +335,7 @@ _G.scriptEnvironmentGlobals = {
 
 	-- Lua libraries.
 	lfs = lfs,
+	xml = xmlLib,
 
 	-- Site objects. (Create at site generation.)
 	site = nil,
@@ -450,7 +451,7 @@ _G.scriptEnvironmentGlobals = {
 			end
 		end
 
-		if xmlLib.is_tag(node) then
+		if xmlLib.isElement(node) then
 			printNode(node, 0)
 		else
 			print("(xml array)")

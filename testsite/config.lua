@@ -70,4 +70,6 @@ end
 
 
 
+runTests()
+
 return config

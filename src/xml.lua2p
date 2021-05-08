@@ -1,0 +1,1436 @@
+--[[============================================================
+--=
+--=  XML parser module
+--=
+--=  Doesn't follow the XML spec too closely, but really should
+--=  be enough for our use case!
+--=
+--=  Provides a similar API as Penlight.
+--=
+--=  Notes:
+--=  - Only UTF-8 is supported.
+--=  - <? ... ?> sequences are ignored.
+--=  - <! ... > sequences (including comments) are ignored, except for CDATA sections which become text nodes.
+--=
+--=-------------------------------------------------------------
+--=
+--=  LuaWebGen - static website generator in Lua!
+--=  - Written by Marcus 'ReFreezed' Thunström
+--=  - MIT License (See LICENSE.txt)
+--=
+--============================================================]]
+
+!(
+local PATTERN_NAME_CHAR = "[-._:%w\128-\255]"
+
+local _IS_TEXT = `(type(?) == "string")`
+local function IS_TEXT(expr)
+	return (_IS_TEXT:gsub("%?", expr))
+end
+)
+
+local ENTITY_NAME_TO_UTF8 = require"entities"
+
+local CHAR_TO_ENTITY = {
+	["&"] = "&amp;",
+	["<"] = "&lt;",
+	[">"] = "&gt;",
+	['"'] = "&quot;",
+	["'"] = "&apos;",
+}
+
+local xmlLib = {}
+
+local Element   = {}
+Element.__index = Element
+
+local cacheTemplate -- @Cleanup
+
+
+
+local function codepointToUtf8(cp)
+	if cp < 0 or cp > 0x10ffff then
+		errorf("Codepoint %d is out of the valid range.", cp)
+	end
+
+	if cp < 128 then  return string.char(cp)  end
+
+	local suffix = cp % 64
+	local c4     = 128 + suffix
+	cp           = (cp - suffix) / 64
+	if cp < 32 then  return string.char(192+cp, c4)  end
+
+	suffix   = cp % 64
+	local c3 = 128 + suffix
+	cp       = (cp - suffix) / 64
+	if cp < 16 then  return string.char(224+cp, c3, c4)  end
+
+	suffix = cp % 64
+	cp     = (cp - suffix) / 64
+	return string.char(240+cp, 128+suffix, c3, c4)
+end
+
+
+
+local function fixArrayPartOfAttributes(attrs)
+	if not (next(attrs) and not attrs[1]) then  return  end
+
+	for _, attrName in ipairs(sort(getKeys(attrs))) do
+		table.insert(attrs, attrName)
+	end
+end
+
+
+
+local function insertNode(el, node)
+	if node == "" then
+		-- void
+	elseif !!(IS_TEXT`node`) and !!(IS_TEXT`el[#el]`) then
+		el[#el] = el[#el] .. node -- @Speed
+	else
+		table.insert(el, node)
+	end
+end
+
+-- position = decodeEntities( string, position, stringForError, 0,                      pathForError, element )
+-- string   = decodeEntities( string, 1,        stringForError, positionOffsetForError, pathForError, nil     )
+local function decodeEntities(s, pos, sForError, posOffsetForError, pathForError, el)
+	!(
+	local _INSERT = `
+		if el then  insertNode(el, ?)  else  table.insert(replacements, ?)  end
+	`
+	local function INSERT(expr)
+		__LUA((_INSERT:gsub("%?", expr)))
+	end
+	)
+
+	local replacements = (not el) and {} or nil
+
+	while true do
+		local i1, i2 = s:find("&", pos, true)
+		if not i1 then  break  end
+		pos = i2 + 1
+
+		-- Entity, hex number.
+		if s:find("^#[Xx]", pos) then
+			pos = pos + !(#"#x")
+
+			local i1, i2, cpStr = s:find(!("^(0*[%dA-Fa-f]+)"), pos)
+			if not i1 then
+				fileError(pathForError, sForError, posOffsetForError+pos, "Invalid format for hexadecimal entity number.")
+			end
+			pos = i2 + 1
+
+			local cp = tonumber(cpStr, 16)
+			!INSERT `codepointToUtf8(cp)`
+
+		-- Entity, decimal number.
+		elseif s:find("^#", pos) then
+			pos = pos + !(#"#")
+
+			local i1, i2, cpStr = s:find(!("^(0*%d+)"), pos)
+			if not i1 then
+				fileError(pathForError, sForError, posOffsetForError+pos, "Invalid format for decimal entity number.")
+			end
+			pos = i2 + 1
+
+			local cp = tonumber(cpStr, 10)
+			!INSERT `codepointToUtf8(cp)`
+
+		-- Entity, name.
+		else
+			local i1, i2, entityName = s:find(!("^("..PATTERN_NAME_CHAR.."+)"), pos)
+			if not i1 then
+				fileError(pathForError, sForError, posOffsetForError+pos, "Invalid format for entity name.")
+			elseif not ENTITY_NAME_TO_UTF8[entityName] then
+				fileError(pathForError, sForError, posOffsetForError+pos, "Unknown entity name '%s'.", entityName)
+			end
+			pos = i2 + 1
+
+			!INSERT `ENTITY_NAME_TO_UTF8[entityName]`
+		end
+
+		if not s:find("^;", pos) then
+			fileError(pathForError, sForError, posOffsetForError+pos, "Expected ';' at the end of the entity.")
+		end
+		pos = pos + !(#";")
+
+		if el then  break  end
+	end
+
+	if el then
+		return pos
+
+	else
+		if replacements[1] then
+			local i = 0
+			s = s:gsub("&.-;", function()
+				i = i + 1
+				return replacements[i]
+			end)
+		end
+
+		return s
+	end
+end
+
+!(
+local EAT_SPACE = `do local _, i2 = s:find("^%s*", pos) ; pos = i2 + 1 end`
+)
+
+-- position = parseAttributes( string, position, pathForError, attributes )
+local function parseAttributes(s, pos, pathForError, attrs)
+	while pos <= #s do
+		local i1, i2, attrName = s:find(!("^("..PATTERN_NAME_CHAR.."+)"), pos)
+		if not i1 then  break  end
+		pos = i2 + 1
+
+		!!(EAT_SPACE)
+
+		if not s:find("^=", pos) then
+			fileError(pathForError, s, pos, "Expected '=' after '%s'.", attrName)
+		end
+		pos = pos + !(#"=")
+
+		!!(EAT_SPACE)
+
+		local posQuote = pos
+
+		local quote = s:sub(pos, pos)
+		if not (quote == '"' or quote == "'") then
+			fileError(pathForError, s, pos, "Expected a quote for the value of attribute '%s'.", attrName)
+		end
+		pos = pos + 1
+
+		local attrValuePos = pos
+
+		pos = s:find(quote, pos, true)
+		if not pos then
+			fileError(pathForError, s, posQuote, "Missing end quote (%s) for value of attribute '%s'.", quote, attrName)
+		end
+
+		local attrValue = s:sub(attrValuePos, pos-1)
+		attrValue       = decodeEntities(attrValue, 1, s, attrValuePos-1, pathForError, nil)
+		pos             = pos + !(#'"')
+
+		!!(EAT_SPACE)
+
+		if not attrs[attrName] then
+			table.insert(attrs, attrName)
+		end
+		attrs[attrName] = attrValue
+	end
+
+	return pos
+end
+
+-- position = parseElementContents( string, position, pathForError, element, isTop )
+local function parseElementContents(s, pos, pathForError, el, isTop)
+	while pos <= #s do
+		local posStart = pos
+
+		-- Processing instruction.
+		if s:find("^<%?", pos) then
+			pos = pos + !(#"<?")
+
+			local i1, i2, target = s:find(!("^("..PATTERN_NAME_CHAR.."+)"), pos)
+			if not i1 then
+				fileError(pathForError, s, pos, "Invalid format for processing instruction.")
+			end
+
+			target = target:lower()
+			if target ~= "xml" then
+				fileError(pathForError, s, pos, "Invalid processing instruction target '%s'. (Must be 'xml')", target)
+			end
+			pos = i2 + 1
+
+			while true do
+				local posQuoteStart = s:find("[\"']", pos)
+				local posPiEnd      = s:find("?>",    pos, true)
+
+				if not posPiEnd then
+					fileError(pathForError, s, posStart, "Missing end of processing instruction.")
+				end
+
+				if posQuoteStart and posQuoteStart < posPiEnd then
+					local quote    = s:sub(posQuoteStart, posQuoteStart)
+					pos            = posQuoteStart + !(#'"')
+
+					local posQuoteEnd = s:find(quote, pos, true)
+					if not posQuoteEnd then
+						fileError(pathForError, s, posQuoteStart, "Missing end quote (%s) for string.", quote)
+					end
+					pos = posQuoteEnd + !(#'"')
+
+				else
+					pos = posPiEnd + !(#"?>")
+					break
+				end
+			end
+
+		-- Comment.
+		elseif s:find("^<!%-%-", pos) then
+			pos = pos + !(#"<!--")
+
+			local i1, i2 = s:find("-->", pos, true)
+			if not i1 then
+				fileError(pathForError, s, pos, "Missing end of comment.")
+			end
+
+			pos = i2 + 1
+
+		-- CDATA section.
+		elseif s:find("^<!%[CDATA%[", pos) then
+			pos = pos + !(#"<![CDATA[")
+
+			local i1, i2 = s:find("]]>", pos, true)
+			if not i1 then
+				fileError(pathForError, s, posStart, "Missing end of CDATA section.")
+			end
+
+			local text = s:sub(pos, i1-1)
+			pos        = i2 + 1
+
+			insertNode(el, text)
+
+		-- Declaration.
+		elseif s:find("^<!", pos) then
+			-- Originally @Copypaste from the '<?' matching above.
+			local balance = 1
+			pos           = pos + !(#"<!")
+
+			while true do
+				local posQuoteStart = s:find("[\"']", pos)
+				local posTagStart   = s:find("<",     pos, true)
+				local posTagEnd     = s:find(">",     pos, true)
+
+				if not posTagEnd then
+					fileError(pathForError, s, posStart, "Missing end of declaration.")
+				end
+
+				if posQuoteStart and posQuoteStart < math.min(posTagEnd, (posTagStart or 1/0)) then
+					local quote    = s:sub(posQuoteStart, posQuoteStart)
+					pos            = posQuoteStart + !(#'"')
+
+					local posQuoteEnd = s:find(quote, pos, true)
+					if not posQuoteEnd then
+						fileError(pathForError, s, posQuoteStart, "Missing end quote (%s) for string.", quote)
+					end
+					pos = posQuoteEnd + !(#'"')
+
+				elseif posTagStart and posTagStart < posTagEnd then
+					pos     = posTagStart + !(#"<")
+					balance = balance     + 1
+
+				else
+					pos     = posTagEnd + !(#">")
+					balance = balance   - 1
+					if balance == 0 then  break  end
+				end
+			end
+
+		-- End tag.
+		elseif s:find("^</", pos) then
+			return pos
+
+		-- Start tag, or empty tag.
+		elseif s:find("^<", pos) then
+			pos = pos + !(#"<")
+
+			local i1, i2, tagName = s:find(!("^("..PATTERN_NAME_CHAR.."+)"), pos)
+			if not i1 then
+				fileError(pathForError, s, pos, "Missing name tag after '<'.")
+			end
+			pos = i2 + 1
+
+			local childEl = xmlLib.newElement(tagName)
+
+			if s:find("^%s", pos) then
+				!!(EAT_SPACE)
+				pos = parseAttributes(s, pos, pathForError, childEl.attr)
+			end
+
+			if s:find("^/", pos) then
+				pos           = pos + !(#"/")
+				childEl.empty = true
+			end
+
+			if not s:find("^>", pos) then
+				fileError(pathForError, s, pos, "Expected '>'.")
+			end
+			pos = pos + !(#">")
+
+			insertNode(el, childEl)
+
+			if not childEl.empty then
+				pos           = parseElementContents(s, pos, pathForError, childEl, false)
+				childEl.empty = not childEl[1]
+
+				if not s:find("^</", pos) then
+					fileError(pathForError, s, pos, "Expected end tag for '<%s>' at line %d.", tagName, getLineNumber(s, posStart))
+				end
+				pos = pos + !(#"</")
+
+				local i1, i2, tagNameEnd = s:find(!("^("..PATTERN_NAME_CHAR.."+)"), pos)
+				if not i1 then
+					fileError(pathForError, s, pos, "Missing name tag after '<'.")
+				elseif tagNameEnd ~= tagName then
+					fileError(pathForError, s, pos, "Expected '</%s>'.", tagName)
+				end
+				pos = i2 + 1
+
+				!!(EAT_SPACE)
+
+				if not s:find("^>", pos) then
+					fileError(pathForError, s, pos, "Expected '>'.")
+				end
+				pos = pos + !(#">")
+			end
+
+		--
+		-- Only text-like nodes from here on!
+		--
+
+		-- Entity.
+		elseif s:find("^&", pos) then
+			if isTop then  fileError(pathForError, s, posOffsetForError+pos, "Invalid data outside root element.")  end
+
+			pos = decodeEntities(s, pos, s, 0, pathForError, el)
+
+		-- Text.
+		else
+			local i1, i2, text = s:find("^([^<&]+)", pos)
+
+			if isTop and text:find"%S" then
+				fileError(pathForError, s, pos, "Invalid data outside root element.")
+			end
+			pos = i2 + 1
+
+			if not isTop then  insertNode(el, text)  end
+		end
+	end
+
+	return pos
+end
+
+
+
+--==============================================================
+--= Element methods
+--==============================================================
+
+
+
+-- Element:addChild( childNode )
+function Element.addChild(el, childNode)
+	table.insert(el, childNode)
+end
+Element.add_direct_child = Element.addChild -- :PenlightCompatibility
+
+
+
+-- element = Element:getFirstElement( )
+function Element.getFirstElement(el)
+	for _, childNode in ipairs(el) do
+		if xmlLib.isElement(childNode) then  return childNode  end
+	end
+	return nil
+end
+Element.first_childtag = Element.getFirstElement -- :PenlightCompatibility
+
+-- element = Element:getChildByName( tag )
+function Element.getChildByName(el, tagName)
+	for _, childNode in ipairs(el) do
+		if xmlLib.isElement(childNode) and childNode.tag == tag then
+			return childNode
+		end
+	end
+end
+Element.child_with_name = Element.getChildByName -- :PenlightCompatibility
+
+do
+	local function _findAllElementsByName(el, tag, elements, recurse)
+		for _, childNode in ipairs(el) do
+			if xmlLib.isElement(childNode) then
+				if childNode.tag == tag then
+					table.insert(elements, childNode)
+				end
+				if recurse then
+					_findAllElementsByName(childNode, tag, elements, true)
+				end
+			end
+		end
+	end
+
+	-- elements = Element:findAllElementsByName( tag [, doNotRecurse=false ] )
+	function Element.findAllElementsByName(el, tagName, doNotRecurse)
+		local elements = {}
+		_findAllElementsByName(el, tag, elements, (not doNotRecurse))
+		return elements
+	end
+	Element.get_elements_with_name = Element.findAllElementsByName -- :PenlightCompatibility
+end
+
+
+
+-- for childNode in Element:eachChild( )
+function Element.eachChild(el)
+	local i = 0
+	return function()
+		i = i + 1
+		return el[i]
+	end
+end
+Element.children = Element.eachChild -- :PenlightCompatibility
+
+-- for childElement in Element:eachChildElement( )
+function Element.eachChildElement(el)
+	local i = 0
+
+	return function()
+		while true do
+			i               = i + 1
+			local childNode = el[i]
+
+			if not childNode               then  return            end
+			if xmlLib.isElement(childNode) then  return childNode  end
+		end
+	end
+end
+Element.childtags = Element.eachChildElement -- :PenlightCompatibility
+
+
+
+-- attributes = Element:getAttributes( )
+function Element.getAttributes(el)
+	return el.attr
+end
+Element.get_attribs = Element.getAttributes -- :PenlightCompatibility
+
+-- Element:setAttribute( attributeName, attributeValue )
+-- Element:setAttribute( attributeName, nil ) -- Remove attribute.
+function Element.setAttribute(el, attrName, attrValue)
+	if not attrValue and not el.attr[attrName] then  return  end
+
+	if attrValue and not el.attr[attrName] then
+		table.insert(el.attr, attrName)
+	elseif not attrValue and el.attr[attrName] then
+		removeItem(el.attr, attrName)
+	end
+
+	el.attr[attrName] = attrValue
+end
+Element.set_attrib = Element.setAttribute -- :PenlightCompatibility
+
+-- Element:updateAttributes( attributes )
+function Element.updateAttributes(el, attrs)
+	for attrName, attrValue in pairs(attrs) do
+		if not el.attr[attrName] then
+			table.insert(el.attr, attrName)
+		end
+		el.attr[attrName] = attrValue
+	end
+end
+Element.set_attribs = Element.updateAttributes -- :PenlightCompatibility
+
+
+
+do
+	local function _getText(buffer, el)
+		for _, childNode in ipairs(el) do
+			if !!(IS_TEXT`childNode`) then
+				table.insert(buffer, childNode)
+			else
+				_getText(buffer, childNode)
+			end
+		end
+	end
+
+	-- text = Element:getText( )
+	function Element.getText(el)
+		local buffer = {}
+		_getText(buffer, el)
+		return table.concat(buffer)
+	end
+end
+
+-- This function is pretty silly - use getText() instead!
+-- text = Element:getTextOfChildren( )
+function Element.getTextOfChildren(el)
+	local buffer = {}
+	for _, childNode in ipairs(el) do
+		if !!(IS_TEXT`childNode`) then  table.insert(buffer, childNode)  end
+	end
+	return table.concat(buffer)
+end
+Element.get_text = Element.getTextOfChildren -- :PenlightCompatibility
+
+
+
+do
+	local function isEmpty(attr)
+		return not (attr and next(attr))
+	end
+
+	local function getKvPairIfAlone(t)
+		local k, v = next(t)
+		if next(t, k) ~= nil then  return nil  end
+		return k, v
+	end
+
+	local function appendCapture(matches, capture)
+		if isEmpty(capture) then  return  end -- No point in capturing empty tables...
+
+		local k = nil
+
+		if capture._ then -- If $_ was set then it is meant as the top-level key for the captured table.
+			k         = capture._
+			capture._ = nil
+
+			if isEmpty(capture) then  return  end
+		end
+
+		-- A table with only one pair {[0]=value} shall be reduced to that value...
+		local numKey, v = getKvPairIfAlone(capture)
+		if numKey == 0 then  capture = v  end
+
+		if k then
+			matches[k] = capture
+		else -- ... otherwise, we append the captured table.
+			table.insert(matches, capture)
+		end
+	end
+
+	local function maybeMakeNumber(pat)
+		if pat:find"^%d+$" then -- $1 etc. means use this as an array location.
+			return tonumber(pat)
+		end
+		return pat
+	end
+
+	local function captureAttribute(matches, pat, value)
+		matches[maybeMakeNumber(pat:sub(2))] = value
+		return true
+	end
+
+	local function _match(node, patEl, matches, keepGoing)
+		if node == nil then  node = ""  end
+
+		-- Attribute string matching is straight equality, except if the pattern is a $ capture, which always succeeds.
+		if !!(IS_TEXT`node`) then
+			if not !!(IS_TEXT`patEl`) then  return false  end
+
+			-- print(node, patEl) -- DEBUG
+
+			if patEl:find"^%$" then
+				return captureAttribute(matches, patEl, node)
+			else
+				return node == patEl
+			end
+		end
+
+		--
+		-- This is an element node.
+		-- For a match to succeed, the attributes must match as well.
+		--
+		local el = node
+		-- print(el.tag, patEl.tag) -- DEBUG
+
+		-- A tagname in the pattern ending with "-" is a wildcard and matches like an attribute.
+		local tagNamePat = patEl.tag:match"^(.-)%-$"
+
+		if tagNamePat then
+			tagNamePat          = maybeMakeNumber(tagNamePat)
+			matches[tagNamePat] = el.tag
+		end
+
+		local ok = true
+
+		if el.tag == patEl.tag or tagNamePat then
+			if isEmpty(patEl.attr) then
+				-- void
+
+			elseif isEmpty(el.attr) then
+				ok = false
+
+			else
+				for attrName, patAttrValue in pairs(patEl.attr) do
+					local elAttrValue = el.attr[attrName]
+
+					if not _match(elAttrValue, patAttrValue, matches) then
+						ok = false
+						break
+					end
+				end
+			end
+
+			-- The pattern may have child nodes. We match partially, so that {P1,P2} shall match {X,P1,X,X,P2,..}.
+			if ok and patEl[1] then
+				local elChildI  = 1
+				local patChildI = 1
+
+				local function advanceElement()
+					elChildI = elChildI + 1 -- Next child element of data.
+					if !!(IS_TEXT`el[elChildI]`) then  elChildI = elChildI + 1  end
+					return elChildI <= #el
+				end
+
+				repeat
+					local childNode = patEl[patChildI]
+
+					-- Repeated {{<...>}} patterns shall match one or more elements so e.g. {P+} will match {X,X,P,P,X,P,X,X,X}.
+					if xmlLib.isElement(childNode) and childNode.repeated then
+						local found = false
+
+						repeat
+							local submatches = {}
+							ok               = _match(el[elChildI], childNode, submatches, false)
+
+							if ok then
+								found = false--true
+								appendCapture(matches, submatches)
+							end
+						until not advanceElement() or (found and not ok)
+
+						patChildI = patChildI + 1
+
+					else
+						ok = _match(el[elChildI], childNode, matches, false)
+
+						if ok then  patChildI = patChildI + 1  end
+					end
+				until not advanceElement() or patChildI > #patEl -- Run out of elements or patterns to match.
+
+				-- If every element in our pattern matched ok, then it's been a successful match.
+				if patChildI > #patEl then  return true  end
+			end
+
+			if ok then  return true  end
+
+		else
+			ok = false
+		end
+
+		-- Keep going anyway - look at the children!
+		if keepGoing then
+			for child in el:eachChildElement() do
+				ok = _match(child, patEl, matches, keepGoing)
+				if ok then  break  end
+			end
+		end
+
+		return ok
+	end
+
+	-- matches = Element:match( xmlStringPattern )
+	-- matches = Element:match( elementPattern )
+	-- Returns nil and a message on error.
+	-- (See https://lunarmodules.github.io/Penlight/manual/06-data.md.html#XML)
+	function Element.match(el, patStrOrEl)
+		local patEl, err = cacheTemplate(patStrOrEl)
+		if not patEl then  return nil, err  end
+
+		xmlLib.walk(patEl, false, function(tagName, currentEl)
+			if
+				!!(IS_TEXT`currentEl[1]`) and xmlLib.isElement(currentEl[2]) and !!(IS_TEXT`currentEl[3]`)
+				and currentEl[1]:find"%s*{{" and currentEl[3]:find"}}%s*"
+			then
+				table.remove(currentEl, 1)
+				table.remove(currentEl, 2)
+				currentEl[1].repeated = true
+			end
+		end)
+
+		local matches = {}
+		local ok      = _match(el, patEl, matches, true)
+
+		if not ok then
+			return nil, "Matching failed."
+		end
+
+		return matches
+	end
+end
+
+
+
+-- for childElement in Element:eachMatchingChildElement( [ tag=any, xmlns=(self.attr.xmlns or any) ] )
+function Element.eachMatchingChildElement(el, tagName, xmlns)
+	xmlns   = xmlns or el.attr.xmlns
+	local i = 0
+
+	return function()
+		while true do
+			i               = i + 1
+			local childNode = el[i]
+
+			if not childNode then  return  end
+
+			if
+				xmlLib.isElement(childNode)
+				and (not tagName or childNode.tag        == tagName)
+				and (not xmlns   or childNode.attr.xmlns == xmlns)
+			then
+				return childNode
+			end
+		end
+	end
+end
+Element.matching_tags = Element.eachMatchingChildElement -- :PenlightCompatibility
+
+
+
+
+-- self = Element:stackAddChild( childNode )
+function Element.stackAddChild(el, childNode)
+	local targetEl = (el._last[#el._last] or el)
+	targetEl:addChild(childNode)
+	return el
+end
+Element.add_child = Element.stackAddChild -- :PenlightCompatibility
+
+-- self = Element:stackAddElement( tag [, attributes ] )
+function Element.stackAddElement(el, tagName, attrs)
+	assertArg(1, tagName, "string")
+
+	if attrs then  fixArrayPartOfAttributes(attrs) end
+
+	local elToAdd  = xmlLib.newElement(tagName, attrs)
+	local targetEl = (el._last[#el._last] or el)
+
+	targetEl:addChild(elToAdd)
+	table.insert(el._last, elToAdd)
+
+	return el
+end
+Element.addtag = Element.stackAddElement -- :PenlightCompatibility
+
+-- self = Element:stackAddText( text )
+function Element.stackAddText(el, text)
+	local targetEl = (el._last[#el._last] or el)
+	targetEl:addChild(text)
+	return el
+end
+Element.text = Element.stackAddText -- :PenlightCompatibility
+
+-- self = Element:stackUp( )
+function Element.stackUp(el)
+	table.remove(el._last)
+	return el
+end
+Element.up = Element.stackUp -- :PenlightCompatibility
+
+-- self = Element:stackReset( )
+function Element.stackReset(el)
+	for i = #el._last, 1, -1 do
+		el._last[i] = nil
+	end
+	return el
+end
+Element.reset = Element.stackReset -- :PenlightCompatibility
+
+
+
+-- self = Element:mapElements( callback )
+function Element.mapElements(el, cb)
+	local i = 1
+
+	while el[i] do
+		if xmlLib.isElement(el[i]) then
+			local replacement = cb(el[i])
+			if replacement == nil then
+				table.remove(el, i)
+			else
+				el[i] = replacement
+				i     = i + 1
+			end
+		else
+			i = i + 1
+		end
+	end
+
+	return el
+end
+Element.maptags = Element.mapElements -- :PenlightCompatibility
+
+
+
+do
+	local templateCache = {}
+
+	function cacheTemplate(template)
+		if !!(IS_TEXT`template`) then
+			if templateCache[template] then
+				template = templateCache[template]
+			else
+				local str, err = template
+				template, err = xmlLib.parse(str, false, true)
+				if not template then  return nil, err  end
+				templateCache[str] = template
+			end
+		elseif not xmlLib.isElement(template) then
+			return nil, "Template is not a document."
+		end
+		return template
+	end
+
+	local function prepareData(data)
+		-- A hack for ensuring that $1 maps to first element of data, etc.
+		-- Either this or could change the gsub call just below.
+		for i, v in ipairs(data) do
+			data[tostring(i)] = v
+		end
+	end
+
+	-- newElement = Element:substitute( data )
+	-- newElement = Element.substitute( xmlString, data )
+	-- Returns nil and a message on error.
+	function Element.substitute(templateStrOrEl, data)
+		if not (type(data) == "table" and next(data)) then
+			return nil, "data must be a non-empty table"
+		end
+
+		local dataIsData = (type(data[1]) ~= "table")
+		if dataIsData then  prepareData(data)  end
+
+		local templateEl, err = cacheTemplate(templateStrOrEl)
+		if not templateEl then  return nil, err  end
+
+		local function _substitute(item)
+			return xmlLib.clone(templateEl, function(s)
+				return s:gsub("%$(%w+)", item)
+			end)
+		end
+
+		if dataIsData then  return _substitute(data)  end
+
+		local list = {}
+		for _, item in ipairs(data) do
+			prepareData(item)
+			table.insert(list, _substitute(item))
+		end
+
+		if data.tag then
+			list = xmlLib.elem(data.tag, list)
+		end
+
+		return list
+	end
+	Element.subst = Element.substitute -- :PenlightCompatibility
+end
+
+
+
+--==============================================================
+--= Library functions
+--==============================================================
+
+
+
+local function shouldEncodeAsCdata(s)
+	if s:find("]]>", 1, true) then  return false  end
+
+	local entitiesNeeded = 0
+	local pos            = 1
+
+	while pos <= #s do
+		local charPos = s:find("[&<>\"']", pos)
+		if not charPos then  return false  end
+
+		entitiesNeeded = entitiesNeeded + 1
+		if entitiesNeeded >= 4 then  return true  end
+
+		pos = charPos + 1
+	end
+end
+
+local function writeAttribute(buffer, k,v)
+	table.insert(buffer, " ")
+	table.insert(buffer, k)
+	table.insert(buffer, '="')
+	table.insert(buffer, (v:gsub("[&<>\"']", CHAR_TO_ENTITY)))
+	table.insert(buffer, '"')
+end
+
+local function nodeToXml(buffer, node)
+	if !!(IS_TEXT`node`) then
+		if shouldEncodeAsCdata(node) then
+			table.insert(buffer, "<![CDATA[")
+			table.insert(buffer, node)
+			table.insert(buffer, "]]>")
+		else
+			table.insert(buffer, (node:gsub("[&<>\"']", CHAR_TO_ENTITY)))
+		end
+		return
+	end
+
+	local el = node
+
+	table.insert(buffer, "<")
+	table.insert(buffer, el.tag)
+
+	if not next(el.attr) then
+		-- void
+
+	elseif el.attr[1] then
+		local visited = {}
+
+		for _, k in ipairs(el.attr) do
+			local v = el.attr[k]
+			if v and not visited[k] then -- We assume attr[k] may have been removed but the array was not updated, and that the array may have duplicates.
+				writeAttribute(buffer, k,v)
+				visited[k] = true
+			end
+		end
+
+		-- In case a new attr[k] was added but the array wasn't updated then we append the new attributes at the end.
+		for k, v in pairsSorted(el.attr) do
+			if type(k) == "string" and not visited[k] then
+				writeAttribute(buffer, k,v)
+			end
+		end
+
+	else
+		for k, v in pairsSorted(el.attr) do
+			if type(k) == "string" then
+				writeAttribute(buffer, k,v)
+			end
+		end
+	end
+
+	if not el[1] then -- Assume el.empty has not been updated properly.
+		table.insert(buffer, "/>")
+
+	else
+		table.insert(buffer, ">")
+
+		for _, childNode in ipairs(el) do
+			nodeToXml(buffer, childNode)
+		end
+
+		table.insert(buffer, "</")
+		table.insert(buffer, el.tag)
+		table.insert(buffer, ">")
+	end
+end
+
+function xmlLib.toXml(node)
+	local buffer = {}
+	nodeToXml(buffer, node)
+	return table.concat(buffer, "")
+end
+Element.toXml = xmlLib.toXml -- :Alias
+
+
+
+local function writeAttributePretty(buffer, k,v, initialIndent,attrIndent)
+	if attrIndent then
+		table.insert(buffer, "\n")
+		table.insert(buffer, initialIndent)
+		table.insert(buffer, attrIndent)
+	else
+		table.insert(buffer, " ")
+	end
+
+	table.insert(buffer, k)
+	table.insert(buffer, '="')
+	table.insert(buffer, (v:gsub("[&<>\"']", CHAR_TO_ENTITY)))
+	table.insert(buffer, '"')
+end
+
+local function nodeToXmlPretty(buffer, node, initialIndent,indent,attrIndent, indentTags)
+	if !!(IS_TEXT`node`) then
+		if not node:find"%S" then
+			-- void
+		elseif shouldEncodeAsCdata(node) then
+			table.insert(buffer, "<![CDATA[")
+			table.insert(buffer, node)
+			table.insert(buffer, "]]>")
+		else
+			table.insert(buffer, (node:gsub("[&<>\"']", CHAR_TO_ENTITY)))
+		end
+		return
+	end
+
+	local el = node
+
+	if indentTags then  table.insert(buffer, "\n")  end
+	table.insert(buffer, initialIndent)
+	table.insert(buffer, "<")
+	table.insert(buffer, el.tag)
+
+	if not next(el.attr) then
+		-- void
+
+	elseif el.attr[1] then
+		local visited = {}
+
+		for _, k in ipairs(el.attr) do
+			local v = el.attr[k]
+			if v and not visited[k] then -- We assume attr[k] may have been removed but the array was not updated, and that the array may have duplicates.
+				writeAttributePretty(buffer, k,v, initialIndent,attrIndent)
+				visited[k] = true
+			end
+		end
+
+		-- In case a new attr[k] was added but the array wasn't updated then we append the new attributes at the end.
+		for k, v in pairsSorted(el.attr) do
+			if type(k) == "string" and not visited[k] then
+				writeAttributePretty(buffer, k,v, initialIndent,attrIndent)
+			end
+		end
+
+	else
+		for k, v in pairsSorted(el.attr) do
+			if type(k) == "string" then
+				writeAttributePretty(buffer, k,v, initialIndent,attrIndent)
+			end
+		end
+	end
+
+	if attrIndent and next(el.attr) then
+		table.insert(buffer, "\n")
+		table.insert(buffer, initialIndent)
+	end
+
+	if not el[1] then -- Assume el.empty has not been updated properly.
+		table.insert(buffer, "/>")
+
+	else
+		table.insert(buffer, ">")
+
+		local hasChildElements = false
+		for _, childNode in ipairs(el) do
+			nodeToXmlPretty(buffer, childNode, initialIndent..indent,indent,attrIndent, indentTags)
+			hasChildElements = hasChildElements or xmlLib.isElement(childNode)
+		end
+
+		if hasChildElements and indentTags then
+			table.insert(buffer, "\n")
+			table.insert(buffer, initialIndent)
+		end
+
+		table.insert(buffer, "</")
+		table.insert(buffer, el.tag)
+		table.insert(buffer, ">")
+	end
+end
+
+--
+-- This is only for (legacy) pretty-printing of the XML - call xmlLib.toXml() or
+-- element:toXml() to create an XML string without any modifications to the data.
+--
+-- xmlString = xmlLib.toPrettyXml( node [, initialIndentationString="", indentationString=noIndentation, attributeIndentationString=noIndentation, prefaceProcessingInstruction=false ] )
+-- xmlString = xmlLib.toPrettyXml( node, initialIndentationString="", indentationString=noIndentation, attributeIndentationString=noIndentation, processingInstructionToPreface )
+--
+-- Specifying indentationString puts each tag on its own line.
+-- Specifying attributeIndentationString puts each attribute on its own line.
+--
+function xmlLib.toPrettyXml(node, initialIndent,indent,attrIndent, xmlPi)
+	local indentTags = (indent ~= nil)
+
+	initialIndent = (initialIndent or "")
+	indent        = (indent        or "")
+
+	local buffer = {}
+	if xmlPi then
+		buffer[1] = (type(xmlPi) == "string") and xmlPi or '<?xml version="1.0" encoding="UTF-8"?>'
+	end
+
+	nodeToXmlPretty(buffer, node, initialIndent,indent,attrIndent, indentTags)
+
+	return table.concat(buffer)
+end
+xmlLib.tostring    = xmlLib.toPrettyXml -- :PenlightCompatibility
+Element.__tostring = xmlLib.toPrettyXml -- :PenlightCompatibility
+
+
+
+-- document = parseXml( xmlString [, filePathForError ] )
+function xmlLib.parseXml(s, pathForError)
+	pathForError = pathForError or "[xml]"
+
+	if s:find"%z" then -- A valid UTF-16 file should always have NULLs in it.
+		fileError(pathForError, s, 1, "Only UTF-8 is supported.")
+	end
+
+	local docWrapper = xmlLib.newElement("")
+	local pos        = parseElementContents(s, 1, pathForError, docWrapper, true)
+
+	if pos <= #s then
+		fileError(pathForError, s, pos, "Unexpected end tag.")
+	end
+
+	local doc = nil
+
+	for _, node in ipairs(docWrapper) do
+		if not !!(IS_TEXT`node`) then
+			if doc then
+				fileError(pathForError, s, #s, "There are multiple root elements.")
+			end
+			doc = node
+		end
+	end
+
+	if not doc then
+		fileError(pathForError, s, 0, "There is no document.")
+	end
+
+	return doc
+end
+
+local function removeWhitespaceNodes(el)
+	for i, childNode in ipairsr(el) do
+		if !!(IS_TEXT`childNode`) and childNode:match"^%s+$" then
+			table.remove(el, i)
+		end
+	end
+
+	el.empty = not el[1]
+
+	xmlLib.walk(el, false, function(tagName, currentEl)
+		if !!(IS_TEXT`currentEl`) then  return  end
+
+		for i, childNode in ipairsr(currentEl) do
+			if !!(IS_TEXT`childNode`) and childNode:match"^%s+$" then
+				table.remove(currentEl, i)
+			end
+		end
+
+		currentEl.empty = not currentEl[1]
+	end)
+end
+
+-- Use parseXml() instead! :PenlightCompatibility
+--
+-- document = xmlLib.parse( xmlString,     isFile, useBasic )
+-- document = xmlLib.parse( xmlFileHandle, isFile, useBasic )
+--
+-- 'isFile' and 'useBasic' are ignored.
+-- Returns nil and a message on error.
+--
+function xmlLib.parse(s, isFile, useBasic)
+	if type(s) == "userdata" then
+		s = s:read"*a"
+		if not s then
+			return nil, "Could not read file."
+		end
+	end
+
+	local ok, docOrErr = pcall(xmlLib.parseXml, s, nil)
+	if not ok then
+		return nil, tostring(isErrorObject(docOrErr) and docOrErr.message or docOrErr)
+	end
+	local doc = docOrErr
+
+	removeWhitespaceNodes(doc)
+	return doc
+end
+
+-- Use parseXml() instead! :PenlightCompatibility
+-- document = xmlLib.basic_parse( string [, preserveAllWhitespace=false, isHtml=false ] )
+function xmlLib.basic_parse(s, preserveAllWhitespace, isHtml)
+	if isHtml then  error("HTML parsing not supported.", 2)  end
+
+	local doc, err = xmlLib.parse(s)
+	if not doc then  error(err, 2)  end
+
+	if not preserveAllWhitespace then
+		removeWhitespaceNodes(doc)
+	end
+
+	return doc
+end
+
+-- :PenlightCompatibility
+-- document = xmlLib.parsehtml( htmlString )
+function xmlLib.parsehtml(s)
+	return (xmlLib.basic_parse(s, false, true))
+end
+
+
+
+-- xmlLib.walk( element, depthFirst, callback )
+-- callback = function( tag, node )
+function xmlLib.walk(el, depthFirst, cb)
+	if not depthFirst then  cb(el.tag, el)  end
+
+	for _, childNode in ipairs(el) do
+		if xmlLib.isElement(childNode) then
+			xmlLib.walk(childNode, depthFirst, cb)
+		end
+	end
+
+	if depthFirst then  cb(el.tag, el)  end
+end
+
+
+
+-- bool = xmlLib.isElement( value )
+function xmlLib.isElement(v)
+	return type(v) == "table" and getmetatable(v) == Element
+end
+xmlLib.is_tag = xmlLib.isElement -- :PenlightCompatibility
+
+
+
+-- element = xmlLib.newElement( tag [, attributes ] )
+function xmlLib.newElement(tagName, attrs)
+	assertArg(1, tagName, "string")
+
+	if attrs then  fixArrayPartOfAttributes(attrs) end
+
+	local el = {
+		_last  = {--[[ element1, ... ]]},
+
+		tag   = tagName,
+		attr  = attrs or {--[[ [attrName1]=attrValue1, attrName1, ... ]]},
+		empty = false,
+
+		-- [1] = childNode1, ...
+	}
+	return setmetatable(el, Element)
+end
+xmlLib.new = xmlLib.newElement -- :PenlightCompatibility
+
+
+
+-- element = xmlLib.element( tag [, childNode ] )
+-- element = xmlLib.element( tag [, attributesAndChildNodes ] )
+function xmlLib.element(tagName, prototype)
+	local el = xmlLib.newElement(tagName)
+
+	if not prototype then
+		-- void
+
+	elseif !!(IS_TEXT`prototype`) or xmlLib.isElement(prototype) then
+		el[1] = prototype
+
+	else
+		for k, v in pairsSorted(prototype) do
+			if type(k) == "string" then
+				table.insert(el.attr, k)
+				el.attr[k] = v
+			else
+				el[k] = v
+			end
+		end
+	end
+
+	return el
+end
+xmlLib.elem = xmlLib.element -- :PenlightCompatibility
+
+
+
+do
+	local function _clone(node, textSubstCallback, parentEl)
+		if !!(IS_TEXT`node`) then
+			if textSubstCallback then  node = textSubstCallback(node, "*TEXT", parentEl)  end
+			return node
+		end
+
+		local el = node
+
+		local elClone = xmlLib.newElement("")
+		local tagName = el.tag
+
+		if textSubstCallback then  tagName = textSubstCallback(tagName, "*TAG", el)  end
+
+		elClone.tag = tagName
+
+		for _, attrName in ipairs(el.attr) do
+			local attrValue = el.attr[attrName]
+			if textSubstCallback then  attrValue = textSubstCallback(attrValue, attrName, el)  end
+
+			table.insert(elClone.attr, attrName)
+			elClone.attr[attrName] = attrValue
+		end
+
+		for i, childNode in ipairs(el) do
+			elClone[i] = _clone(childNode, textSubstCallback, el)
+		end
+
+		return elClone
+	end
+
+	-- clone = xmlLib.clone( node [, textSubstitutionCallback ] )
+	-- text  = textSubstitutionCallback( text, kind, parentElement )
+	-- kind  = attributeName | "*TEXT" | "*TAG"
+	-- parentElement is nil if 'node' is a text node.
+	function xmlLib.clone(node, textSubstCallback)
+		return (_clone(node, textSubstCallback, nil))
+	end
+	Element.filter = xmlLib.clone -- :Alias
+end
+
+
+
+-- nodesLookEqual = xmlLib.compare( value1, value2 )
+-- Returns false if any value is not a node.
+function xmlLib.compare(v1, v2)
+	if !!(IS_TEXT`v1`) and !!(IS_TEXT`v2`) then
+		return v1 == v2
+	end
+	if not (xmlLib.isElement(v1) and xmlLib.isElement(v2)) then
+		return false
+	end
+
+	if v1.tag ~= v2.tag then  return false  end
+	if #v1    ~= #v2    then  return false  end
+
+	for k, v in pairs(v1.attr) do
+		if type(k) == "string" and v2.attr[k] ~= v then  return false  end
+	end
+	for k, v in pairs(v2.attr) do
+		if type(k) == "string" and v1.attr[k] ~= v then  return false  end
+	end
+
+	for i = 1, #v1 do
+		if not xmlLib.compare(v1[i], v2[i]) then
+			return false
+		end
+	end
+
+	return true
+end
+
+
+
+do
+	local constructors = {}
+
+	-- constructor1, ... = xmlLib.makeElementConstructors( tags )
+	-- constructor1, ... = xmlLib.makeElementConstructors( "tag,..." )
+	function xmlLib.makeElementConstructors(tagNames)
+		if type(tagNames) == "string" then
+			local _tagNames = {}
+
+			for tagName in tagNames:gmatch"[^,]+" do
+				tagName = tagName:gsub("^%s+", ""):gsub("%s+$", "")
+				if tagName == "" then
+					error("A value in the comma-separated list is empty.")
+				end
+
+				table.insert(_tagNames, tagName)
+			end
+
+			tagNames = _tagNames
+		end
+
+		for i, tag in ipairs(tagNames) do
+			constructors[i] = function(items)
+				return xmlLib.element(tag, items)
+			end
+		end
+
+		return unpack(constructors, 1, #tagNames)
+	end
+	xmlLib.tags = xmlLib.makeElementConstructors
+end
+
+
+
+--==============================================================
+
+return xmlLib

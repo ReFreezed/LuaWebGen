@@ -1,0 +1,23 @@
+<?xml ignore="?>" version="1.0" encoding="UTF-8"?>
+
+<!DOCTYPE greeting [
+	<!ELEMENT greeting (#PCDATA)>
+	<!ATTLIST pre xml:space (preserve) #FIXED 'preserve'>
+	<!DOG "woof << WOOF">
+]>
+
+<information>
+	<place id="5">
+		<country>Sweden</country>
+		<cities>Stockholm &amp; Uppsala</cities>
+	</place>
+	<space:whatever>
+		<thing op="&quot;">Apple <![CDATA[with <i>sauce</i>!]]></thing>
+		<!-- Just a comment here. <foo> -->
+		<bool value="true" bad-but-ok='"'
+			important = "Very much, I tell you." hot="58&deg;C" />
+		<nothing1  percent="&#37; and &#x000000000000000000000025;"  />
+		<nothing2  ></nothing2  >
+	</space:whatever>
+	<many-amps>&amp;&amp;&amp;&amp;&amp;&amp;&amp;&amp;&amp;&amp;&amp;]]</many-amps>
+</information>

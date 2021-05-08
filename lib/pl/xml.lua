@@ -66,8 +66,8 @@ end
 -- @param text_or_file  File or string representation.
 -- @param is_file       Whether text_or_file is a file name or not.
 -- @param use_basic     Do a basic parse.
--- @return             A parsed LOM document with the document metatatables set.
--- @return nil, error  The error can either be a file error or a parse error.
+-- @return              A parsed LOM document with the document metatatables set.
+-- @return nil, error   The error can either be a file error or a parse error.
 function _M.parse(text_or_file, is_file, use_basic)
     local parser,status,lom
     if use_basic then parser = _M.basic_parse
@@ -486,15 +486,15 @@ function _M.compare(t1,t2)
     if #t1 ~= #t2 then return false, 'size '..#t1..' ~= size '..#t2..' for tag '..t1.tag end
     -- compare attributes
     for k,v in pairs(t1.attr) do
-        if t2.attr[k] ~= v then return false, 'mismatch attrib' end
+        if is_text(k) and t2.attr[k] ~= v then return false, 'mismatch attrib' end
     end
     for k,v in pairs(t2.attr) do
-        if t1.attr[k] ~= v then return false, 'mismatch attrib' end
+        if is_text(k) and t1.attr[k] ~= v then return false, 'mismatch attrib' end
     end
     -- compare children
     for i = 1,#t1 do
         local yes,err = _M.compare(t1[i],t2[i])
-        if not yes then return err end
+        if not yes then return false, err end
     end
     return true
 end
@@ -532,6 +532,7 @@ local html_empty_elements = { --lists all HTML empty (void) elements  :Edit
     isindex = true,
     link    = true,
     meta    = true,
+    option  = true,
     param   = true,
     track   = true,
     wbr     = true,
@@ -574,7 +575,8 @@ function _M.basic_parse(s,all_text,html)
 
     t_insert(stack, top)
     local ni,c,label,xarg, empty, _, istart
-    local i, j = 1, 1
+    local i = 1
+    local j
     -- we're not interested in <?xml version="1.0"?>
     _,istart = s_find(s,'^%s*<%?[^%?]+%?>%s*')
     if not istart then -- or <!DOCTYPE ...>
@@ -598,8 +600,6 @@ function _M.basic_parse(s,all_text,html)
             if html then
                 label = label:lower()
                 if html_empty_elements[label] then empty = "/" end
-                if label == 'script' then
-                end
             end
             if all_text or not s_find(text, "^%s*$") then
                 t_insert(top, unescape(text))
@@ -621,7 +621,7 @@ function _M.basic_parse(s,all_text,html)
                 t_insert(top, toclose)
             end
         end
-    i = j+1
+        i = j+1
     end
     local text = s_sub(s, i)
     if all_text or  not s_find(text, "^%s*$") then

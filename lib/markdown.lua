@@ -1196,7 +1196,7 @@ end
 setfenv(1, _G)
 M.lock(M)
 
--- Expose markdown function to the world
-markdown = M.markdown
+-- Expose markdown function to the world  @Edit: No!
+-- markdown = M.markdown
 
-return markdown
+return M.markdown

@@ -47,7 +47,7 @@ _G.dateLib     = require"date"
 _G.markdownLib = require"markdown"
 _G.tomlLib     = require"toml"
 _G.urlLib      = require"url"
-_G.xmlLib      = require"pl.xml"
+_G.xmlLib      = require"xml"
 
 
 

@@ -10,7 +10,7 @@
 --=
 --==============================================================
 
-	assertArg
+	assert, assertArg
 	attributeWith, attributeWithAny
 	cleanupPath
 	countStrings, countSubStrings
@@ -1364,7 +1364,7 @@ end
 
 dataParserIsBinary.xml = false
 function dataParsers.xml(dataStr, path)
-	return (assert(xmlLib.parse(dataStr, false)))
+	return (assert(xmlLib.parseXml(dataStr, path)))
 end
 
 -- dataFolderReader = newDataFolderReader( directory [, isTop=false ] )
@@ -1713,6 +1713,15 @@ end
 
 
 
+_G._assert = assert
+
+function _G.assert(v, ...)
+	if v then  return v, ...  end
+
+	local message = (... ~= nil) and tostring(...) or "Assertion failed!"
+	_error(message, 2)
+end
+
 -- value = assertArg( [ functionName=auto, ] argumentNumber, value, expectedValueType1, ... [, depth=2 ] )
 do
 	local function _assertArg(fName, n, v, ...)
@@ -1778,7 +1787,7 @@ do
 		["<"] = "&lt;",
 		[">"] = "&gt;",
 		['"'] = "&quot;",
-		["'"] = "&#39;",
+		["'"] = "&apos;",
 	}
 
 	function _G.encodeHtmlEntities(s)
@@ -1788,9 +1797,8 @@ end
 
 
 
-function _G.markdownToHtml(md)
-	return markdownLib(md)
-end
+-- html = markdownToHtml( markdown )
+_G.markdownToHtml = markdownLib
 
 
 
