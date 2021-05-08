@@ -13,12 +13,12 @@ return function()
 	end
 
 	--[[ XML module tests.
-	require"pl.xml"
+	-- require"pl.xml"
 	timerStart("our") ; xmlTests(xml)             ; timerEnd()
-	timerStart("pl")  ; xmlTests(require"pl.xml") ; timerEnd()
+	-- timerStart("pl")  ; xmlTests(require"pl.xml") ; timerEnd()
 	--]]
 
-	--[==[ XML parsing.
+	-- [==[ XML parsing.
 	local function readTextFile(path)
 		local file, err = io.open(path, "r")
 		if not file then  return nil, err  end
