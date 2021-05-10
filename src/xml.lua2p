@@ -72,16 +72,6 @@ end
 
 
 
-local function fixArrayPartOfAttributes(attrs)
-	if not (next(attrs) and not attrs[1]) then  return  end
-
-	for _, attrName in ipairs(sort(getKeys(attrs))) do
-		table.insert(attrs, attrName)
-	end
-end
-
-
-
 local documentCache = {}
 
 local function cacheIfXmlString(xmlStrOrEl)
@@ -237,15 +227,10 @@ local function parseAttributes(s, pos, pathForError, attrs)
 		end
 
 		local attrValue = s:sub(attrValuePos, pos-1)
-		attrValue       = decodeEntities(attrValue, 1, s, attrValuePos-1, pathForError, nil)
+		attrs[attrName] = decodeEntities(attrValue, 1, s, attrValuePos-1, pathForError, nil)
 		pos             = pos + !(#'"')
 
 		!!(EAT_SPACE)
-
-		if not attrs[attrName] then
-			table.insert(attrs, attrName)
-		end
-		attrs[attrName] = attrValue
 	end
 
 	return pos
@@ -377,9 +362,11 @@ local function parseElementContents(s, pos, pathForError, el, isTop)
 				pos = parseAttributes(s, pos, pathForError, childEl.attr)
 			end
 
+			local isEmpty = false
+
 			if s:find("^/", pos) then
-				pos           = pos + !(#"/")
-				childEl.empty = true
+				pos     = pos + !(#"/")
+				isEmpty = true
 			end
 
 			if not s:find("^>", pos) then
@@ -389,9 +376,8 @@ local function parseElementContents(s, pos, pathForError, el, isTop)
 
 			insertNode(el, childEl)
 
-			if not childEl.empty then
-				pos           = parseElementContents(s, pos, pathForError, childEl, false)
-				childEl.empty = not childEl[1]
+			if not isEmpty then
+				pos = parseElementContents(s, pos, pathForError, childEl, false)
 
 				if not s:find("^</", pos) then
 					fileError(pathForError, s, pos, "Expected end tag for '<%s>' at line %d.", tagName, getLineNumber(s, posStart))
@@ -537,14 +523,6 @@ Element.get_attribs = Element.getAttributes -- :PenlightCompatibility
 -- Element:setAttribute( attributeName, attributeValue )
 -- Element:setAttribute( attributeName, nil ) -- Remove the attribute.
 function Element.setAttribute(el, attrName, attrValue)
-	if not attrValue and not el.attr[attrName] then  return  end
-
-	if attrValue and not el.attr[attrName] then
-		table.insert(el.attr, attrName)
-	elseif not attrValue and el.attr[attrName] then
-		removeItem(el.attr, attrName)
-	end
-
 	el.attr[attrName] = attrValue
 end
 Element.set_attrib = Element.setAttribute -- :PenlightCompatibility
@@ -552,12 +530,7 @@ Element.set_attrib = Element.setAttribute -- :PenlightCompatibility
 -- Element:updateAttributes( attributes )
 function Element.updateAttributes(el, attrs)
 	for attrName, attrValue in pairs(attrs) do
-		if type(attrName) == "string" then
-			if not el.attr[attrName] then
-				table.insert(el.attr, attrName)
-			end
-			el.attr[attrName] = attrValue
-		end
+		el.attr[attrName] = attrValue
 	end
 end
 Element.set_attribs = Element.updateAttributes -- :PenlightCompatibility
@@ -684,13 +657,11 @@ do
 
 			else
 				for attrName, patAttrValue in pairs(patEl.attr) do
-					if type(attrName) == "string" then
-						local elAttrValue  = el.attr[attrName]
+					local elAttrValue = el.attr[attrName]
 
-						if not _match(elAttrValue, patAttrValue, matches) then
-							ok = false
-							break
-						end
+					if not _match(elAttrValue, patAttrValue, matches) then
+						ok = false
+						break
 					end
 				end
 			end
@@ -832,19 +803,19 @@ end
 
 
 
--- self = Element:stackAddChild( childNode )
-function Element.stackAddChild(el, childNode)
-	local targetEl = (el._last[#el._last] or el)
+-- self = Element:stackChild( childNode )
+function Element.stackChild(el, childNode)
+	local targetEl = (el._last and el._last[#el._last] or el)
 	targetEl:addChild(childNode)
 	return el
 end
-Element.add_child = Element.stackAddChild -- :PenlightCompatibility
+Element.add_child = Element.stackChild -- :PenlightCompatibility
 
--- self = Element:stackAddElement( tag [, attributes ] )
-function Element.stackAddElement(el, tagName, attrs)
+-- self = Element:stackElement( tag [, attributes ] )
+function Element.stackElement(el, tagName, attrs)
 	assertArg(1, tagName, "string")
 
-	if attrs then  fixArrayPartOfAttributes(attrs) end
+	el._last = el._last or {}
 
 	local elToAdd  = xml.newElement(tagName, attrs)
 	local targetEl = (el._last[#el._last] or el)
@@ -854,27 +825,29 @@ function Element.stackAddElement(el, tagName, attrs)
 
 	return el
 end
-Element.addtag = Element.stackAddElement -- :PenlightCompatibility
+Element.addtag = Element.stackElement -- :PenlightCompatibility
 
--- self = Element:stackAddText( text )
-function Element.stackAddText(el, text)
-	local targetEl = (el._last[#el._last] or el)
+-- self = Element:stackText( text )
+function Element.stackText(el, text)
+	local targetEl = (el._last and el._last[#el._last] or el)
 	targetEl:addChild(text)
 	return el
 end
-Element.text = Element.stackAddText -- :PenlightCompatibility
+Element.text = Element.stackText -- :PenlightCompatibility
 
 -- self = Element:stackUp( )
 function Element.stackUp(el)
-	table.remove(el._last)
+	if el._last then  table.remove(el._last)  end
 	return el
 end
 Element.up = Element.stackUp -- :PenlightCompatibility
 
 -- self = Element:stackReset( )
 function Element.stackReset(el)
-	for i = #el._last, 1, -1 do
-		el._last[i] = nil
+	if el._last then
+		for i = #el._last, 1, -1 do
+			el._last[i] = nil
+		end
 	end
 	return el
 end
@@ -979,14 +952,6 @@ local function shouldEncodeAsCdata(s)
 	end
 end
 
-local function writeAttribute(buffer, k,v)
-	table.insert(buffer, " ")
-	table.insert(buffer, k)
-	table.insert(buffer, '="')
-	table.insert(buffer, (v:gsub("[&<>\"']", CHAR_TO_ENTITY)))
-	table.insert(buffer, '"')
-end
-
 local function nodeToXml(buffer, node)
 	if !!(IS_TEXT`node`) then
 		if shouldEncodeAsCdata(node) then
@@ -1004,36 +969,17 @@ local function nodeToXml(buffer, node)
 	table.insert(buffer, "<")
 	table.insert(buffer, el.tag)
 
-	if not next(el.attr) then
-		-- void
-
-	elseif el.attr[1] then
-		local visited = {}
-
-		for _, k in ipairs(el.attr) do
-			local v = el.attr[k]
-			if v and not visited[k] then -- We assume attr[k] may have been removed but the array was not updated, and that the array may have duplicates.
-				writeAttribute(buffer, k,v)
-				visited[k] = true
-			end
-		end
-
-		-- In case a new attr[k] was added but the array wasn't updated then we append the new attributes at the end.
-		for k, v in pairsSorted(el.attr) do
-			if type(k) == "string" and not visited[k] then
-				writeAttribute(buffer, k,v)
-			end
-		end
-
-	else
-		for k, v in pairsSorted(el.attr) do
-			if type(k) == "string" then
-				writeAttribute(buffer, k,v)
-			end
+	for k, v in pairsSorted(el.attr) do
+		if type(k) == "string" then
+			table.insert(buffer, " ")
+			table.insert(buffer, k)
+			table.insert(buffer, '="')
+			table.insert(buffer, (v:gsub("[&<>\"']", CHAR_TO_ENTITY)))
+			table.insert(buffer, '"')
 		end
 	end
 
-	if not el[1] then -- Assume el.empty has not been updated properly.
+	if not el[1] then
 		table.insert(buffer, "/>")
 
 	else
@@ -1063,21 +1009,6 @@ Element.toXml = xml.toXml -- :Alias
 
 
 
-local function writeAttributePretty(buffer, k,v, initialIndent,attrIndent)
-	if attrIndent then
-		table.insert(buffer, "\n")
-		table.insert(buffer, initialIndent)
-		table.insert(buffer, attrIndent)
-	else
-		table.insert(buffer, " ")
-	end
-
-	table.insert(buffer, k)
-	table.insert(buffer, '="')
-	table.insert(buffer, (v:gsub("[&<>\"']", CHAR_TO_ENTITY)))
-	table.insert(buffer, '"')
-end
-
 local function nodeToXmlPretty(buffer, node, initialIndent,indent,attrIndent, indentTags)
 	if !!(IS_TEXT`node`) then
 		if not node:find"%S" then
@@ -1099,33 +1030,19 @@ local function nodeToXmlPretty(buffer, node, initialIndent,indent,attrIndent, in
 	table.insert(buffer, "<")
 	table.insert(buffer, el.tag)
 
-	if not next(el.attr) then
-		-- void
-
-	elseif el.attr[1] then
-		local visited = {}
-
-		for _, k in ipairs(el.attr) do
-			local v = el.attr[k]
-			if v and not visited[k] then -- We assume attr[k] may have been removed but the array was not updated, and that the array may have duplicates.
-				writeAttributePretty(buffer, k,v, initialIndent,attrIndent)
-				visited[k] = true
-			end
+	for k, v in pairsSorted(el.attr) do
+		if attrIndent then
+			table.insert(buffer, "\n")
+			table.insert(buffer, initialIndent)
+			table.insert(buffer, attrIndent)
+		else
+			table.insert(buffer, " ")
 		end
 
-		-- In case a new attr[k] was added but the array wasn't updated then we append the new attributes at the end.
-		for k, v in pairsSorted(el.attr) do
-			if type(k) == "string" and not visited[k] then
-				writeAttributePretty(buffer, k,v, initialIndent,attrIndent)
-			end
-		end
-
-	else
-		for k, v in pairsSorted(el.attr) do
-			if type(k) == "string" then
-				writeAttributePretty(buffer, k,v, initialIndent,attrIndent)
-			end
-		end
+		table.insert(buffer, k)
+		table.insert(buffer, '="')
+		table.insert(buffer, (v:gsub("[&<>\"']", CHAR_TO_ENTITY)))
+		table.insert(buffer, '"')
 	end
 
 	if attrIndent and next(el.attr) then
@@ -1133,7 +1050,7 @@ local function nodeToXmlPretty(buffer, node, initialIndent,indent,attrIndent, in
 		table.insert(buffer, initialIndent)
 	end
 
-	if not el[1] then -- Assume el.empty has not been updated properly.
+	if not el[1] then
 		table.insert(buffer, "/>")
 
 	else
@@ -1220,25 +1137,6 @@ function xml.parseXml(s, pathForError)
 	return doc
 end
 
-local function removeWhitespaceNodes(el)
-	for i, childNode in ipairsr(el) do
-		if !!(IS_TEXT`childNode`) and childNode:match"^%s+$" then
-			table.remove(el, i)
-		end
-	end
-
-	el.empty = not el[1]
-
-	xml.walk(el, false, function(tagName, currentEl)
-		for i, childNode in ipairsr(currentEl) do
-			if !!(IS_TEXT`childNode`) and childNode:match"^%s+$" then
-				table.remove(currentEl, i)
-			end
-		end
-		currentEl.empty = not currentEl[1]
-	end)
-end
-
 -- Use parseXml() instead! :PenlightCompatibility
 --
 -- document = xml.parse( xmlString,     isFile, useBasic )
@@ -1261,7 +1159,7 @@ function xml.parse(s, isFile, useBasic)
 	end
 	local doc = docOrErr
 
-	removeWhitespaceNodes(doc)
+	xml.removeWhitespaceNodes(doc)
 	return doc
 end
 
@@ -1274,7 +1172,7 @@ function xml.basic_parse(s, preserveAllWhitespace, isHtml)
 	if not doc then  error(err, 2)  end
 
 	if not preserveAllWhitespace then
-		removeWhitespaceNodes(doc)
+		xml.removeWhitespaceNodes(doc)
 	end
 
 	return doc
@@ -1321,14 +1219,11 @@ end
 function xml.newElement(tagName, attrs)
 	assertArg(1, tagName, "string")
 
-	if attrs then  fixArrayPartOfAttributes(attrs) end
-
 	local el = {
-		_last  = {--[[ element1, ... ]]},
+		_last = nil,-- { element1, ... }
 
-		tag   = tagName,
-		attr  = attrs or {--[[ [attrName1]=attrValue1, attrName1, ... ]]},
-		empty = false,
+		tag  = tagName,
+		attr = attrs or {--[[ [attrName1]=attrValue1, ... ]]},
 
 		-- [1] = childNode1, ...
 	}
@@ -1339,7 +1234,7 @@ xml.new = xml.newElement -- :PenlightCompatibility
 
 
 -- element = xml.element( tag [, childNode ] )
--- element = xml.element( tag [, attributesAndChildNodes ] )
+-- element = xml.element( tag, attributesAndChildNodes )
 function xml.element(tagName, prototype)
 	local el = xml.newElement(tagName)
 
@@ -1352,7 +1247,6 @@ function xml.element(tagName, prototype)
 	else
 		for k, v in pairsSorted(prototype) do
 			if type(k) == "string" then
-				table.insert(el.attr, k)
 				el.attr[k] = v
 			else
 				el[k] = v
@@ -1386,13 +1280,10 @@ do
 
 		elClone.tag = tagName
 
-		for _, attrName in ipairs(el.attr) do
-			local attrValue = el.attr[attrName]
+		for attrName, attrValue in pairs(el.attr) do
 			if textSubstCallback then
 				attrValue = textSubstCallback(attrValue, attrName, el) or errorf("No value returned from text substitution callback for '%s'.", attrName)
 			end
-
-			table.insert(elClone.attr, attrName)
 			elClone.attr[attrName] = attrValue
 		end
 
@@ -1429,10 +1320,10 @@ function xml.compare(v1, v2)
 	if #v1    ~= #v2    then  return false  end
 
 	for k, v in pairs(v1.attr) do
-		if type(k) == "string" and v2.attr[k] ~= v then  return false  end
+		if v2.attr[k] ~= v then  return false  end
 	end
 	for k, v in pairs(v2.attr) do
-		if type(k) == "string" and v1.attr[k] ~= v then  return false  end
+		if v1.attr[k] ~= v then  return false  end
 	end
 
 	for i = 1, #v1 do
@@ -1477,8 +1368,21 @@ do
 
 		return unpack(constructors, 1, #tagNames)
 	end
-	xml.tags = xml.makeElementConstructors
+	xml.tags = xml.makeElementConstructors -- :PenlightCompatibility
 end
+
+
+
+function xml.removeWhitespaceNodes(doc)
+	for i, childNode in ipairsr(doc) do
+		if xml.isElement(childNode) then
+			xml.removeWhitespaceNodes(childNode)
+		elseif childNode:match"^%s+$" then
+			table.remove(doc, i)
+		end
+	end
+end
+Element.removeWhitespaceNodes = xml.removeWhitespaceNodes -- :Alias
 
 
 
