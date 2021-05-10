@@ -502,8 +502,8 @@ asserteq(script[1]:get_text(), 'function less(a,b) { return a < b; }')
 --]=]
 
 
+--[=[
 -- test attribute order
-
 local test_attrlist = xml.new('AttrList',{
    Attr3="Value3",
     ['Attr1'] = "Value1",
@@ -514,6 +514,7 @@ asserteq(
 xml.tostring(test_attrlist),
 [[<AttrList Attr1="Value1" Attr2="Value2" Attr3="Value3"/>]]
 )
+--]=]
 
 
 --[=[

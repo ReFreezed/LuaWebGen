@@ -605,7 +605,7 @@ _G.scriptEnvironmentGlobals = {
 	end,
 
 	toDatetime = function(time)
-		assertArg(1, time, "number")
+		!ARGS "time:number"
 		return getDatetime(time)
 	end,
 
@@ -688,13 +688,13 @@ _G.scriptEnvironmentGlobals = {
 
 	echof = function(s, ...)
 		assertContext("template", "echof")
-		assertArg(1, s, "string")
+		!ARGS "s:string"
 		scriptEnvironmentGlobals.echo(s:format(...))
 	end,
 
 	echofRaw = function(s, ...)
 		assertContext("template", "echofRaw")
-		assertArg(1, s, "string")
+		!ARGS "s:string"
 		scriptEnvironmentGlobals.echoRaw(s:format(...))
 	end,
 
@@ -716,9 +716,7 @@ _G.scriptEnvironmentGlobals = {
 
 	generateFromTemplate = function(sitePathRel, template, paramsOrInit)
 		assertContext("config", "generateFromTemplate")
-		assertArg(1, sitePathRel,  "string")
-		assertArg(2, template,     "string")
-		assertArg(3, paramsOrInit, "table","function","nil")
+		!ARGS "sitePathRel,template:string ? paramsOrInit:table,function"
 
 		local pathRel = sitePathToPath(sitePathRel)
 		local page    = newPage(pathRel, false)
@@ -739,7 +737,7 @@ _G.scriptEnvironmentGlobals = {
 
 	outputRaw = function(sitePathRel, contents)
 		assertContext("config", "outputRaw")
-		assertArg(2, contents, "string")
+		!ARGS "sitePathRel,contents:string"
 
 		local pathRel = sitePathToPath(sitePathRel)
 		writeOutputFile("raw", pathRel, sitePathRel, contents, nil, "")

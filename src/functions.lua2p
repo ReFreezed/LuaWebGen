@@ -10,7 +10,7 @@
 --=
 --==============================================================
 
-	assert, assertArg
+	assert
 	attributeWith, attributeWithAny
 	cleanupPath
 	countStrings, countSubStrings
@@ -1465,8 +1465,7 @@ end
 
 
 function _G.getProtectionWrapper(obj, objName)
-	assertArg(1, obj,     "table")
-	assertArg(2, objName, "string")
+	!ARGS "obj:table objName:string"
 
 	local wrapper = protectionWrappers[obj]
 	if wrapper then  return wrapper  end
@@ -1630,8 +1629,7 @@ function _G.generateFromTemplateFile(page)
 end
 
 function _G.generateRedirection(url, targetUrl, sourcePath)
-	assertArg(1, url,       "string")
-	assertArg(2, targetUrl, "string")
+	!ARGS "url,targetUrl,sourcePath:string"
 
 	if not url:find"^/" then
 		errorLine("Redirection URLs must begin with '/'. (%s)", url)
@@ -1699,8 +1697,8 @@ function _G.generateRedirection(url, targetUrl, sourcePath)
 					</body>
 				</html>
 			]=], {
-				url           = encodeHtmlEntities(              toUrlAbsolute(targetUrl) ),
-				urlAbsPercent = encodeHtmlEntities(toUrlAbsolute(toUrlAbsolute(targetUrl))),
+				url           = encodeHtmlEntities(              targetUrl ),
+				urlAbsPercent = encodeHtmlEntities(toUrlAbsolute(targetUrl)),
 			}
 		)
 
@@ -1720,39 +1718,6 @@ function _G.assert(v, ...)
 
 	local message = (... ~= nil) and tostring(...) or "Assertion failed!"
 	_error(message, 2)
-end
-
--- value = assertArg( [ functionName=auto, ] argumentNumber, value, expectedValueType1, ... [, depth=2 ] )
-do
-	local function _assertArg(fName, n, v, ...)
-		local vType       = type(v)
-		local varargCount = select("#", ...)
-		local lastArg     = select(varargCount, ...)
-		local hasDepthArg = (type(lastArg) == "number")
-		local typeCount   = varargCount+(hasDepthArg and -1 or 0)
-
-		for i = 1, typeCount do
-			if vType == select(i, ...) then  return v  end
-		end
-
-		local depth = 2 + (hasDepthArg and lastArg or 2)
-
-		if not fName then
-			fName = debug.traceback("", depth-1):match": in function '(.-)'" or "?"
-		end
-
-		local expects = table.concat({...}, " or ", 1, typeCount)
-
-		errorf(depth, "bad argument #%d to '%s' (%s expected, got %s)", n, fName, expects, vType)
-	end
-
-	function _G.assertArg(fNameOrArgNum, ...)
-		if type(fNameOrArgNum) == "string" then
-			return (_assertArg(fNameOrArgNum, ...))
-		else
-			return (_assertArg(nil, fNameOrArgNum, ...))
-		end
-	end
 end
 
 
@@ -1846,7 +1811,7 @@ end
 
 
 function _G.datetimeToTime(datetime)
-	assertArg(1, datetime, "string")
+	!ARGS "datetime:string"
 
 	local date = dateLib(datetime)
 	local time = (date-dateLib.epoch()):spanseconds()
@@ -1856,7 +1821,7 @@ end
 
 -- datetime = getDatetime( [ time=now ] )
 function _G.getDatetime(time)
-	assertArg(1, time, "number","nil")
+	!ARGS "? time:number"
 
 	local date     = dateLib(time or os.time()):tolocal()
 	local datetime = date:fmt"${iso}%z" :gsub("..$", ":%0") :gsub("%+00:00$", "Z")
@@ -2056,8 +2021,7 @@ do
 	end
 
 	function _G.newPage(pathRel, isRedirection)
-		assertArg(1, pathRel,       "string")
-		assertArg(2, isRedirection, "boolean")
+		!ARGS "pathRel:string isRedirection:boolean"
 
 		local filename = getFilename(pathRel)
 		local ext      = getExtension(filename)
@@ -2145,7 +2109,7 @@ do
 				g = function(field)  return field.v ~= "" and field.v or page.date.v  end,
 				s = function(field, datetime)
 					assertContext("template", "publishDate", 3)
-					assertArg(1, datetime, "string")
+					!ARGS "datetime:string"
 					field.v = datetime
 				end,
 			},
@@ -2443,8 +2407,7 @@ do
 	end
 
 	function _G.makeError(message, level)
-		assertArg(1, message, "string")
-		assertArg(2, level,   "number","nil")
+		!ARGS "message:string ? level:number"
 
 		level       = (level == 0) and 0 or (level or 1)
 		local stack = {}
@@ -2523,7 +2486,7 @@ end
 
 
 function _G.ipairsr(t)
-	assertArg(1, t, "table")
+	!ARGS "t:table"
 	return iprev, t, #t+1
 end
 

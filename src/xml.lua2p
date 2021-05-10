@@ -1,11 +1,10 @@
 --[[============================================================
 --=
---=  XML parser module
---=
---=  Doesn't follow the XML spec too closely, but really should
---=  be enough for our use case!
---=
+--=  XML handling module
 --=  Provides a similar API as Penlight.
+--=
+--=  We don't follow the XML spec too closely, but this really
+--=  should be enough for our use case!
 --=
 --=  Notes:
 --=  - Only UTF-8 is supported.
@@ -18,6 +17,32 @@
 --=  - Written by Marcus 'ReFreezed' Thunström
 --=  - MIT License (See LICENSE.txt)
 --=
+--==============================================================
+
+	xml.clone
+	xml.compare
+	xml.isElement, xml.isText
+	xml.makeElementConstructors
+	xml.newElement, xml.element
+	xml.parseXml
+	xml.removeWhitespaceNodes
+	xml.substitute
+	xml.toXml, xml.toPrettyXml
+	xml.walk
+
+	Element.addChild
+	Element.eachChild, Element.eachChildElement, Element.eachMatchingChildElement
+	Element.filter
+	Element.getAttributes, Element.setAttribute, Element.updateAttributes
+	Element.getChildByName, Element.findAllElementsByName
+	Element.getFirstElement
+	Element.getText, Element.getTextOfDirectChildren
+	Element.mapElements
+	Element.match, Element.substitute
+	Element.removeWhitespaceNodes
+	Element.stackChild, Element.stackElement, Element.stackText, Element.stackUp, Element.stackReset
+	Element.toXml, Element.toPrettyXml
+
 --============================================================]]
 
 !(
@@ -512,6 +537,48 @@ function Element.eachChildElement(el)
 end
 Element.childtags = Element.eachChildElement -- :PenlightCompatibility
 
+-- for childElement in Element:eachMatchingChildElement( tag )
+function Element.eachMatchingChildElement(el, tagName)
+	local i = 0
+
+	return function()
+		while true do
+			i               = i + 1
+			local childNode = el[i]
+
+			if not childNode then  return  end
+
+			if xml.isElement(childNode) and childNode.tag == tagName then
+				return childNode
+			end
+		end
+	end
+end
+
+-- :PenlightCompatibility
+-- for childElement in Element:matching_tags( [ tag=any, xmlns=(self.attr.xmlns or any) ] ) -- This function has no new replacement and is @Undocumented.
+function Element.matching_tags(el, tagName, xmlns)
+	xmlns   = xmlns or el.attr.xmlns
+	local i = 0
+
+	return function()
+		while true do
+			i               = i + 1
+			local childNode = el[i]
+
+			if not childNode then  return  end
+
+			if
+				xml.isElement(childNode)
+				and (not tagName or childNode.tag        == tagName)
+				and (not xmlns   or childNode.attr.xmlns == xmlns)
+			then
+				return childNode
+			end
+		end
+	end
+end
+
 
 
 -- attributes = Element:getAttributes( )
@@ -758,50 +825,10 @@ end
 
 
 
--- for childElement in Element:eachMatchingChildElement( tag )
-function Element.eachMatchingChildElement(el, tagName)
-	local i = 0
-
-	return function()
-		while true do
-			i               = i + 1
-			local childNode = el[i]
-
-			if not childNode then  return  end
-
-			if xml.isElement(childNode) and childNode.tag == tagName then
-				return childNode
-			end
-		end
-	end
-end
-
--- :PenlightCompatibility
--- for childElement in Element:matching_tags( [ tag=any, xmlns=(self.attr.xmlns or any) ] )
-function Element.matching_tags(el, tagName, xmlns)
-	xmlns   = xmlns or el.attr.xmlns
-	local i = 0
-
-	return function()
-		while true do
-			i               = i + 1
-			local childNode = el[i]
-
-			if not childNode then  return  end
-
-			if
-				xml.isElement(childNode)
-				and (not tagName or childNode.tag        == tagName)
-				and (not xmlns   or childNode.attr.xmlns == xmlns)
-			then
-				return childNode
-			end
-		end
-	end
-end
-
-
-
+--
+-- These stack*() methods are @Undocumented because people should use the much
+-- nicer makeElementConstructors() instead!
+--
 
 -- self = Element:stackChild( childNode )
 function Element.stackChild(el, childNode)
@@ -813,7 +840,7 @@ Element.add_child = Element.stackChild -- :PenlightCompatibility
 
 -- self = Element:stackElement( tag [, attributes ] )
 function Element.stackElement(el, tagName, attrs)
-	assertArg(1, tagName, "string")
+	!ARGS "tagName:string ? attrs:table"
 
 	el._last = el._last or {}
 
@@ -1137,7 +1164,7 @@ function xml.parseXml(s, pathForError)
 	return doc
 end
 
--- Use parseXml() instead! :PenlightCompatibility
+-- Use parseXml() instead! :PenlightCompatibility @Undocumented
 --
 -- document = xml.parse( xmlString,     isFile, useBasic )
 -- document = xml.parse( xmlFileHandle, isFile, useBasic )
@@ -1179,25 +1206,30 @@ function xml.basic_parse(s, preserveAllWhitespace, isHtml)
 end
 
 -- :PenlightCompatibility
--- document = xml.parsehtml( htmlString )
+-- document = xml.parsehtml( htmlString ) -- This function has no new replacement and is @Undocumented.
 function xml.parsehtml(s)
 	return (xml.basic_parse(s, false, true))
 end
 
 
 
--- xml.walk( document, depthFirst, callback )
--- callback = function( tag, element )
-function xml.walk(el, depthFirst, cb)
-	if not depthFirst then  cb(el.tag, el)  end
+local function _walk(doc, depthFirst, cb)
+	if not depthFirst then  cb(doc.tag, doc)  end
 
-	for _, childNode in ipairs(el) do
+	for _, childNode in ipairs(doc) do
 		if xml.isElement(childNode) then
-			xml.walk(childNode, depthFirst, cb)
+			_walk(childNode, depthFirst, cb)
 		end
 	end
 
-	if depthFirst then  cb(el.tag, el)  end
+	if depthFirst then  cb(doc.tag, doc)  end
+end
+
+-- xml.walk( document, depthFirst, callback )
+-- callback = function( tag, element )
+function xml.walk(doc, depthFirst, cb)
+	!ARGS "doc:table depthFirst:boolean cb:function"
+	_walk(doc, depthFirst, cb)
 end
 
 
@@ -1217,7 +1249,7 @@ end
 
 -- element = xml.newElement( tag [, attributes ] )
 function xml.newElement(tagName, attrs)
-	assertArg(1, tagName, "string")
+	!ARGS "tagName:string ? attrs:table"
 
 	local el = {
 		_last = nil,-- { element1, ... }
@@ -1236,6 +1268,8 @@ xml.new = xml.newElement -- :PenlightCompatibility
 -- element = xml.element( tag [, childNode ] )
 -- element = xml.element( tag, attributesAndChildNodes )
 function xml.element(tagName, prototype)
+	!ARGS "tagName:string ? prototype:table,string"
+
 	local el = xml.newElement(tagName)
 
 	if not prototype then
@@ -1342,27 +1376,26 @@ do
 
 	-- constructor1, ... = xml.makeElementConstructors( tags )
 	-- constructor1, ... = xml.makeElementConstructors( "tag,..." )
-	-- element           = constructor( [ childNode ] )
-	-- element           = constructor( attributesAndChildNodes )
+	-- element = constructor( [ childNode ] )
+	-- element = constructor( attributesAndChildNodes )
 	function xml.makeElementConstructors(tagNames)
 		if type(tagNames) == "string" then
-			local _tagNames = {}
+			local tagNamesStr = tagNames
+			tagNames          = {}
 
-			for tagName in tagNames:gmatch"[^,]+" do
+			for tagName in tagNamesStr:gmatch"[^,]+" do
 				tagName = tagName:gsub("^%s+", ""):gsub("%s+$", "")
 				if tagName == "" then
 					error("A value in the comma-separated list is empty.")
 				end
 
-				table.insert(_tagNames, tagName)
+				table.insert(tagNames, tagName)
 			end
-
-			tagNames = _tagNames
 		end
 
 		for i, tag in ipairs(tagNames) do
-			constructors[i] = function(items)
-				return xml.element(tag, items)
+			constructors[i] = function(prototype)
+				return xml.element(tag, prototype)
 			end
 		end
 

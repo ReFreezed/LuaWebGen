@@ -9,6 +9,7 @@
 --=
 --==============================================================
 
+	ARGS
 	convertTextFileEncoding, addBomToUft16File
 	copyFile, copyFilesInDirectory, copyDirectoryRecursive
 	execute, executeRequired
@@ -377,6 +378,54 @@ function XPCALL(lua)
 	__LUA"xpcall(function() "
 	__LUA(lua)
 	__LUA" end, xpcallErrorHandler)"
+end
+
+
+do
+	local function outputArgumentChecks(errLevel, argsStr)
+		local optionalPos = argsStr:find("?", 1, true) or #argsStr
+		local n           = 1
+
+		for pos, argNames, types in argsStr:gmatch"()([%w_,]+):([%w_,*]+)" do
+			if types == "*" then
+				n = n + #argNames:gsub("[^,]+", "") + 1
+
+			else
+				if pos > optionalPos then  types = types..",nil"  end
+
+				local multipleTypes = types:find(",", 1, true) ~= nil
+				local ifFormat      = multipleTypes and "not isAny(type(%s), %s)" or 'type(%s) ~= "%s"'
+				local typesCode     = multipleTypes and types:gsub("[%w_]+", '"%0"') or types
+				local typesText     = multipleTypes and types:gsub(",",      " or ") or types
+
+				for argName in argNames:gmatch"[%w_]+" do
+					__LUA(F(
+						"if %s then  errorf(%d, \"Bad argument #%d '%s'. (Expected %s, got %%s)\", type(%s))  end\n",
+						ifFormat:format(argName, typesCode),
+						errLevel + 1,
+						n,
+						argName,
+						typesText,
+						argName
+					))
+					n = n + 1
+				end
+			end
+		end
+	end
+
+	-- ARGS [ (errorLevel=1) ] "arg1:arg1Type1,arg1Type2 arg2,arg3:arg2And3Type ? optionalArg4:optionalArg4Type ..."
+	function _G.ARGS(errLevelOrArgsStr)
+		if type(errLevelOrArgsStr) == "string" then
+			local argsStr = errLevelOrArgsStr
+			outputArgumentChecks(1, argsStr)
+		else
+			local errLevel = errLevelOrArgsStr
+			return function(argsStr)
+				outputArgumentChecks(errLevel, argsStr)
+			end
+		end
+	end
 end
 
 
