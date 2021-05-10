@@ -12,13 +12,6 @@ return function()
 		printf("%s: %.3f", timerLabel, os.clock()-timerStartTime)
 	end
 
-	--[[ XML module tests.
-	-- require"pl.xml"
-	timerStart("our") ; xmlTests(xml)             ; timerEnd()
-	-- timerStart("pl")  ; xmlTests(require"pl.xml") ; timerEnd()
-	--]]
-
-	-- [==[ XML parsing.
 	local function readTextFile(path)
 		local file, err = io.open(path, "r")
 		if not file then  return nil, err  end
@@ -33,6 +26,13 @@ return function()
 		return contents
 	end
 
+	--[[ XML module tests.
+	-- require"pl.xml"
+	timerStart("our") ; xmlTests(xml)             ; timerEnd()
+	-- timerStart("pl")  ; xmlTests(require"pl.xml") ; timerEnd()
+	--]]
+
+	--[==[ XML parsing.
 	local xmlStr = (
 		readTextFile"../local/wordpress-export.xml" or
 		-- assert(readTextFile"data/barf.xml") or
@@ -53,14 +53,30 @@ return function()
 	)
 
 	timerStart("our") ; local doc = assert(xml.parseXml(xmlStr, "data/barf.xml")) ; timerEnd()
-	-- print(xml.toPrettyXml(doc, "","    ",nil, true))
-	-- print(xml.toPrettyXml(doc, "","    ","  ", true))
-	print(doc)
+	-- print(doc:toPrettyXml("","    ",nil, true))
+	-- print(doc:toPrettyXml("","    ","  ", true))
+	print(doc:toXml())
 
 	-- require"pl.xml"
 	-- timerStart("pl") ; local doc = assert(require"pl.xml".parse(xmlStr, false)) ; timerEnd()
-	-- print(require"pl.xml".tostring(doc, "","    ","  ", true))
-	-- print(doc)
+	-- print(doc:tostring("","    ","  ", true))
+	-- print(doc:tostring())
+	--]==]
+
+	-- [==[ HTML parsing.
+	local htmlStr = [[<!DOCTYPE html>
+		<html>
+			<head>
+				<script>function bitAnd(a, b) { return a && b; }</script>
+			</head>
+			<body>
+				<h1>Hello, world &amp; all bananas!</h1>
+			</body>
+		</html>
+	]]
+
+	timerStart("html") ; local doc = assert(xml.parseHtml(htmlStr, "foo.html")) ; timerEnd()
+	print(doc:toHtml())
 	--]==]
 
 	print()

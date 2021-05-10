@@ -1,6 +1,6 @@
 --[[============================================================
 --=
---=  XML handling module
+--=  XML (and some HTML) handling module
 --=  Provides a similar API as Penlight.
 --=
 --=  We don't follow the XML spec too closely, but this really
@@ -24,9 +24,10 @@
 	xml.isElement, xml.isText
 	xml.makeElementConstructors
 	xml.newElement, xml.element
-	xml.parseXml
+	xml.parseXml, xml.parseHtml
 	xml.removeWhitespaceNodes
 	xml.substitute
+	xml.toHtml
 	xml.toXml, xml.toPrettyXml
 	xml.walk
 
@@ -41,12 +42,14 @@
 	Element.match, Element.substitute
 	Element.removeWhitespaceNodes
 	Element.stackChild, Element.stackElement, Element.stackText, Element.stackUp, Element.stackReset
+	Element.toHtml
 	Element.toXml, Element.toPrettyXml
 
 --============================================================]]
 
 !(
-local STANDARD_PREFACE = '<?xml version="1.0" encoding="UTF-8"?>'
+local XML_STANDARD_PREFACE  = '<?xml version="1.0" encoding="UTF-8"?>'
+local HTML_STANDARD_PREFACE = '<!DOCTYPE html>'
 
 local PATTERN_NAME_CHAR = "[-._:%w\128-\255]"
 
@@ -55,6 +58,8 @@ local function IS_TEXT(expr)
 	return (_IS_TEXT:gsub("%?", expr))
 end
 )
+
+
 
 local ENTITY_NAME_TO_UTF8 = require"entities"
 
@@ -65,6 +70,32 @@ local CHAR_TO_ENTITY = {
 	['"'] = "&quot;",
 	["'"] = "&apos;",
 }
+
+local HTML_EMPTY_ELEMENTS = {
+	area    = true,
+	base    = true,
+	br      = true,
+	col     = true,
+	embed   = true,
+	hr      = true,
+	img     = true,
+	input   = true,
+	isindex = true,
+	keygen  = true,
+	link    = true,
+	meta    = true,
+	param   = true,
+	source  = true,
+	track   = true,
+	wbr     = true,
+}
+
+local HTML_END_TAG_PATTERNS_FOR_TAGS_WITH_UNENCODED_CONTENTS = {
+	["script"] = "</[Ss][Cc][Rr][Ii][Pp][Tt]%s*>",
+	["style"]  = "</[Ss][Tt][Yy][Ll][Ee]%s*>",
+}
+
+
 
 local xml = {}
 
@@ -220,8 +251,8 @@ end
 local EAT_SPACE = `do local _, i2 = s:find("^%s*", pos) ; pos = i2 + 1 end`
 )
 
--- position = parseAttributes( string, position, pathForError, attributes )
-local function parseAttributes(s, pos, pathForError, attrs)
+-- position = parseAttributes( string, position, pathForError, isHtml, attributes )
+local function parseAttributes(s, pos, pathForError, isHtml, attrs)
 	while pos <= #s do
 		local i1, i2, attrName = s:find(!("^("..PATTERN_NAME_CHAR.."+)"), pos)
 		if not i1 then  break  end
@@ -229,31 +260,49 @@ local function parseAttributes(s, pos, pathForError, attrs)
 
 		!!(EAT_SPACE)
 
-		if not s:find("^=", pos) then
-			fileError(pathForError, s, pos, "Expected '=' after '%s'.", attrName)
+		if isHtml and not s:find("^=", pos) then
+			attrs[attrName] = attrName
+
+		else
+			if not s:find("^=", pos) then
+				fileError(pathForError, s, pos, "Expected '=' after '%s'.", attrName)
+			end
+			pos = pos + !(#"=")
+
+			!!(EAT_SPACE)
+
+			local posQuote = pos
+			local quote    = s:sub(pos, pos)
+
+			if quote == '"' or quote == "'" then
+				pos                = pos + 1
+				local attrValuePos = pos
+
+				pos = s:find(quote, pos, true)
+				if not pos then
+					fileError(pathForError, s, posQuote, "Missing end quote (%s) for value of attribute '%s'.", quote, attrName)
+				end
+
+				local attrValue = s:sub(attrValuePos, pos-1)
+				attrs[attrName] = decodeEntities(attrValue, 1, s, attrValuePos-1, pathForError, nil)
+				pos             = pos + !(#'"')
+
+			elseif isHtml then
+				local attrValuePos = pos
+
+				local i1, i2 = s:find("^[^%s/>]+", pos)
+				if not i1 then
+					fileError(pathForError, s, posQuote, "Missing value for attribute '%s'.", quote, attrName)
+				end
+				pos = i2 + 1
+
+				local attrValue = s:sub(attrValuePos, pos-1)
+				attrs[attrName] = decodeEntities(attrValue, 1, s, attrValuePos-1, pathForError, nil)
+
+			else
+				fileError(pathForError, s, pos, "Expected a quote for the value of attribute '%s'.", attrName)
+			end
 		end
-		pos = pos + !(#"=")
-
-		!!(EAT_SPACE)
-
-		local posQuote = pos
-
-		local quote = s:sub(pos, pos)
-		if not (quote == '"' or quote == "'") then
-			fileError(pathForError, s, pos, "Expected a quote for the value of attribute '%s'.", attrName)
-		end
-		pos = pos + 1
-
-		local attrValuePos = pos
-
-		pos = s:find(quote, pos, true)
-		if not pos then
-			fileError(pathForError, s, posQuote, "Missing end quote (%s) for value of attribute '%s'.", quote, attrName)
-		end
-
-		local attrValue = s:sub(attrValuePos, pos-1)
-		attrs[attrName] = decodeEntities(attrValue, 1, s, attrValuePos-1, pathForError, nil)
-		pos             = pos + !(#'"')
 
 		!!(EAT_SPACE)
 	end
@@ -261,13 +310,17 @@ local function parseAttributes(s, pos, pathForError, attrs)
 	return pos
 end
 
--- position = parseElementContents( string, position, pathForError, element, isTop )
-local function parseElementContents(s, pos, pathForError, el, isTop)
+-- position = parseElementContents( string, position, pathForError, element, isHtml, isTop )
+local function parseElementContents(s, pos, pathForError, el, isHtml, isTop)
 	while pos <= #s do
 		local posStart = pos
 
 		-- Processing instruction.
 		if s:find("^<%?", pos) then
+			if isHtml then
+				fileError(pathForError, s, pos, "Encountered XML code in the HTML document.")
+			end
+
 			pos = pos + !(#"<?")
 
 			local i1, i2, target = s:find(!("^("..PATTERN_NAME_CHAR.."+)"), pos)
@@ -318,6 +371,10 @@ local function parseElementContents(s, pos, pathForError, el, isTop)
 
 		-- CDATA section.
 		elseif s:find("^<!%[CDATA%[", pos) then
+			if isHtml then
+				fileError(pathForError, s, pos, "Encountered XML code in the HTML document.")
+			end
+
 			pos = pos + !(#"<![CDATA[")
 
 			local i1, i2 = s:find("]]>", pos, true)
@@ -378,19 +435,25 @@ local function parseElementContents(s, pos, pathForError, el, isTop)
 			if not i1 then
 				fileError(pathForError, s, pos, "Missing name tag after '<'.")
 			end
+			if isHtml then
+				tagName = tagName:lower()
+			end
 			pos = i2 + 1
 
 			local childEl = xml.newElement(tagName)
 
 			if s:find("^%s", pos) then
 				!!(EAT_SPACE)
-				pos = parseAttributes(s, pos, pathForError, childEl.attr)
+				pos = parseAttributes(s, pos, pathForError, isHtml, childEl.attr)
 			end
 
 			local isEmpty = false
 
 			if s:find("^/", pos) then
 				pos     = pos + !(#"/")
+				isEmpty = true
+
+			elseif isHtml and HTML_EMPTY_ELEMENTS[tagName] then
 				isEmpty = true
 			end
 
@@ -402,18 +465,36 @@ local function parseElementContents(s, pos, pathForError, el, isTop)
 			insertNode(el, childEl)
 
 			if not isEmpty then
-				pos = parseElementContents(s, pos, pathForError, childEl, false)
+				if isHtml and HTML_END_TAG_PATTERNS_FOR_TAGS_WITH_UNENCODED_CONTENTS[tagName] then
+					local specialTextNodeStart = pos
+					local pat                  = HTML_END_TAG_PATTERNS_FOR_TAGS_WITH_UNENCODED_CONTENTS[tagName]
+
+					local i1, i2 = s:find(pat, pos)
+					if not i1 then
+						fileError(pathForError, s, pos, "Missing end tag for <%s>.", tagName)
+					end
+					pos = i1
+
+					childEl[1] = s:sub(specialTextNodeStart, pos-1) -- No entity decoding!
+
+				else
+					pos = parseElementContents(s, pos, pathForError, childEl, isHtml, false)
+				end
 
 				if not s:find("^</", pos) then
-					fileError(pathForError, s, pos, "Expected end tag for '<%s>' at line %d.", tagName, getLineNumber(s, posStart))
+					fileError(pathForError, s, pos, "Expected end tag for <%s> at line %d.", tagName, getLineNumber(s, posStart))
 				end
 				pos = pos + !(#"</")
 
 				local i1, i2, tagNameEnd = s:find(!("^("..PATTERN_NAME_CHAR.."+)"), pos)
 				if not i1 then
 					fileError(pathForError, s, pos, "Missing name tag after '<'.")
-				elseif tagNameEnd ~= tagName then
-					fileError(pathForError, s, pos, "Expected '</%s>'.", tagName)
+				end
+				if isHtml then
+					tagNameEnd = tagNameEnd:lower()
+				end
+				if tagNameEnd ~= tagName then
+					fileError(pathForError, s, pos, "Expected </%s>.", tagName)
 				end
 				pos = i2 + 1
 
@@ -479,7 +560,7 @@ Element.first_childtag = Element.getFirstElement -- :PenlightCompatibility
 -- element = Element:getChildByName( tag )
 function Element.getChildByName(el, tagName)
 	for _, childNode in ipairs(el) do
-		if xml.isElement(childNode) and childNode.tag == tag then
+		if xml.isElement(childNode) and childNode.tag == tagName then
 			return childNode
 		end
 	end
@@ -487,14 +568,14 @@ end
 Element.child_with_name = Element.getChildByName -- :PenlightCompatibility
 
 do
-	local function _findAllElementsByName(el, tag, elements, recurse)
+	local function _findAllElementsByName(el, tagName, elements, recurse)
 		for _, childNode in ipairs(el) do
 			if xml.isElement(childNode) then
-				if childNode.tag == tag then
+				if childNode.tag == tagName then
 					table.insert(elements, childNode)
 				end
 				if recurse then
-					_findAllElementsByName(childNode, tag, elements, true)
+					_findAllElementsByName(childNode, tagName, elements, true)
 				end
 			end
 		end
@@ -503,7 +584,7 @@ do
 	-- elements = Element:findAllElementsByName( tag [, doNotRecurse=false ] )
 	function Element.findAllElementsByName(el, tagName, doNotRecurse)
 		local elements = {}
-		_findAllElementsByName(el, tag, elements, (not doNotRecurse))
+		_findAllElementsByName(el, tagName, elements, (not doNotRecurse))
 		return elements
 	end
 	Element.get_elements_with_name = Element.findAllElementsByName -- :PenlightCompatibility
@@ -1027,12 +1108,74 @@ end
 function xml.toXml(node, preface)
 	local buffer = {}
 	if preface then
-		buffer[1] = (type(preface) == "string") and preface or !(STANDARD_PREFACE.."\n")
+		buffer[1] = (type(preface) == "string") and preface or !(XML_STANDARD_PREFACE.."\n")
 	end
 	nodeToXml(buffer, node)
 	return table.concat(buffer, "")
 end
 Element.toXml = xml.toXml -- :Alias
+
+
+
+local function nodeToHtml(buffer, node)
+	if !!(IS_TEXT`node`) then
+		table.insert(buffer, (node:gsub("[&<>\"']", CHAR_TO_ENTITY)))
+		return
+	end
+
+	local el = node
+
+	table.insert(buffer, "<")
+	table.insert(buffer, el.tag)
+
+	for k, v in pairsSorted(el.attr) do
+		if type(k) == "string" then
+			table.insert(buffer, " ")
+			table.insert(buffer, k)
+			table.insert(buffer, '="')
+			table.insert(buffer, (v:gsub("[&<>\"']", CHAR_TO_ENTITY)))
+			table.insert(buffer, '"')
+		end
+	end
+
+	table.insert(buffer, ">")
+
+	if not HTML_EMPTY_ELEMENTS[el.tag:lower()] then
+		if el[1] then
+			if HTML_END_TAG_PATTERNS_FOR_TAGS_WITH_UNENCODED_CONTENTS[el.tag:lower()] then
+				if el:getFirstElement() then
+					errorf("HTML <%s> element has child elements, which is illegal.", el.tag)
+				end
+				for _, childNode in ipairs(el) do
+					table.insert(buffer, childNode) -- We trust that there's no </script> or anything in here.
+				end
+			else
+				for _, childNode in ipairs(el) do
+					nodeToHtml(buffer, childNode)
+				end
+			end
+		end
+
+		table.insert(buffer, "</")
+		table.insert(buffer, el.tag)
+		table.insert(buffer, ">")
+
+	elseif el[1] then
+		errorf("HTML <%s> element should be empty, but it is not.", el.tag)
+	end
+end
+
+-- xmlString = xml.toHtml( node [, prefaceDoctype=false ] )
+-- xmlString = xml.toHtml( node, doctypeToPreface )
+function xml.toHtml(node, preface)
+	local buffer = {}
+	if preface then
+		buffer[1] = (type(preface) == "string") and preface or !(HTML_STANDARD_PREFACE.."\n")
+	end
+	nodeToHtml(buffer, node)
+	return table.concat(buffer, "")
+end
+Element.toHtml = xml.toHtml -- :Alias
 
 
 
@@ -1118,7 +1261,7 @@ function xml.toPrettyXml(node, initialIndent,indent,attrIndent, preface)
 
 	local buffer = {}
 	if preface then
-		buffer[1] = (type(preface) == "string") and preface or !(STANDARD_PREFACE)
+		buffer[1] = (type(preface) == "string") and preface or !(XML_STANDARD_PREFACE)
 	end
 
 	nodeToXmlPretty(buffer, node, initialIndent,indent,attrIndent, indentTags)
@@ -1140,7 +1283,7 @@ function xml.parseXml(s, pathForError)
 	end
 
 	local docWrapper = xml.newElement("")
-	local pos        = parseElementContents(s, 1, pathForError, docWrapper, true)
+	local pos        = parseElementContents(s, 1, pathForError, docWrapper, false, true)
 
 	if pos <= #s then
 		fileError(pathForError, s, pos, "Unexpected end tag.")
@@ -1164,7 +1307,40 @@ function xml.parseXml(s, pathForError)
 	return doc
 end
 
--- Use parseXml() instead! :PenlightCompatibility @Undocumented
+-- document = xml.parseHtml( xmlString [, filePathForError ] ) -- @Doc
+function xml.parseHtml(s, pathForError)
+	pathForError = pathForError or "[html]"
+
+	if s:find"%z" then -- A valid UTF-16 file should always have NULLs in it.
+		fileError(pathForError, s, 1, "Only UTF-8 is supported.")
+	end
+
+	local docWrapper = xml.newElement("")
+	local pos        = parseElementContents(s, 1, pathForError, docWrapper, true, true)
+
+	if pos <= #s then
+		fileError(pathForError, s, pos, "Unexpected end tag.")
+	end
+
+	local doc = nil
+
+	for _, node in ipairs(docWrapper) do
+		if not !!(IS_TEXT`node`) then
+			if doc then
+				fileError(pathForError, s, #s, "There are multiple root elements.")
+			end
+			doc = node
+		end
+	end
+
+	if not doc then
+		fileError(pathForError, s, 0, "There is no document.")
+	end
+
+	return doc
+end
+
+-- Use parseXml() instead! :PenlightCompatibility
 --
 -- document = xml.parse( xmlString,     isFile, useBasic )
 -- document = xml.parse( xmlFileHandle, isFile, useBasic )
@@ -1190,13 +1366,18 @@ function xml.parse(s, isFile, useBasic)
 	return doc
 end
 
--- Use parseXml() instead! :PenlightCompatibility
+-- Use parseXml() or parseHtml() instead! :PenlightCompatibility
+--
 -- document = xml.basic_parse( string [, preserveAllWhitespace=false, isHtml=false ] )
+--
 function xml.basic_parse(s, preserveAllWhitespace, isHtml)
-	if isHtml then  error("HTML parsing not supported.", 2)  end
+	local doc
 
-	local doc, err = xml.parse(s)
-	if not doc then  error(err, 2)  end
+	if isHtml then
+		doc = xml.parseHtml(s)
+	else
+		doc = xml.parseXml(s)
+	end
 
 	if not preserveAllWhitespace then
 		xml.removeWhitespaceNodes(doc)
@@ -1206,7 +1387,7 @@ function xml.basic_parse(s, preserveAllWhitespace, isHtml)
 end
 
 -- :PenlightCompatibility
--- document = xml.parsehtml( htmlString ) -- This function has no new replacement and is @Undocumented.
+-- document = xml.parsehtml( htmlString )
 function xml.parsehtml(s)
 	return (xml.basic_parse(s, false, true))
 end
@@ -1393,9 +1574,9 @@ do
 			end
 		end
 
-		for i, tag in ipairs(tagNames) do
+		for i, tagName in ipairs(tagNames) do
 			constructors[i] = function(prototype)
-				return xml.element(tag, prototype)
+				return xml.element(tagName, prototype)
 			end
 		end
 

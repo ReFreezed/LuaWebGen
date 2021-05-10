@@ -20,7 +20,7 @@ local function asserteq(v1, v2)
 	end
 end
 
-local d,d1,d2, templ, t,t1,t2, config, err, res, out, str, doc
+local d,d1,d2,doc, templ, t,t1,t2, config, err, res, out, str, script
 
 -- Prosody stanza.lua style XML building
 
@@ -455,7 +455,6 @@ asserteq(out,[[
    </country>
  </serviceprovider>]])
 
---[=[
 ----- HTML is a degenerate form of XML ;)
 -- attribute values don't need to be quoted, tags are case insensitive,
 -- and some are treated as self-closing
@@ -499,7 +498,6 @@ doc = xml.parsehtml [[
 
 script = doc:get_elements_with_name 'script'
 asserteq(script[1]:get_text(), 'function less(a,b) { return a < b; }')
---]=]
 
 
 --[=[
