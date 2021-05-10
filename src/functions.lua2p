@@ -184,8 +184,8 @@ do
 		["["] = "]",
 	}
 
-	-- position, isUrlBlock = findEndOfBlockContents( path, template, position )
-	local function findEndOfBlockContents(path, template, pos)
+	-- position, isUrlBlock = findEndOfBlockContents( path, template, position, blockI1 )
+	local function findEndOfBlockContents(path, template, pos, blockI1)
 		!local PRINT_PROGRESS = DEV and 1==0
 		!if PRINT_PROGRESS then  __LUA`printf("%s(%d):%d: >>>>>>>>", path, pos, getLineNumber(template, pos))`  end
 
@@ -197,7 +197,7 @@ do
 		if template:find("^ *%.?%.?/", pos) or template:find("^ *%a%w*:/", pos) then
 			local i1 = template:find("%*?}}", pos)
 			if not i1 then
-				fileError(path, template, pos, "Incomplete URL block.")
+				fileError(path, template, blockI1, "Incomplete URL block.")
 			end
 			return i1-1, true
 		end
@@ -249,7 +249,7 @@ do
 
 					if not i2 then
 						fileError(
-							path, template, pos,
+							path, template, posComment,
 							"Incomplete long comment. (Code block starting at line %d)",
 							getLineNumber(template, blockContentsI1)
 						)
@@ -296,7 +296,7 @@ do
 
 				if not i2 then
 					fileError(
-						path, template, pos,
+						path, template, posStringLong,
 						"Incomplete long string. (Code block starting at line %d)",
 						getLineNumber(template, blockContentsI1)
 					)
@@ -354,11 +354,7 @@ do
 					)
 				end
 
-				fileError(
-					path, template, pos,
-					"Missing end of code block. (Code block starting at line %d)",
-					getLineNumber(template, blockContentsI1)
-				)
+				fileError(path, template, blockI1, "Missing end of this code block.")
 			end
 		end
 
@@ -394,7 +390,7 @@ do
 
 			table.insert(out, "do end ") -- Statement divider.
 
-			local blockContentsI2, isUrlBlock = findEndOfBlockContents(path, template, pos)
+			local blockContentsI2, isUrlBlock = findEndOfBlockContents(path, template, pos, blockI1)
 			local blockContents               = template:sub(blockContentsI1, blockContentsI2)
 			pos                               = blockContentsI2 + 1
 
@@ -431,13 +427,13 @@ do
 				if not expr then           ident, expr = blockContents:match!(NOSPACE("^ %s* fori %s+          ("..PATTERN_IDENT..") %s+ in "..PATTERN_IDENT_END.." %s* (%S.*)"))
 				if not expr then  reverse,        expr = blockContents:match!(NOSPACE("^ %s* fori %s* (<?) %s*                                                          (%S.*)"))
 				if not expr then
-					fileError(path, template, blockI1, "Invalid 'fori' statement.")
+					fileError(path, template, blockContentsI1, "Invalid 'fori' statement.")
 				end end end
 
 				reverse = (reverse == "<")
 
 				if not loadstring("_=("..expr..")") then
-					fileError(path, template, blockI1, "Invalid value expression for 'fori' loop: %s", trim(expr)) -- @UX: Better error message.
+					fileError(path, template, blockContentsI1, "Invalid value expression for 'fori' loop: %s", trim(expr)) -- @UX: Better error message.
 				end
 
 				table.insert(out, "for i, ")
@@ -492,7 +488,7 @@ do
 					local expr = blockContents:gsub("for%s*<", "", 1)
 
 					if not loadstring("_=("..expr..")") then
-						fileError(path, template, blockI1, "Invalid value expression for simplified 'for' loop: %s", trim(expr)) -- @UX: Better error message.
+						fileError(path, template, blockContentsI1, "Invalid value expression for simplified 'for' loop: %s", trim(expr)) -- @UX: Better error message.
 					end
 
 					table.insert(out, "for i = (")
@@ -504,7 +500,7 @@ do
 					local expr = blockContents:gsub("for", "", 1)
 
 					if not loadstring("_=("..expr..")") then
-						fileError(path, template, blockI1, "Invalid value expression for simplified 'for' loop: %s", trim(expr)) -- @UX: Better error message.
+						fileError(path, template, blockContentsI1, "Invalid value expression for simplified 'for' loop: %s", trim(expr)) -- @UX: Better error message.
 					end
 
 					table.insert(out, "for i = 1, (")
@@ -625,7 +621,7 @@ do
 			then
 				-- @Polish: Make sure there's no garbage at the end of blockContents.
 				if tcsLevel == 1 then
-					fileError(path, template, blockI1, "Unexpected templateified '%s'.", blockContents:match"%a+")
+					fileError(path, template, blockContentsI1, "Unexpected templateified '%s'.", blockContents:match"%a+")
 				end
 				!!(TRIM_POS_AFTER_BLOCK)
 				local blockI2 = pos - 1
@@ -634,7 +630,7 @@ do
 			-- Value expression.
 			elseif insertLuaForEchoingIfExpression(out, blockContents) then
 				if blockContents:find"^%s*function%s*%(" then -- We do allow echoing functions, but this specifically is probably an error made by the user.
-					fileError(path, template, blockI1, "Invalid value expression.")
+					fileError(path, template, blockContentsI1, "Invalid value expression.")
 				end
 				!!(TRIM_POS_AFTER_BLOCK)
 
@@ -802,16 +798,57 @@ function _G.errorf(levelOrS, ...)
 	end
 end
 
--- fileError( path, contents, position,   formatString, ... )
--- fileError( path, nil,      lineNumber, formatString, ... )
-function _G.fileError(path, contents, pos, s, ...)
-	local ln = contents and getLineNumber(contents, pos) or pos
-	if type(s) ~= "string" then
-		s = F("%s:%d: %s", path, ln, tostring(s))
-	else
-		s = F("%s:%d: "..s, path, ln, ...)
+do
+	local function findStartOfNonEmptyLine(s, pos)
+		while pos > 1 do
+			if s:byte(pos-1) == !(string.byte"\n") and s:byte(pos) ~= !(string.byte"\n") then  break  end
+			pos = pos - 1
+		end
+		return math.max(pos, 1)
 	end
-	errorLine(s)
+	local function findEndOfLine(s, pos)
+		while pos < #s do
+			if s:byte(pos+1) == !(string.byte"\n") then  break  end
+			pos = pos + 1
+		end
+		return math.min(pos, #s)
+	end
+
+	-- fileError( path, contents, position,   formatString, ... )
+	-- fileError( path, nil,      lineNumber, formatString, ... )
+	function _G.fileError(path, contents, pos, s, ...)
+		if contents then
+			pos = math.min(math.max(pos, 1), #contents+1)
+		end
+		local ln = contents and getLineNumber(contents, pos) or pos
+
+		if type(s) ~= "string" then
+			s = F("%s:%d: %s", path, ln, tostring(s))
+		else
+			s = F("%s:%d: "..s, path, ln, ...)
+		end
+
+		if contents then
+			local lineStart     = findStartOfNonEmptyLine(contents, pos)
+			local lineEnd       = findEndOfLine(contents, pos-1)
+			local linePre1Start = findStartOfNonEmptyLine(contents, lineStart-1)
+			local linePre1End   = findEndOfLine(contents, linePre1Start-1)
+			local linePre2Start = findStartOfNonEmptyLine(contents, linePre1Start-1)
+			local linePre2End   = findEndOfLine(contents, linePre2Start-1)
+			printf("pos %d | lines %d..%d, %d..%d, %d..%d", pos, linePre2Start,linePre2End+1, linePre1Start,linePre1End+1, lineStart,lineEnd+1)
+
+			s = F("%s\n\n%s%s> %s\n> %s^",
+				s,
+				(linePre2Start < linePre1Start and linePre2Start <= linePre2End) and F("> %s\n", (contents:sub(linePre2Start, linePre2End):gsub("\t", "    "))) or "",
+				(linePre1Start < lineStart     and linePre1Start <= linePre1End) and F("> %s\n", (contents:sub(linePre1Start, linePre1End):gsub("\t", "    "))) or "",
+				contents:sub(lineStart, lineEnd):gsub("\t", "    "),
+				("-"):rep(pos - lineStart + 3*countSubStrings(contents, lineStart, lineEnd, "\t", true)),
+				nil
+			)
+		end
+
+		errorLine(s)
+	end
 end
 
 -- errorLine( message )

@@ -34,7 +34,7 @@ return function()
 
 	--[==[ XML parsing.
 	local xmlStr = (
-		readTextFile"../local/wordpress-export.xml" or
+		readTextFile"../local/test-wordpress-export.xml" or
 		-- assert(readTextFile"data/barf.xml") or
 		[=[<?xml version="1.0" encoding="UTF-8"?>
 			<information>
@@ -64,16 +64,19 @@ return function()
 	--]==]
 
 	-- [==[ HTML parsing.
-	local htmlStr = [[<!DOCTYPE html>
-		<html>
-			<head>
-				<script>function bitAnd(a, b) { return a && b; }</script>
-			</head>
-			<body>
-				<h1>Hello, world &amp; all bananas!</h1>
-			</body>
-		</html>
-	]]
+	local htmlStr = (
+		-- readTextFile"../local/test-youtube-watch-page.html" or
+		[=[<!DOCTYPE html>
+			<html>
+				<head>
+					<SCRIPT>function bitAnd(a, b) { return a && b; }</SCRIPT>
+				</head>
+				<BODY id="foo">
+					<h1 super duper=yes>Hello, world &amp; all bananas!</h1>
+				</body>
+			</html>
+		]=]
+	)
 
 	timerStart("html") ; local doc = assert(xml.parseHtml(htmlStr, "foo.html")) ; timerEnd()
 	print(doc:toHtml())

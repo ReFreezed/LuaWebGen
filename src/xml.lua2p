@@ -255,13 +255,19 @@ local EAT_SPACE = `do local _, i2 = s:find("^%s*", pos) ; pos = i2 + 1 end`
 local function parseAttributes(s, pos, pathForError, isHtml, attrs)
 	while pos <= #s do
 		local i1, i2, attrName = s:find(!("^("..PATTERN_NAME_CHAR.."+)"), pos)
-		if not i1 then  break  end
+		if not i1 then
+			break
+		end
+		if isHtml then
+			attrName = attrName:lower()
+		end
 		pos = i2 + 1
 
 		!!(EAT_SPACE)
 
+		-- No value.
 		if isHtml and not s:find("^=", pos) then
-			attrs[attrName] = attrName
+			attrs[attrName] = ""
 
 		else
 			if not s:find("^=", pos) then
@@ -274,6 +280,7 @@ local function parseAttributes(s, pos, pathForError, isHtml, attrs)
 			local posQuote = pos
 			local quote    = s:sub(pos, pos)
 
+			-- Quoted value.
 			if quote == '"' or quote == "'" then
 				pos                = pos + 1
 				local attrValuePos = pos
@@ -287,12 +294,13 @@ local function parseAttributes(s, pos, pathForError, isHtml, attrs)
 				attrs[attrName] = decodeEntities(attrValue, 1, s, attrValuePos-1, pathForError, nil)
 				pos             = pos + !(#'"')
 
+			-- Unquoted value.
 			elseif isHtml then
 				local attrValuePos = pos
 
 				local i1, i2 = s:find("^[^%s/>]+", pos)
 				if not i1 then
-					fileError(pathForError, s, posQuote, "Missing value for attribute '%s'.", quote, attrName)
+					fileError(pathForError, s, attrValuePos, "Expected value for attribute '%s'.", attrName)
 				end
 				pos = i2 + 1
 
@@ -364,7 +372,7 @@ local function parseElementContents(s, pos, pathForError, el, isHtml, isTop)
 
 			local i1, i2 = s:find("-->", pos, true)
 			if not i1 then
-				fileError(pathForError, s, pos, "Missing end of comment.")
+				fileError(pathForError, s, posStart, "Missing end of comment.")
 			end
 
 			pos = i2 + 1
@@ -372,6 +380,7 @@ local function parseElementContents(s, pos, pathForError, el, isHtml, isTop)
 		-- CDATA section.
 		elseif s:find("^<!%[CDATA%[", pos) then
 			if isHtml then
+				-- Should we allow this in all HTML? It should at least be allowed in SVG elements for example.
 				fileError(pathForError, s, pos, "Encountered XML code in the HTML document.")
 			end
 
@@ -433,7 +442,7 @@ local function parseElementContents(s, pos, pathForError, el, isHtml, isTop)
 
 			local i1, i2, tagName = s:find(!("^("..PATTERN_NAME_CHAR.."+)"), pos)
 			if not i1 then
-				fileError(pathForError, s, pos, "Missing name tag after '<'.")
+				fileError(pathForError, s, pos, "Expected tag name after '<'.")
 			end
 			if isHtml then
 				tagName = tagName:lower()
@@ -488,7 +497,7 @@ local function parseElementContents(s, pos, pathForError, el, isHtml, isTop)
 
 				local i1, i2, tagNameEnd = s:find(!("^("..PATTERN_NAME_CHAR.."+)"), pos)
 				if not i1 then
-					fileError(pathForError, s, pos, "Missing name tag after '<'.")
+					fileError(pathForError, s, pos, "Expected tag name after '<'.")
 				end
 				if isHtml then
 					tagNameEnd = tagNameEnd:lower()
@@ -1043,80 +1052,6 @@ end
 
 
 
-local function shouldEncodeAsCdata(s)
-	if s:find("]]>", 1, true) then  return false  end
-
-	local entitiesNeeded = 0
-	local pos            = 1
-
-	while pos <= #s do
-		local charPos = s:find("[&<>\"']", pos)
-		if not charPos then  return false  end
-
-		entitiesNeeded = entitiesNeeded + 1
-		if entitiesNeeded >= 4 then  return true  end
-
-		pos = charPos + 1
-	end
-end
-
-local function nodeToXml(buffer, node)
-	if !!(IS_TEXT`node`) then
-		if shouldEncodeAsCdata(node) then
-			table.insert(buffer, "<![CDATA[")
-			table.insert(buffer, node)
-			table.insert(buffer, "]]>")
-		else
-			table.insert(buffer, (node:gsub("[&<>\"']", CHAR_TO_ENTITY)))
-		end
-		return
-	end
-
-	local el = node
-
-	table.insert(buffer, "<")
-	table.insert(buffer, el.tag)
-
-	for k, v in pairsSorted(el.attr) do
-		if type(k) == "string" then
-			table.insert(buffer, " ")
-			table.insert(buffer, k)
-			table.insert(buffer, '="')
-			table.insert(buffer, (v:gsub("[&<>\"']", CHAR_TO_ENTITY)))
-			table.insert(buffer, '"')
-		end
-	end
-
-	if not el[1] then
-		table.insert(buffer, "/>")
-
-	else
-		table.insert(buffer, ">")
-
-		for _, childNode in ipairs(el) do
-			nodeToXml(buffer, childNode)
-		end
-
-		table.insert(buffer, "</")
-		table.insert(buffer, el.tag)
-		table.insert(buffer, ">")
-	end
-end
-
--- xmlString = xml.toXml( node [, prefaceProcessingInstruction=false ] )
--- xmlString = xml.toXml( node, processingInstructionToPreface )
-function xml.toXml(node, preface)
-	local buffer = {}
-	if preface then
-		buffer[1] = (type(preface) == "string") and preface or !(XML_STANDARD_PREFACE.."\n")
-	end
-	nodeToXml(buffer, node)
-	return table.concat(buffer, "")
-end
-Element.toXml = xml.toXml -- :Alias
-
-
-
 local function nodeToHtml(buffer, node)
 	if !!(IS_TEXT`node`) then
 		table.insert(buffer, (node:gsub("[&<>\"']", CHAR_TO_ENTITY)))
@@ -1128,12 +1063,13 @@ local function nodeToHtml(buffer, node)
 	table.insert(buffer, "<")
 	table.insert(buffer, el.tag)
 
-	for k, v in pairsSorted(el.attr) do
-		if type(k) == "string" then
-			table.insert(buffer, " ")
-			table.insert(buffer, k)
+	for attrName, attrValue in pairsSorted(el.attr) do
+		table.insert(buffer, " ")
+		table.insert(buffer, attrName)
+
+		if attrValue ~= "" then
 			table.insert(buffer, '="')
-			table.insert(buffer, (v:gsub("[&<>\"']", CHAR_TO_ENTITY)))
+			table.insert(buffer, (attrValue:gsub("[&<>\"']", CHAR_TO_ENTITY)))
 			table.insert(buffer, '"')
 		end
 	end
@@ -1179,6 +1115,78 @@ Element.toHtml = xml.toHtml -- :Alias
 
 
 
+local function shouldEncodeAsCdata(s)
+	if s:find("]]>", 1, true) then  return false  end
+
+	local entitiesNeeded = 0
+	local pos            = 1
+
+	while pos <= #s do
+		local charPos = s:find("[&<>\"']", pos)
+		if not charPos then  return false  end
+
+		entitiesNeeded = entitiesNeeded + 1
+		if entitiesNeeded >= 4 then  return true  end
+
+		pos = charPos + 1
+	end
+end
+
+local function nodeToXml(buffer, node)
+	if !!(IS_TEXT`node`) then
+		if shouldEncodeAsCdata(node) then
+			table.insert(buffer, "<![CDATA[")
+			table.insert(buffer, node)
+			table.insert(buffer, "]]>")
+		else
+			table.insert(buffer, (node:gsub("[&<>\"']", CHAR_TO_ENTITY)))
+		end
+		return
+	end
+
+	local el = node
+
+	table.insert(buffer, "<")
+	table.insert(buffer, el.tag)
+
+	for attrName, attrValue in pairsSorted(el.attr) do
+		table.insert(buffer, " ")
+		table.insert(buffer, attrName)
+		table.insert(buffer, '="')
+		table.insert(buffer, (attrValue:gsub("[&<>\"']", CHAR_TO_ENTITY)))
+		table.insert(buffer, '"')
+	end
+
+	if not el[1] then
+		table.insert(buffer, "/>")
+
+	else
+		table.insert(buffer, ">")
+
+		for _, childNode in ipairs(el) do
+			nodeToXml(buffer, childNode)
+		end
+
+		table.insert(buffer, "</")
+		table.insert(buffer, el.tag)
+		table.insert(buffer, ">")
+	end
+end
+
+-- xmlString = xml.toXml( node [, prefaceProcessingInstruction=false ] )
+-- xmlString = xml.toXml( node, processingInstructionToPreface )
+function xml.toXml(node, preface)
+	local buffer = {}
+	if preface then
+		buffer[1] = (type(preface) == "string") and preface or !(XML_STANDARD_PREFACE.."\n")
+	end
+	nodeToXml(buffer, node)
+	return table.concat(buffer, "")
+end
+Element.toXml = xml.toXml -- :Alias
+
+
+
 local function nodeToXmlPretty(buffer, node, initialIndent,indent,attrIndent, indentTags)
 	if !!(IS_TEXT`node`) then
 		if not node:find"%S" then
@@ -1200,7 +1208,7 @@ local function nodeToXmlPretty(buffer, node, initialIndent,indent,attrIndent, in
 	table.insert(buffer, "<")
 	table.insert(buffer, el.tag)
 
-	for k, v in pairsSorted(el.attr) do
+	for attrName, attrValue in pairsSorted(el.attr) do
 		if attrIndent then
 			table.insert(buffer, "\n")
 			table.insert(buffer, initialIndent)
@@ -1209,9 +1217,9 @@ local function nodeToXmlPretty(buffer, node, initialIndent,indent,attrIndent, in
 			table.insert(buffer, " ")
 		end
 
-		table.insert(buffer, k)
+		table.insert(buffer, attrName)
 		table.insert(buffer, '="')
-		table.insert(buffer, (v:gsub("[&<>\"']", CHAR_TO_ENTITY)))
+		table.insert(buffer, (attrValue:gsub("[&<>\"']", CHAR_TO_ENTITY)))
 		table.insert(buffer, '"')
 	end
 
