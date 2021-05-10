@@ -21,6 +21,8 @@
 --============================================================]]
 
 !(
+local STANDARD_PREFACE = '<?xml version="1.0" encoding="UTF-8"?>'
+
 local PATTERN_NAME_CHAR = "[-._:%w\128-\255]"
 
 local _IS_TEXT = `(type(?) == "string")`
@@ -39,12 +41,10 @@ local CHAR_TO_ENTITY = {
 	["'"] = "&apos;",
 }
 
-local xmlLib = {}
+local xml = {}
 
 local Element   = {}
 Element.__index = Element
-
-local cacheTemplate -- @Cleanup
 
 
 
@@ -77,6 +77,33 @@ local function fixArrayPartOfAttributes(attrs)
 
 	for _, attrName in ipairs(sort(getKeys(attrs))) do
 		table.insert(attrs, attrName)
+	end
+end
+
+
+
+local documentCache = {}
+
+local function cacheIfXmlString(xmlStrOrEl)
+	if type(xmlStrOrEl) == "string" then
+		local xmlStr = xmlStrOrEl
+		local el     = documentCache[xmlStr]
+		if el then  return el  end
+
+		local err ; el, err = xml.parse(xmlStr) -- @Incomplete: Use parseXml instead!
+		if not el then  return nil, err  end
+		-- local ok, elOrErr = pcall(xml.parseXml, xmlStr)
+		-- if not ok then  return nil, elOrErr  end
+		-- el = elOrErr
+
+		documentCache[xmlStr] = el
+		return el
+
+	elseif xml.isElement(xmlStrOrEl) then
+		return xmlStrOrEl
+
+	else
+		return nil, "Template is not a document."
 	end
 end
 
@@ -343,7 +370,7 @@ local function parseElementContents(s, pos, pathForError, el, isTop)
 			end
 			pos = i2 + 1
 
-			local childEl = xmlLib.newElement(tagName)
+			local childEl = xml.newElement(tagName)
 
 			if s:find("^%s", pos) then
 				!!(EAT_SPACE)
@@ -432,7 +459,7 @@ Element.add_direct_child = Element.addChild -- :PenlightCompatibility
 -- element = Element:getFirstElement( )
 function Element.getFirstElement(el)
 	for _, childNode in ipairs(el) do
-		if xmlLib.isElement(childNode) then  return childNode  end
+		if xml.isElement(childNode) then  return childNode  end
 	end
 	return nil
 end
@@ -441,7 +468,7 @@ Element.first_childtag = Element.getFirstElement -- :PenlightCompatibility
 -- element = Element:getChildByName( tag )
 function Element.getChildByName(el, tagName)
 	for _, childNode in ipairs(el) do
-		if xmlLib.isElement(childNode) and childNode.tag == tag then
+		if xml.isElement(childNode) and childNode.tag == tag then
 			return childNode
 		end
 	end
@@ -451,7 +478,7 @@ Element.child_with_name = Element.getChildByName -- :PenlightCompatibility
 do
 	local function _findAllElementsByName(el, tag, elements, recurse)
 		for _, childNode in ipairs(el) do
-			if xmlLib.isElement(childNode) then
+			if xml.isElement(childNode) then
 				if childNode.tag == tag then
 					table.insert(elements, childNode)
 				end
@@ -493,7 +520,7 @@ function Element.eachChildElement(el)
 			local childNode = el[i]
 
 			if not childNode               then  return            end
-			if xmlLib.isElement(childNode) then  return childNode  end
+			if xml.isElement(childNode) then  return childNode  end
 		end
 	end
 end
@@ -508,7 +535,7 @@ end
 Element.get_attribs = Element.getAttributes -- :PenlightCompatibility
 
 -- Element:setAttribute( attributeName, attributeValue )
--- Element:setAttribute( attributeName, nil ) -- Remove attribute.
+-- Element:setAttribute( attributeName, nil ) -- Remove the attribute.
 function Element.setAttribute(el, attrName, attrValue)
 	if not attrValue and not el.attr[attrName] then  return  end
 
@@ -525,10 +552,12 @@ Element.set_attrib = Element.setAttribute -- :PenlightCompatibility
 -- Element:updateAttributes( attributes )
 function Element.updateAttributes(el, attrs)
 	for attrName, attrValue in pairs(attrs) do
-		if not el.attr[attrName] then
-			table.insert(el.attr, attrName)
+		if type(attrName) == "string" then
+			if not el.attr[attrName] then
+				table.insert(el.attr, attrName)
+			end
+			el.attr[attrName] = attrValue
 		end
-		el.attr[attrName] = attrValue
 	end
 end
 Element.set_attribs = Element.updateAttributes -- :PenlightCompatibility
@@ -555,15 +584,15 @@ do
 end
 
 -- This function is pretty silly - use getText() instead!
--- text = Element:getTextOfChildren( )
-function Element.getTextOfChildren(el)
+-- text = Element:getTextOfDirectChildren( )
+function Element.getTextOfDirectChildren(el)
 	local buffer = {}
 	for _, childNode in ipairs(el) do
 		if !!(IS_TEXT`childNode`) then  table.insert(buffer, childNode)  end
 	end
 	return table.concat(buffer)
 end
-Element.get_text = Element.getTextOfChildren -- :PenlightCompatibility
+Element.get_text = Element.getTextOfDirectChildren -- :PenlightCompatibility
 
 
 
@@ -655,11 +684,13 @@ do
 
 			else
 				for attrName, patAttrValue in pairs(patEl.attr) do
-					local elAttrValue = el.attr[attrName]
+					if type(attrName) == "string" then
+						local elAttrValue  = el.attr[attrName]
 
-					if not _match(elAttrValue, patAttrValue, matches) then
-						ok = false
-						break
+						if not _match(elAttrValue, patAttrValue, matches) then
+							ok = false
+							break
+						end
 					end
 				end
 			end
@@ -671,7 +702,9 @@ do
 
 				local function advanceElement()
 					elChildI = elChildI + 1 -- Next child element of data.
-					if !!(IS_TEXT`el[elChildI]`) then  elChildI = elChildI + 1  end
+					while el[elChildI] and !!(IS_TEXT`el[elChildI]`) do
+						elChildI = elChildI + 1
+					end
 					return elChildI <= #el
 				end
 
@@ -679,7 +712,7 @@ do
 					local childNode = patEl[patChildI]
 
 					-- Repeated {{<...>}} patterns shall match one or more elements so e.g. {P+} will match {X,X,P,P,X,P,X,X,X}.
-					if xmlLib.isElement(childNode) and childNode.repeated then
+					if xml.isElement(childNode) and childNode.repeated then
 						local found = false
 
 						repeat
@@ -725,18 +758,18 @@ do
 	-- matches = Element:match( xmlStringPattern )
 	-- matches = Element:match( elementPattern )
 	-- Returns nil and a message on error.
-	-- (See https://lunarmodules.github.io/Penlight/manual/06-data.md.html#XML)
+	-- (See https://lunarmodules.github.io/Penlight/manual/06-data.md.html#XML - look for sections describing templates)
 	function Element.match(el, patStrOrEl)
-		local patEl, err = cacheTemplate(patStrOrEl)
+		local patEl, err = cacheIfXmlString(patStrOrEl)
 		if not patEl then  return nil, err  end
 
-		xmlLib.walk(patEl, false, function(tagName, currentEl)
+		xml.walk(patEl, false, function(tagName, currentEl)
 			if
-				!!(IS_TEXT`currentEl[1]`) and xmlLib.isElement(currentEl[2]) and !!(IS_TEXT`currentEl[3]`)
+				!!(IS_TEXT`currentEl[1]`) and xml.isElement(currentEl[2]) and !!(IS_TEXT`currentEl[3]`)
 				and currentEl[1]:find"%s*{{" and currentEl[3]:find"}}%s*"
 			then
+				table.remove(currentEl, 3)
 				table.remove(currentEl, 1)
-				table.remove(currentEl, 2)
 				currentEl[1].repeated = true
 			end
 		end)
@@ -754,8 +787,27 @@ end
 
 
 
--- for childElement in Element:eachMatchingChildElement( [ tag=any, xmlns=(self.attr.xmlns or any) ] )
-function Element.eachMatchingChildElement(el, tagName, xmlns)
+-- for childElement in Element:eachMatchingChildElement( tag )
+function Element.eachMatchingChildElement(el, tagName)
+	local i = 0
+
+	return function()
+		while true do
+			i               = i + 1
+			local childNode = el[i]
+
+			if not childNode then  return  end
+
+			if xml.isElement(childNode) and childNode.tag == tagName then
+				return childNode
+			end
+		end
+	end
+end
+
+-- :PenlightCompatibility
+-- for childElement in Element:matching_tags( [ tag=any, xmlns=(self.attr.xmlns or any) ] )
+function Element.matching_tags(el, tagName, xmlns)
 	xmlns   = xmlns or el.attr.xmlns
 	local i = 0
 
@@ -767,7 +819,7 @@ function Element.eachMatchingChildElement(el, tagName, xmlns)
 			if not childNode then  return  end
 
 			if
-				xmlLib.isElement(childNode)
+				xml.isElement(childNode)
 				and (not tagName or childNode.tag        == tagName)
 				and (not xmlns   or childNode.attr.xmlns == xmlns)
 			then
@@ -776,7 +828,6 @@ function Element.eachMatchingChildElement(el, tagName, xmlns)
 		end
 	end
 end
-Element.matching_tags = Element.eachMatchingChildElement -- :PenlightCompatibility
 
 
 
@@ -795,7 +846,7 @@ function Element.stackAddElement(el, tagName, attrs)
 
 	if attrs then  fixArrayPartOfAttributes(attrs) end
 
-	local elToAdd  = xmlLib.newElement(tagName, attrs)
+	local elToAdd  = xml.newElement(tagName, attrs)
 	local targetEl = (el._last[#el._last] or el)
 
 	targetEl:addChild(elToAdd)
@@ -831,18 +882,19 @@ Element.reset = Element.stackReset -- :PenlightCompatibility
 
 
 
--- self = Element:mapElements( callback )
+-- self            = Element:mapElements( callback )
+-- replacementNode = callback( childNode ) -- Returning nil removes the node.
 function Element.mapElements(el, cb)
 	local i = 1
 
 	while el[i] do
-		if xmlLib.isElement(el[i]) then
+		if xml.isElement(el[i]) then
 			local replacement = cb(el[i])
-			if replacement == nil then
-				table.remove(el, i)
-			else
+			if replacement then
 				el[i] = replacement
 				i     = i + 1
+			else
+				table.remove(el, i)
 			end
 		else
 			i = i + 1
@@ -856,24 +908,6 @@ Element.maptags = Element.mapElements -- :PenlightCompatibility
 
 
 do
-	local templateCache = {}
-
-	function cacheTemplate(template)
-		if !!(IS_TEXT`template`) then
-			if templateCache[template] then
-				template = templateCache[template]
-			else
-				local str, err = template
-				template, err = xmlLib.parse(str, false, true)
-				if not template then  return nil, err  end
-				templateCache[str] = template
-			end
-		elseif not xmlLib.isElement(template) then
-			return nil, "Template is not a document."
-		end
-		return template
-	end
-
 	local function prepareData(data)
 		-- A hack for ensuring that $1 maps to first element of data, etc.
 		-- Either this or could change the gsub call just below.
@@ -893,11 +927,11 @@ do
 		local dataIsData = (type(data[1]) ~= "table")
 		if dataIsData then  prepareData(data)  end
 
-		local templateEl, err = cacheTemplate(templateStrOrEl)
+		local templateEl, err = cacheIfXmlString(templateStrOrEl)
 		if not templateEl then  return nil, err  end
 
 		local function _substitute(item)
-			return xmlLib.clone(templateEl, function(s)
+			return xml.clone(templateEl, function(s)
 				return s:gsub("%$(%w+)", item)
 			end)
 		end
@@ -911,12 +945,13 @@ do
 		end
 
 		if data.tag then
-			list = xmlLib.elem(data.tag, list)
+			list = xml.elem(data.tag, list)
 		end
 
 		return list
 	end
-	Element.subst = Element.substitute -- :PenlightCompatibility
+	xml.substitute = Element.substitute -- :Alias
+	Element.subst  = Element.substitute -- :PenlightCompatibility
 end
 
 
@@ -1014,12 +1049,17 @@ local function nodeToXml(buffer, node)
 	end
 end
 
-function xmlLib.toXml(node)
+-- xmlString = xml.toXml( node [, prefaceProcessingInstruction=false ] )
+-- xmlString = xml.toXml( node, processingInstructionToPreface )
+function xml.toXml(node, preface)
 	local buffer = {}
+	if preface then
+		buffer[1] = (type(preface) == "string") and preface or !(STANDARD_PREFACE.."\n")
+	end
 	nodeToXml(buffer, node)
 	return table.concat(buffer, "")
 end
-Element.toXml = xmlLib.toXml -- :Alias
+Element.toXml = xml.toXml -- :Alias
 
 
 
@@ -1102,7 +1142,7 @@ local function nodeToXmlPretty(buffer, node, initialIndent,indent,attrIndent, in
 		local hasChildElements = false
 		for _, childNode in ipairs(el) do
 			nodeToXmlPretty(buffer, childNode, initialIndent..indent,indent,attrIndent, indentTags)
-			hasChildElements = hasChildElements or xmlLib.isElement(childNode)
+			hasChildElements = hasChildElements or xml.isElement(childNode)
 		end
 
 		if hasChildElements and indentTags then
@@ -1117,44 +1157,45 @@ local function nodeToXmlPretty(buffer, node, initialIndent,indent,attrIndent, in
 end
 
 --
--- This is only for (legacy) pretty-printing of the XML - call xmlLib.toXml() or
+-- This is only for (legacy) pretty-printing of the XML - call xml.toXml() or
 -- element:toXml() to create an XML string without any modifications to the data.
 --
--- xmlString = xmlLib.toPrettyXml( node [, initialIndentationString="", indentationString=noIndentation, attributeIndentationString=noIndentation, prefaceProcessingInstruction=false ] )
--- xmlString = xmlLib.toPrettyXml( node, initialIndentationString="", indentationString=noIndentation, attributeIndentationString=noIndentation, processingInstructionToPreface )
+-- xmlString = xml.toPrettyXml( node [, initialIndentationString="", indentationString=noIndentation, attributeIndentationString=noIndentation, prefaceProcessingInstruction=false ] )
+-- xmlString = xml.toPrettyXml( node, initialIndentationString="", indentationString=noIndentation, attributeIndentationString=noIndentation, processingInstructionToPreface )
 --
 -- Specifying indentationString puts each tag on its own line.
 -- Specifying attributeIndentationString puts each attribute on its own line.
 --
-function xmlLib.toPrettyXml(node, initialIndent,indent,attrIndent, xmlPi)
+function xml.toPrettyXml(node, initialIndent,indent,attrIndent, preface)
 	local indentTags = (indent ~= nil)
 
 	initialIndent = (initialIndent or "")
 	indent        = (indent        or "")
 
 	local buffer = {}
-	if xmlPi then
-		buffer[1] = (type(xmlPi) == "string") and xmlPi or '<?xml version="1.0" encoding="UTF-8"?>'
+	if preface then
+		buffer[1] = (type(preface) == "string") and preface or !(STANDARD_PREFACE)
 	end
 
 	nodeToXmlPretty(buffer, node, initialIndent,indent,attrIndent, indentTags)
 
 	return table.concat(buffer)
 end
-xmlLib.tostring    = xmlLib.toPrettyXml -- :PenlightCompatibility
-Element.__tostring = xmlLib.toPrettyXml -- :PenlightCompatibility
+Element.toPrettyXml = xml.toPrettyXml -- :Alias
+xml.tostring        = xml.toPrettyXml -- :PenlightCompatibility
+Element.__tostring  = xml.toPrettyXml -- :PenlightCompatibility
 
 
 
--- document = parseXml( xmlString [, filePathForError ] )
-function xmlLib.parseXml(s, pathForError)
+-- document = xml.parseXml( xmlString [, filePathForError ] )
+function xml.parseXml(s, pathForError)
 	pathForError = pathForError or "[xml]"
 
 	if s:find"%z" then -- A valid UTF-16 file should always have NULLs in it.
 		fileError(pathForError, s, 1, "Only UTF-8 is supported.")
 	end
 
-	local docWrapper = xmlLib.newElement("")
+	local docWrapper = xml.newElement("")
 	local pos        = parseElementContents(s, 1, pathForError, docWrapper, true)
 
 	if pos <= #s then
@@ -1188,28 +1229,25 @@ local function removeWhitespaceNodes(el)
 
 	el.empty = not el[1]
 
-	xmlLib.walk(el, false, function(tagName, currentEl)
-		if !!(IS_TEXT`currentEl`) then  return  end
-
+	xml.walk(el, false, function(tagName, currentEl)
 		for i, childNode in ipairsr(currentEl) do
 			if !!(IS_TEXT`childNode`) and childNode:match"^%s+$" then
 				table.remove(currentEl, i)
 			end
 		end
-
 		currentEl.empty = not currentEl[1]
 	end)
 end
 
 -- Use parseXml() instead! :PenlightCompatibility
 --
--- document = xmlLib.parse( xmlString,     isFile, useBasic )
--- document = xmlLib.parse( xmlFileHandle, isFile, useBasic )
+-- document = xml.parse( xmlString,     isFile, useBasic )
+-- document = xml.parse( xmlFileHandle, isFile, useBasic )
 --
 -- 'isFile' and 'useBasic' are ignored.
 -- Returns nil and a message on error.
 --
-function xmlLib.parse(s, isFile, useBasic)
+function xml.parse(s, isFile, useBasic)
 	if type(s) == "userdata" then
 		s = s:read"*a"
 		if not s then
@@ -1217,7 +1255,7 @@ function xmlLib.parse(s, isFile, useBasic)
 		end
 	end
 
-	local ok, docOrErr = pcall(xmlLib.parseXml, s, nil)
+	local ok, docOrErr = pcall(xml.parseXml, s)
 	if not ok then
 		return nil, tostring(isErrorObject(docOrErr) and docOrErr.message or docOrErr)
 	end
@@ -1228,11 +1266,11 @@ function xmlLib.parse(s, isFile, useBasic)
 end
 
 -- Use parseXml() instead! :PenlightCompatibility
--- document = xmlLib.basic_parse( string [, preserveAllWhitespace=false, isHtml=false ] )
-function xmlLib.basic_parse(s, preserveAllWhitespace, isHtml)
+-- document = xml.basic_parse( string [, preserveAllWhitespace=false, isHtml=false ] )
+function xml.basic_parse(s, preserveAllWhitespace, isHtml)
 	if isHtml then  error("HTML parsing not supported.", 2)  end
 
-	local doc, err = xmlLib.parse(s)
+	local doc, err = xml.parse(s)
 	if not doc then  error(err, 2)  end
 
 	if not preserveAllWhitespace then
@@ -1243,21 +1281,21 @@ function xmlLib.basic_parse(s, preserveAllWhitespace, isHtml)
 end
 
 -- :PenlightCompatibility
--- document = xmlLib.parsehtml( htmlString )
-function xmlLib.parsehtml(s)
-	return (xmlLib.basic_parse(s, false, true))
+-- document = xml.parsehtml( htmlString )
+function xml.parsehtml(s)
+	return (xml.basic_parse(s, false, true))
 end
 
 
 
--- xmlLib.walk( element, depthFirst, callback )
--- callback = function( tag, node )
-function xmlLib.walk(el, depthFirst, cb)
+-- xml.walk( document, depthFirst, callback )
+-- callback = function( tag, element )
+function xml.walk(el, depthFirst, cb)
 	if not depthFirst then  cb(el.tag, el)  end
 
 	for _, childNode in ipairs(el) do
-		if xmlLib.isElement(childNode) then
-			xmlLib.walk(childNode, depthFirst, cb)
+		if xml.isElement(childNode) then
+			xml.walk(childNode, depthFirst, cb)
 		end
 	end
 
@@ -1266,16 +1304,21 @@ end
 
 
 
--- bool = xmlLib.isElement( value )
-function xmlLib.isElement(v)
+-- bool = xml.isElement( value )
+function xml.isElement(v)
 	return type(v) == "table" and getmetatable(v) == Element
 end
-xmlLib.is_tag = xmlLib.isElement -- :PenlightCompatibility
+xml.is_tag = xml.isElement -- :PenlightCompatibility
+
+-- bool = xml.isText( value )
+function xml.isText(v)
+	return type(v) == "string"
+end
 
 
 
--- element = xmlLib.newElement( tag [, attributes ] )
-function xmlLib.newElement(tagName, attrs)
+-- element = xml.newElement( tag [, attributes ] )
+function xml.newElement(tagName, attrs)
 	assertArg(1, tagName, "string")
 
 	if attrs then  fixArrayPartOfAttributes(attrs) end
@@ -1291,19 +1334,19 @@ function xmlLib.newElement(tagName, attrs)
 	}
 	return setmetatable(el, Element)
 end
-xmlLib.new = xmlLib.newElement -- :PenlightCompatibility
+xml.new = xml.newElement -- :PenlightCompatibility
 
 
 
--- element = xmlLib.element( tag [, childNode ] )
--- element = xmlLib.element( tag [, attributesAndChildNodes ] )
-function xmlLib.element(tagName, prototype)
-	local el = xmlLib.newElement(tagName)
+-- element = xml.element( tag [, childNode ] )
+-- element = xml.element( tag [, attributesAndChildNodes ] )
+function xml.element(tagName, prototype)
+	local el = xml.newElement(tagName)
 
 	if not prototype then
 		-- void
 
-	elseif !!(IS_TEXT`prototype`) or xmlLib.isElement(prototype) then
+	elseif !!(IS_TEXT`prototype`) or xml.isElement(prototype) then
 		el[1] = prototype
 
 	else
@@ -1319,29 +1362,35 @@ function xmlLib.element(tagName, prototype)
 
 	return el
 end
-xmlLib.elem = xmlLib.element -- :PenlightCompatibility
+xml.elem = xml.element -- :PenlightCompatibility
 
 
 
 do
 	local function _clone(node, textSubstCallback, parentEl)
 		if !!(IS_TEXT`node`) then
-			if textSubstCallback then  node = textSubstCallback(node, "*TEXT", parentEl)  end
+			if textSubstCallback then
+				node = textSubstCallback(node, "*TEXT", parentEl) or errorf("No value returned from text substitution callback for '*TEXT'.")
+			end
 			return node
 		end
 
 		local el = node
 
-		local elClone = xmlLib.newElement("")
+		local elClone = xml.newElement("")
 		local tagName = el.tag
 
-		if textSubstCallback then  tagName = textSubstCallback(tagName, "*TAG", el)  end
+		if textSubstCallback then
+			tagName = textSubstCallback(tagName, "*TAG", el) or errorf("No value returned from text substitution callback for '*TAG'.")
+		end
 
 		elClone.tag = tagName
 
 		for _, attrName in ipairs(el.attr) do
 			local attrValue = el.attr[attrName]
-			if textSubstCallback then  attrValue = textSubstCallback(attrValue, attrName, el)  end
+			if textSubstCallback then
+				attrValue = textSubstCallback(attrValue, attrName, el) or errorf("No value returned from text substitution callback for '%s'.", attrName)
+			end
 
 			table.insert(elClone.attr, attrName)
 			elClone.attr[attrName] = attrValue
@@ -1354,25 +1403,25 @@ do
 		return elClone
 	end
 
-	-- clone = xmlLib.clone( node [, textSubstitutionCallback ] )
+	-- clone = xml.clone( node [, textSubstitutionCallback ] )
 	-- text  = textSubstitutionCallback( text, kind, parentElement )
 	-- kind  = attributeName | "*TEXT" | "*TAG"
 	-- parentElement is nil if 'node' is a text node.
-	function xmlLib.clone(node, textSubstCallback)
+	function xml.clone(node, textSubstCallback)
 		return (_clone(node, textSubstCallback, nil))
 	end
-	Element.filter = xmlLib.clone -- :Alias
+	Element.filter = xml.clone -- :Alias
 end
 
 
 
--- nodesLookEqual = xmlLib.compare( value1, value2 )
+-- nodesLookEqual = xml.compare( value1, value2 )
 -- Returns false if any value is not a node.
-function xmlLib.compare(v1, v2)
+function xml.compare(v1, v2)
 	if !!(IS_TEXT`v1`) and !!(IS_TEXT`v2`) then
 		return v1 == v2
 	end
-	if not (xmlLib.isElement(v1) and xmlLib.isElement(v2)) then
+	if not (xml.isElement(v1) and xml.isElement(v2)) then
 		return false
 	end
 
@@ -1387,7 +1436,7 @@ function xmlLib.compare(v1, v2)
 	end
 
 	for i = 1, #v1 do
-		if not xmlLib.compare(v1[i], v2[i]) then
+		if not xml.compare(v1[i], v2[i]) then
 			return false
 		end
 	end
@@ -1400,9 +1449,11 @@ end
 do
 	local constructors = {}
 
-	-- constructor1, ... = xmlLib.makeElementConstructors( tags )
-	-- constructor1, ... = xmlLib.makeElementConstructors( "tag,..." )
-	function xmlLib.makeElementConstructors(tagNames)
+	-- constructor1, ... = xml.makeElementConstructors( tags )
+	-- constructor1, ... = xml.makeElementConstructors( "tag,..." )
+	-- element           = constructor( [ childNode ] )
+	-- element           = constructor( attributesAndChildNodes )
+	function xml.makeElementConstructors(tagNames)
 		if type(tagNames) == "string" then
 			local _tagNames = {}
 
@@ -1420,17 +1471,17 @@ do
 
 		for i, tag in ipairs(tagNames) do
 			constructors[i] = function(items)
-				return xmlLib.element(tag, items)
+				return xml.element(tag, items)
 			end
 		end
 
 		return unpack(constructors, 1, #tagNames)
 	end
-	xmlLib.tags = xmlLib.makeElementConstructors
+	xml.tags = xml.makeElementConstructors
 end
 
 
 
 --==============================================================
 
-return xmlLib
+return xml
