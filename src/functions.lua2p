@@ -13,7 +13,7 @@
 	assert
 	attributeWith, attributeWithAny
 	cleanupPath
-	countStrings, countSubStrings
+	countString, countSubString
 	createDirectory, isDirectoryEmpty, removeEmptyDirectories
 	createThumbnail
 	datetimeToTime, getDatetime
@@ -376,7 +376,7 @@ do
 			local echoI2   = (doTrim and blockI1Trimmed or blockI1) - 1
 
 			if doTrim and blockI1 > blockI1Trimmed then
-				table.insert(out, ("\n"):rep(countSubStrings(template, blockI1Trimmed, blockI1-1, "\n", true))) -- :TrimBlocks
+				table.insert(out, ("\n"):rep(countSubString(template, blockI1Trimmed, blockI1-1, "\n", true))) -- :TrimBlocks
 			end
 
 			if pos <= echoI2 then
@@ -405,7 +405,7 @@ do
 			if doTrim then
 				local posAfterBlock;posAfterBlock, pos = template:match("^()%s*()", pos)
 				if pos > posAfterBlock then
-					table.insert(out, ("\n"):rep(countSubStrings(template, posAfterBlock, pos, "\n", true))) -- :TrimBlocks
+					table.insert(out, ("\n"):rep(countSubString(template, posAfterBlock, pos, "\n", true))) -- :TrimBlocks
 				end
 			end
 			`
@@ -799,9 +799,9 @@ function _G.errorf(levelOrS, ...)
 end
 
 do
-	local function findStartOfNonEmptyLine(s, pos)
+	local function findStartOfLine(s, pos, canBeEmpty)
 		while pos > 1 do
-			if s:byte(pos-1) == !(string.byte"\n") and s:byte(pos) ~= !(string.byte"\n") then  break  end
+			if s:byte(pos-1) == !(string.byte"\n") and (canBeEmpty or s:byte(pos) ~= !(string.byte"\n")) then  break  end
 			pos = pos - 1
 		end
 		return math.max(pos, 1)
@@ -829,20 +829,20 @@ do
 		end
 
 		if contents then
-			local lineStart     = findStartOfNonEmptyLine(contents, pos)
-			local lineEnd       = findEndOfLine(contents, pos-1)
-			local linePre1Start = findStartOfNonEmptyLine(contents, lineStart-1)
-			local linePre1End   = findEndOfLine(contents, linePre1Start-1)
-			local linePre2Start = findStartOfNonEmptyLine(contents, linePre1Start-1)
-			local linePre2End   = findEndOfLine(contents, linePre2Start-1)
-			printf("pos %d | lines %d..%d, %d..%d, %d..%d", pos, linePre2Start,linePre2End+1, linePre1Start,linePre1End+1, lineStart,lineEnd+1)
+			local lineStart     = findStartOfLine(contents, pos, true)
+			local lineEnd       = findEndOfLine  (contents, pos-1)
+			local linePre1Start = findStartOfLine(contents, lineStart-1, false)
+			local linePre1End   = findEndOfLine  (contents, linePre1Start-1)
+			local linePre2Start = findStartOfLine(contents, linePre1Start-1, false)
+			local linePre2End   = findEndOfLine  (contents, linePre2Start-1)
+			-- printf("pos %d | lines %d..%d, %d..%d, %d..%d", pos, linePre2Start,linePre2End+1, linePre1Start,linePre1End+1, lineStart,lineEnd+1) -- DEBUG
 
-			s = F("%s\n\n%s%s> %s\n> %s^",
+			s = F("%s\n>\n%s%s%s>-%s^",
 				s,
 				(linePre2Start < linePre1Start and linePre2Start <= linePre2End) and F("> %s\n", (contents:sub(linePre2Start, linePre2End):gsub("\t", "    "))) or "",
 				(linePre1Start < lineStart     and linePre1Start <= linePre1End) and F("> %s\n", (contents:sub(linePre1Start, linePre1End):gsub("\t", "    "))) or "",
-				contents:sub(lineStart, lineEnd):gsub("\t", "    "),
-				("-"):rep(pos - lineStart + 3*countSubStrings(contents, lineStart, lineEnd, "\t", true)),
+				(                                  lineStart     <= lineEnd    ) and F("> %s\n", (contents:sub(lineStart,     lineEnd    ):gsub("\t", "    "))) or ">\n",
+				("-"):rep(pos - lineStart + 3*countSubString(contents, lineStart, lineEnd, "\t", true)),
 				nil
 			)
 		end
@@ -861,7 +861,7 @@ end
 
 
 function _G.getLineNumber(s, pos)
-	return 1 + countSubStrings(s, 1, pos-1, "\n", true)
+	return 1 + countSubString(s, 1, pos-1, "\n", true)
 end
 
 
@@ -2661,8 +2661,9 @@ end
 
 
 
--- count = countStrings( string, needle [, plain=false ] )
-function _G.countStrings(s, needle, plain)
+--[[ Unused.
+-- count = countString( haystack, needle [, plain=false ] )
+function _G.countString(s, needle, plain)
 	local count = 0
 	local pos   = 1
 
@@ -2674,9 +2675,10 @@ function _G.countStrings(s, needle, plain)
 		pos   = i2    + 1
 	end
 end
+--]]
 
--- count = countSubStrings( string, startPosition, endPosition, needle [, plain=false ] )
-function _G.countSubStrings(s, pos, posEnd, needle, plain)
+-- count = countSubString( haystack, startPosition, endPosition, needle [, plain=false ] )
+function _G.countSubString(s, pos, posEnd, needle, plain)
 	local count = 0
 
 	while true do
