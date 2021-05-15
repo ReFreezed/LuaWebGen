@@ -367,7 +367,7 @@ _G.scriptEnvironmentGlobals = {
 	markdown         = markdownToHtml,
 	max              = math.max,
 	min              = math.min,
-	newStringBuilder = newStringBuilder, newBuffer = newStringBuilder,
+	newStringBuilder = newStringBuilder, newBuffer = newStringBuilder, -- newBuffer() is @Deprecated, I guess? 2021-05-15
 	prettyUrl        = toPrettyUrl,
 	printf           = printf,
 	printfOnce       = printfOnce,
@@ -664,6 +664,30 @@ _G.scriptEnvironmentGlobals = {
 		end)
 
 		return fileInfos
+	end,
+
+	getDataTextParsers = function()
+		local _dataParsers = {}
+
+		for ext, dataParser in pairs(dataParsers) do
+			if not dataParserIsBinary[ext] then
+				_dataParsers[ext] = dataParser
+			end
+		end
+
+		return _dataParsers
+	end,
+
+	getDataBinaryParsers = function()
+		local _dataParsers = {}
+
+		for ext, dataParser in pairs(dataParsers) do
+			if dataParserIsBinary[ext] then
+				_dataParsers[ext] = dataParser
+			end
+		end
+
+		return _dataParsers
 	end,
 
 	-- Context functions.
@@ -1106,6 +1130,8 @@ local function buildWebsite()
 
 	-- Final config handling.
 	for ext, customDataParser in pairs(customDataTextParsers) do
+		-- ext = ext:lower() -- Actually a bad idea! (Until we have a version of isFile() that is case insensitive, that is.)
+
 		dataParsers[ext]        = customDataParser
 		dataParserIsBinary[ext] = false
 
@@ -1115,6 +1141,8 @@ local function buildWebsite()
 	end
 
 	for ext, customDataParser in pairs(customDataBinaryParsers) do
+		-- ext = ext:lower() -- Actually a bad idea! (Until we have a version of isFile() that is case insensitive, that is.)
+
 		dataParsers[ext]        = customDataParser
 		dataParserIsBinary[ext] = true
 

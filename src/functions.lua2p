@@ -1379,6 +1379,11 @@ end
 _G.dataParsers        = {}
 _G.dataParserIsBinary = {}
 
+-- dataParserIsBinary.html = false
+-- function dataParsers.html(dataStr, path) -- Why would anyone use this? Just, why?
+-- 	return (assert(xmlLib.parseHtml(dataStr, path)))
+-- end
+
 dataParserIsBinary.lua = false
 function dataParsers.lua(dataStr, path)
 	local chunk, err = loadstring(dataStr, "@"..path)
@@ -1403,6 +1408,10 @@ dataParserIsBinary.xml = false
 function dataParsers.xml(dataStr, path)
 	return (assert(xmlLib.parseXml(dataStr, path)))
 end
+
+dataParserIsBinary.svg  = false ; dataParsers.svg  = dataParsers.xml
+-- dataParserIsBinary.htm  = false ; dataParsers.htm  = dataParsers.html
+-- dataParserIsBinary.wlua = false ; dataParsers.wlua = dataParsers.lua -- A bit silly, really.
 
 -- dataFolderReader = newDataFolderReader( directory [, isTop=false ] )
 function _G.newDataFolderReader(dir, checkDirExistance)
