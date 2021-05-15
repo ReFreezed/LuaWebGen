@@ -814,9 +814,7 @@ do
 		return math.min(pos, #s)
 	end
 
-	-- fileError( path, contents, position,   formatString, ... )
-	-- fileError( path, nil,      lineNumber, formatString, ... )
-	function _G.fileError(path, contents, pos, s, ...)
+	local function formatFileMessage(path, contents, pos, s, ...)
 		if contents then
 			pos = math.min(math.max(pos, 1), #contents+1)
 		end
@@ -829,6 +827,9 @@ do
 		end
 
 		if contents then
+			!local MAX_VIEW_BEFORE = 60
+			!local MAX_VIEW_AFTER  = 40
+
 			local lineStart     = findStartOfLine(contents, pos, true)
 			local lineEnd       = findEndOfLine  (contents, pos-1)
 			local linePre1Start = findStartOfLine(contents, lineStart-1, false)
@@ -837,17 +838,45 @@ do
 			local linePre2End   = findEndOfLine  (contents, linePre2Start-1)
 			-- printf("pos %d | lines %d..%d, %d..%d, %d..%d", pos, linePre2Start,linePre2End+1, linePre1Start,linePre1End+1, lineStart,lineEnd+1) -- DEBUG
 
+			-- @Incomplete: Handle multi-byte characters.
+			local lengthLine     = lineEnd     - lineStart     + 1
+			local lengthLinePre1 = linePre1End - linePre1Start + 1
+			local lengthLinePre2 = linePre2End - linePre2Start + 1
+
+			local column       = pos - lineStart + 1
+			local columnsToCut = math.max(column-1-!(MAX_VIEW_BEFORE), 0)
+			local lastColumn   = column + !(MAX_VIEW_AFTER)
+
+			local toCutAfterLine     = lineEnd        - math.min(pos+!(MAX_VIEW_AFTER), lineEnd)
+			local toCutAfterLinePre1 = lengthLinePre1 - math.min(lastColumn, lengthLinePre1) -- @Incomplete: Handle tabs if indentation is different from the main line.
+			local toCutAfterLinePre2 = lengthLinePre2 - math.min(lastColumn, lengthLinePre2) -- @Incomplete: Handle tabs if indentation is different from the main line.
+
+			-- @Incomplete: Handle tabs that's aren't part of the indentation better.
 			s = F("%s\n>\n%s%s%s>-%s^",
 				s,
-				(linePre2Start < linePre1Start and linePre2Start <= linePre2End) and F("> %s\n", (contents:sub(linePre2Start, linePre2End):gsub("\t", "    "))) or "",
-				(linePre1Start < lineStart     and linePre1Start <= linePre1End) and F("> %s\n", (contents:sub(linePre1Start, linePre1End):gsub("\t", "    "))) or "",
-				(                                  lineStart     <= lineEnd    ) and F("> %s\n", (contents:sub(lineStart,     lineEnd    ):gsub("\t", "    "))) or ">\n",
-				("-"):rep(pos - lineStart + 3*countSubString(contents, lineStart, lineEnd, "\t", true)),
+				(linePre2Start < linePre1Start and linePre2Start <= linePre2End) and F("> %s\n", (contents:sub(linePre2Start + columnsToCut, linePre2End - toCutAfterLinePre2):gsub("\t", "    "))) or "",
+				(linePre1Start < lineStart     and linePre1Start <= linePre1End) and F("> %s\n", (contents:sub(linePre1Start + columnsToCut, linePre1End - toCutAfterLinePre1):gsub("\t", "    "))) or "",
+				(                                  lineStart     <= lineEnd    ) and F("> %s\n", (contents:sub(lineStart     + columnsToCut, lineEnd     - toCutAfterLine    ):gsub("\t", "    "))) or ">\n",
+				("-"):rep(pos - (lineStart+columnsToCut) + 3*countSubString(contents, lineStart+columnsToCut, pos-1, "\t", true)),
 				nil
 			)
 		end
 
+		return s
+	end
+
+	-- fileError( path, contents, position,   formatString, ... )
+	-- fileError( path, nil,      lineNumber, formatString, ... )
+	function _G.fileError(path, contents, pos, s, ...)
+		s = formatFileMessage(path, contents, pos, s, ...)
 		errorLine(s)
+	end
+
+	-- fileWarning( path, contents, position,   formatString, ... )
+	-- fileWarning( path, nil,      lineNumber, formatString, ... )
+	function _G.fileWarning(path, contents, pos, s, ...)
+		s = formatFileMessage(path, contents, pos, s, ...)
+		timestampPrintWarning(s)
 	end
 end
 

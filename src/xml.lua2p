@@ -165,68 +165,81 @@ local function insertNode(el, node)
 	end
 end
 
--- position = decodeEntities( string, position, stringForError, 0,                      pathForError, element )
--- string   = decodeEntities( string, 1,        stringForError, positionOffsetForError, pathForError, nil     )
-local function decodeEntities(s, pos, sForError, posOffsetForError, pathForError, el)
+-- position = decodeEntities( string, position, stringForError, 0,                      pathForError, isHtml, element )
+-- string   = decodeEntities( string, 1,        stringForError, positionOffsetForError, pathForError, isHtml, nil     )
+local function decodeEntities(s, pos, sForError, posOffsetForError, pathForError, isHtml, el)
 	!(
 	local _INSERT = `
 		if el then  insertNode(el, ?)  else  table.insert(replacements, ?)  end
 	`
 	local function INSERT(expr)
-		__LUA((_INSERT:gsub("%?", expr)))
+		return (_INSERT:gsub("%?", expr))
 	end
 	)
 
 	local replacements = (not el) and {} or nil
 
 	while true do
-		local i1, i2 = s:find("&", pos, true)
-		if not i1 then  break  end
-		pos = i2 + 1
+		local i = s:find("&", pos, true)
+		if not i then  break  end
+		pos = i + 1
 
-		-- Entity, hex number.
-		if s:find("^#[Xx]", pos) then
-			pos = pos + !(#"#x")
+		if isHtml and not s:find("^#?%w+;", pos) then
+			fileWarning(pathForError, sForError, posOffsetForError+pos-1, "Encountered unencoded '&'. Treating it as text.")
 
-			local i1, i2, cpStr = s:find(!("^(0*[%dA-Fa-f]+)"), pos)
-			if not i1 then
-				fileError(pathForError, sForError, posOffsetForError+pos, "Invalid format for hexadecimal entity number.")
+			@@INSERT("&")
+
+			if not el then
+				-- @Cleanup: Don't use the 'replacements' thingy so we don't have to do this hack.
+				s                 = s:sub(1, pos-1) .. "amp;" .. s:sub(pos)
+				posOffsetForError = posOffsetForError - !(#"amp;")
 			end
-			pos = i2 + 1
 
-			local cp = tonumber(cpStr, 16)
-			!INSERT `codepointToUtf8(cp)`
-
-		-- Entity, decimal number.
-		elseif s:find("^#", pos) then
-			pos = pos + !(#"#")
-
-			local i1, i2, cpStr = s:find(!("^(0*%d+)"), pos)
-			if not i1 then
-				fileError(pathForError, sForError, posOffsetForError+pos, "Invalid format for decimal entity number.")
-			end
-			pos = i2 + 1
-
-			local cp = tonumber(cpStr, 10)
-			!INSERT `codepointToUtf8(cp)`
-
-		-- Entity, name.
 		else
-			local i1, i2, entityName = s:find(!("^("..PATTERN_NAME_CHAR.."+)"), pos)
-			if not i1 then
-				fileError(pathForError, sForError, posOffsetForError+pos, "Invalid format for entity name.")
-			elseif not ENTITY_NAME_TO_UTF8[entityName] then
-				fileError(pathForError, sForError, posOffsetForError+pos, "Unknown entity name '%s'.", entityName)
+			-- Entity, hex number.
+			if s:find("^#[Xx]", pos) then
+				pos = pos + !(#"#x")
+
+				local i1, i2, cpStr = s:find(!("^(0*[%dA-Fa-f]+)"), pos)
+				if not i1 then
+					fileError(pathForError, sForError, posOffsetForError+pos, "Invalid format for hexadecimal entity number.")
+				end
+				pos = i2 + 1
+
+				local cp = tonumber(cpStr, 16)
+				@@INSERT(codepointToUtf8(cp))
+
+			-- Entity, decimal number.
+			elseif s:find("^#", pos) then
+				pos = pos + !(#"#")
+
+				local i1, i2, cpStr = s:find(!("^(0*%d+)"), pos)
+				if not i1 then
+					fileError(pathForError, sForError, posOffsetForError+pos, "Invalid format for decimal entity number.")
+				end
+				pos = i2 + 1
+
+				local cp = tonumber(cpStr, 10)
+				@@INSERT(codepointToUtf8(cp))
+
+			-- Entity, name.
+			else
+				local i1, i2, entityName = s:find(!("^("..PATTERN_NAME_CHAR.."+)"), pos)
+				if not i1 then
+					fileError(pathForError, sForError, posOffsetForError+pos, "Invalid format for entity name.")
+				elseif not ENTITY_NAME_TO_UTF8[entityName] then
+					fileError(pathForError, sForError, posOffsetForError+pos, "Unknown entity name '%s'.", entityName)
+				end
+				pos = i2 + 1
+
+				@@INSERT(ENTITY_NAME_TO_UTF8[entityName])
 			end
-			pos = i2 + 1
 
-			!INSERT `ENTITY_NAME_TO_UTF8[entityName]`
+			if not s:find("^;", pos) then
+				fileError(pathForError, sForError, posOffsetForError+pos, "Expected ';' at the end of the entity.")
+			end
+			pos = pos + !(#";")
 		end
-
-		if not s:find("^;", pos) then
-			fileError(pathForError, sForError, posOffsetForError+pos, "Expected ';' at the end of the entity.")
-		end
-		pos = pos + !(#";")
 
 		if el then  break  end
 	end
@@ -291,7 +304,7 @@ local function parseAttributes(s, pos, pathForError, isHtml, attrs)
 				end
 
 				local attrValue = s:sub(attrValuePos, pos-1)
-				attrs[attrName] = decodeEntities(attrValue, 1, s, attrValuePos-1, pathForError, nil)
+				attrs[attrName] = decodeEntities(attrValue, 1, s, attrValuePos-1, pathForError, isHtml, nil)
 				pos             = pos + !(#'"')
 
 			-- Unquoted value.
@@ -305,7 +318,7 @@ local function parseAttributes(s, pos, pathForError, isHtml, attrs)
 				pos = i2 + 1
 
 				local attrValue = s:sub(attrValuePos, pos-1)
-				attrs[attrName] = decodeEntities(attrValue, 1, s, attrValuePos-1, pathForError, nil)
+				attrs[attrName] = decodeEntities(attrValue, 1, s, attrValuePos-1, pathForError, isHtml, nil)
 
 			else
 				fileError(pathForError, s, pos, "Expected a quote for the value of attribute '%s'.", attrName)
@@ -523,7 +536,7 @@ local function parseElementContents(s, pos, pathForError, el, isHtml, isTop)
 		elseif s:find("^&", pos) then
 			if isTop then  fileError(pathForError, s, posOffsetForError+pos, "Invalid data outside root element.")  end
 
-			pos = decodeEntities(s, pos, s, 0, pathForError, el)
+			pos = decodeEntities(s, pos, s, 0, pathForError, isHtml, el)
 
 		-- Text.
 		else
@@ -973,7 +986,7 @@ Element.reset = Element.stackReset -- :PenlightCompatibility
 
 
 -- self            = Element:mapElements( callback )
--- replacementNode = callback( childNode ) -- Returning nil removes the node.
+-- replacementNode = callback( childElement ) -- Returning nil removes the element.
 function Element.mapElements(el, cb)
 	local i = 1
 
@@ -1101,8 +1114,8 @@ local function nodeToHtml(buffer, node)
 	end
 end
 
--- xmlString = xml.toHtml( node [, prefaceDoctype=false ] )
--- xmlString = xml.toHtml( node, doctypeToPreface )
+-- htmlString = xml.toHtml( node [, prefaceDoctype=false ] )
+-- htmlString = xml.toHtml( node, doctypeToPreface )
 function xml.toHtml(node, preface)
 	local buffer = {}
 	if preface then

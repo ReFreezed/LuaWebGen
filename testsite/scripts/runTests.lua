@@ -36,7 +36,7 @@ return function()
 	local xmlStr = (
 		readTextFile"../local/test-wordpress-export.xml" or
 		-- assert(readTextFile"data/barf.xml") or
-		[=[<?xml version="1.0" encoding="UTF-8"?>
+		([=[<?xml version="1.0" encoding="UTF-8"?>
 			<information>
 				<place id="5"><country>Sweden</country><cities>Stockholm &amp; Uppsala</cities></place>
 				<space:whatever>
@@ -49,7 +49,7 @@ return function()
 				</space:whatever>
 				<many-amps>&amp;&amp;&amp;&amp;&amp;&amp;&amp;&amp;&amp;&amp;&amp;]]</many-amps>
 			</information>
-		]=]
+		]=]):gsub("\n\t\t\t", "\n")
 	)
 
 	timerStart("our") ; local doc = assert(xml.parseXml(xmlStr, "data/barf.xml")) ; timerEnd()
@@ -66,16 +66,18 @@ return function()
 	-- [==[ HTML parsing.
 	local htmlStr = (
 		-- readTextFile"../local/test-youtube-watch-page.html" or
-		[=[<!DOCTYPE html>
+		-- readTextFile"../local/test-deviantart-front-page.html" or
+		-- readTextFile"../local/test-aftonbladet-front-page.html" or
+		([=[<!DOCTYPE html>
 			<html>
 				<head>
 					<SCRIPT>function bitAnd(a, b) { return a && b; }</SCRIPT>
 				</head>
-				<BODY id="foo">
+				<BODY id="foo & bar">
 					<h1 super duper=yes>Hello, world &amp; all bananas!</h1>
 				</body>
 			</html>
-		]=]
+		]=]):gsub("\n\t\t\t", "\n")
 	)
 
 	timerStart("html") ; local doc = assert(xml.parseHtml(htmlStr, "foo.html")) ; timerEnd()
