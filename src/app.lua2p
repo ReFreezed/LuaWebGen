@@ -14,943 +14,961 @@ printf!("==== LuaWebGen v"..getReleaseVersion().." ====")
 
 
 
--- Parse arguments.
---==============================================================
+-- done = setup( )
+local function setup()
 
-local i = 1
+	-- Parse arguments.
+	--==============================================================
 
-local command = args[i]
-i             = i + 1
+	local i = 1
 
-if not command then
-	print("Usage:")
-	print("  cd path/to/siteroot")
-	print("  webgen.exe command [options]")
-	print("or")
-	print("  cd path/to/siteroot")
-	print("  lua webgen.lua command [options]")
-	print()
-	return
-end
+	local command = programArguments[i]
+	i             = i + 1
 
-----------------------------------------------------------------
-
-if command == "new" then
-	local kind = args[i] or errorLine("Arguments: Missing kind after 'new'.")
-	i          = i + 1
-
-	if kind == "page" then
-		local pathRel = args[i] or errorLine("Arguments: Missing path after 'page'.")
-		pathRel       = pathRel:gsub("^/", "")
-		i             = i + 1
-
-		if args[i] then
-			errorLine("Arguments: Unknown argument '%s'.", args[i])
-		end
-
-		local filename = getFilename(pathRel)
-		local basename = getBasename(filename)
-		local title    = basename :gsub("%-+", " ") :gsub("^%a", string.upper) :gsub(" %a", string.upper)
-
-		local contents = formatTemplate(
-			[=[
-				{{
-				page.title = :titleQuoted:
-				page.date  = ":date:"
-				}}
-
-				:content:
-			]=], {
-				titleQuoted = F("%q", title),
-				content     = "",
-				date        = getDatetime(),
-			}
-		)
-
-		local path = DIR_CONTENT.."/"..pathRel
-		if lfs.attributes(path, "mode") then
-			errorLine("File or directory already exists: %s", path)
-		end
-
-		createDirectory(getDirectory(path))
-
-		local file, err = io.open(path, "wb")
-		if not file then  errorLine(err)  end
-
-		file:write(contents)
-		file:close()
-
-		printf("Created page: %s", path)
-
-	elseif kind == "site" then
-		local pathToSite = args[i] or errorLine("Arguments: Missing path after 'site'.")
-		i = i+1
-
-		if args[i] then
-			errorLine("Arguments: Unknown argument '%s'.", args[i])
-		end
-
-		-- Create folders.
-		for _, path in ipairs{
-			pathToSite,
-			pathToSite.."/"..DIR_CONTENT,
-			pathToSite.."/"..DIR_DATA,
-			pathToSite.."/"..DIR_LAYOUTS,
-			pathToSite.."/"..DIR_LOGS,
-			pathToSite.."/"..DIR_OUTPUT,
-			pathToSite.."/"..DIR_SCRIPTS,
-		} do
-			if not isDirectory(path) then
-				local ok, err = lfs.mkdir(path)
-				if not ok then  errorLine(err)  end
-			end
-		end
-
-		-- Create config.
-		local path = pathToSite.."/config.lua"
-
-		if not isFile(path) then
-			local title = getFilename(pathToSite)
-
-			local contents = formatTemplate(
-				[=[
-					return {
-						title         = :title:,
-						baseUrl       = "http://:host:/",
-						languageCode  = "en",
-
-						ignoreFiles   = {"%.tmp$"},
-						ignoreFolders = {"^%."},
-					}
-				]=], {
-					title = F("%q", title),
-					host  = title:find"^%w[-.%w]*%.%a+$" and title:lower() or "example.com",
-				}
-			)
-
-			local file, err = io.open(path, "wb")
-			if not file then  errorLine(err)  end
-
-			file:write(contents)
-			file:close()
-		end
-
-		-- Create default page layout.
-		local path = F("%s/%s/page.html", pathToSite, DIR_LAYOUTS)
-
-		if not isFile(path) then
-			local title = getFilename(pathToSite)
-
-			local contents = formatTemplate(
-				[=[
-					<!DOCTYPE html>
-					<html lang="{{ site.languageCode }}">
-					<head>
-						<meta charset="utf-8">
-
-						<meta name="viewport" content="width=device-width, initial-scale=1">
-						{{ generatorMeta() }}
-
-						<title>
-							{{ echo(page.title ~= "" and page.title.." -" or "") }}
-							{{ echo(site.title) }}
-						</title>
-
-						<link rel="canonical" href="{{ url(page.permalink) }}">
-					</head>
-
-					<body>
-						{{ page.content }}
-					</body>
-
-					</html>
-				]=], {
-					-- ...
-				}
-			)
-
-			local file, err = io.open(path, "wb")
-			if not file then  errorLine(err)  end
-
-			file:write(contents)
-			file:close()
-		end
-
-		printf("Created site: %s", pathToSite)
-
-	else
-		errorLine("Arguments: Unknown kind '%s' after 'new'.", kind)
+	if not command then
+		print("Usage:")
+		print("  cd path/to/siteroot")
+		print("  webgen.exe command [options]")
+		print("or")
+		print("  cd path/to/siteroot")
+		print("  lua webgen.lua command [options]")
+		print()
+		return true
 	end
 
-	return
+	----------------------------------------------------------------
 
-----------------------------------------------------------------
+	if command == "new" then
+		local kind = programArguments[i] or errorNoPos("[Arguments] Missing kind after 'new'.")
+		i          = i + 1
 
-elseif command == "build" then
-	local SHORT_TO_LONG_FORM = {
-		["-a"] = "--autobuild",
-		["-d"] = "--drafts",
-		["-f"] = "--force",
-		["-v"] = "--verbose",
+		if kind == "page" then
+			local pathRel = programArguments[i] or errorNoPos("[Arguments] Missing path after 'page'.")
+			pathRel       = pathRel:gsub("^/", "")
+			i             = i + 1
+
+			if programArguments[i] then
+				errorNoPos("[Arguments] Unknown argument '%s'.", programArguments[i])
+			end
+
+			local filename = getFilename(pathRel)
+			local basename = getBasename(filename)
+			local title    = basename :gsub("%-+", " ") :gsub("^%a", string.upper) :gsub(" %a", string.upper)
+
+			local contents = formatTemplate(
+				[=[
+					{{
+					page.title = :titleQuoted:
+					page.date  = ":date:"
+					}}
+
+					:content:
+				]=], {
+					titleQuoted = F("%q", title),
+					content     = "",
+					date        = getDatetime(),
+				}
+			)
+
+			local path = DIR_CONTENT.."/"..pathRel
+			if lfs.attributes(path, "mode") then
+				errorNoPos("File or directory already exists: %s", path)
+			end
+
+			createDirectory(getDirectory(path))
+
+			local file, err = io.open(path, "wb")
+			if not file then  errorNoPos(err)  end
+
+			file:write(contents)
+			file:close()
+
+			printf("Created page: %s", path)
+
+		elseif kind == "site" then
+			local pathToSite = programArguments[i] or errorNoPos("[Arguments] Missing path after 'site'.")
+			i = i+1
+
+			if programArguments[i] then
+				errorNoPos("[Arguments] Unknown argument '%s'.", programArguments[i])
+			end
+
+			-- Create folders.
+			for _, path in ipairs{
+				pathToSite,
+				pathToSite.."/"..DIR_CONTENT,
+				pathToSite.."/"..DIR_DATA,
+				pathToSite.."/"..DIR_LAYOUTS,
+				pathToSite.."/"..DIR_LOGS,
+				pathToSite.."/"..DIR_OUTPUT,
+				pathToSite.."/"..DIR_SCRIPTS,
+			} do
+				if not isDirectory(path) then
+					local ok, err = lfs.mkdir(path)
+					if not ok then  errorNoPos(err)  end
+				end
+			end
+
+			-- Create config.
+			local path = pathToSite.."/config.lua"
+
+			if not isFile(path) then
+				local title = getFilename(pathToSite)
+
+				local contents = formatTemplate(
+					[=[
+						return {
+							title         = :title:,
+							baseUrl       = "http://:host:/",
+							languageCode  = "en",
+
+							ignoreFiles   = {"%.tmp$"},
+							ignoreFolders = {"^%."},
+						}
+					]=], {
+						title = F("%q", title),
+						host  = title:find"^%w[-.%w]*%.%a+$" and title:lower() or "example.com",
+					}
+				)
+
+				local file, err = io.open(path, "wb")
+				if not file then  errorNoPos(err)  end
+
+				file:write(contents)
+				file:close()
+			end
+
+			-- Create default page layout.
+			local path = F("%s/%s/page.html", pathToSite, DIR_LAYOUTS)
+
+			if not isFile(path) then
+				local title = getFilename(pathToSite)
+
+				local contents = formatTemplate(
+					[=[
+						<!DOCTYPE html>
+						<html lang="{{ site.languageCode }}">
+						<head>
+							<meta charset="utf-8">
+
+							<meta name="viewport" content="width=device-width, initial-scale=1">
+							{{ generatorMeta() }}
+
+							<title>
+								{{ echo(page.title ~= "" and page.title.." -" or "") }}
+								{{ echo(site.title) }}
+							</title>
+
+							<link rel="canonical" href="{{ url(page.permalink) }}">
+						</head>
+
+						<body>
+							{{ page.content }}
+						</body>
+
+						</html>
+					]=], {
+						-- ...
+					}
+				)
+
+				local file, err = io.open(path, "wb")
+				if not file then  errorNoPos(err)  end
+
+				file:write(contents)
+				file:close()
+			end
+
+			printf("Created site: %s", pathToSite)
+
+		else
+			errorNoPos("[Arguments] Unknown kind '%s' after 'new'.", kind)
+		end
+
+		return true
+
+	----------------------------------------------------------------
+
+	elseif command == "build" then
+		local SHORT_TO_LONG_FORM = {
+			["-a"] = "--autobuild",
+			["-d"] = "--drafts",
+			["-f"] = "--force",
+			["-v"] = "--verbose",
+		}
+
+		local options = {}
+
+		while programArguments[i] do
+			local argRaw = programArguments[i]
+			local arg    = SHORT_TO_LONG_FORM[argRaw] or argRaw
+
+			if arg == "--force" then
+				_G.ignoreModificationTimes = true
+
+			elseif arg == "--autobuild" then
+				_G.autobuild = true
+
+			elseif arg == "--drafts" then
+				_G.includeDrafts = true
+
+			elseif arg == "--verbose" then
+				_G.verbosePrint = true
+
+			elseif arg == "--meta" then
+				_G.outputMetaprograms = true
+
+			elseif arg == "--nogc" then
+				_G.enableGc = false
+				collectgarbage("stop")
+
+			elseif arg:find"^%-" then
+				errorNoPos("[Arguments] Unknown option '%s'.", argRaw)
+			else
+				errorNoPos("[Arguments] Unknown argument '%s'.", argRaw)
+			end
+
+			table.insert(options, arg)
+			i = i+1
+		end
+
+		if not (isDirectory(DIR_CONTENT) or isDirectory(DIR_LAYOUTS) or isFile"config.lua") then
+			errorNoPos("The current folder doesn't seem to contain a site.")
+		end
+
+		print(os.date"%Y-%m-%d")
+
+		if options[1] then
+			printf("Options: %s", table.concat(options, ", "))
+		end
+		printf("SiteFolder: %s", getCwd())
+
+		-- Continue...
+
+	----------------------------------------------------------------
+	else
+		errorNoPos("[Arguments] Unknown command '%s'.", command)
+	end
+
+
+
+	-- Prepare log file.
+	--==============================================================
+
+	do
+		if not isDirectory(DIR_LOGS) then
+			local ok, err = lfs.mkdir(DIR_LOGS)
+			if not ok then  errorNoPos(err)  end
+		end
+
+		local basePath = DIR_LOGS .. os.date"/%Y-%m-%d_%H-%M-%S"
+		local i        = 1
+		_G.logPath     = basePath .. ".log"
+
+		while isFile(logPath) do
+			i          = i + 1
+			_G.logPath = basePath .. "_" .. i .. ".log"
+		end
+
+		_G.logFile = io.open(logPath, "w")
+	end
+
+
+
+	-- Prepare script environment.
+	--==============================================================
+
+	_G.scriptEnvironmentGlobals = {
+		_WEBGEN_VERSION      = WEBGEN_VERSION, -- @Deprecated
+		DATA_FILE_EXTENSIONS = DATA_FILE_EXTENSIONS,
+		IMAGE_EXTENSIONS     = IMAGE_EXTENSIONS,
+		WEBGEN_VERSION       = WEBGEN_VERSION,
+
+		-- Lua globals.
+		_G             = nil, -- Deny direct access to the script environment.
+		_VERSION       = _VERSION,
+		assert         = assert,
+		collectgarbage = collectgarbage,
+		dofile         = dofile,
+		error          = error,
+		getfenv        = getfenv,
+		getmetatable   = getmetatable,
+		ipairs         = ipairs,
+		load           = load,
+		loadfile       = loadfile,
+		loadstring     = loadstring,
+		module         = module,
+		pcall          = pcall,
+		print          = print,
+		rawequal       = rawequal,
+		rawget         = rawget,
+		rawset         = rawset,
+		require        = require,
+		select         = select,
+		setfenv        = setfenv,
+		setmetatable   = setmetatable,
+		tonumber       = tonumber,
+		tostring       = tostringForTemplates,
+		type           = type,
+		unpack         = unpack,
+		xpcall         = xpcall,
+
+		next = function(t)
+			if isDataFolderReader(t) then  preloadData(t)  end
+
+			return next(t)
+		end,
+
+		pairs = function(t)
+			if isDataFolderReader(t) then
+				return (pairsSorted(preloadData(t)))
+			end
+			return pairs(t)
+		end,
+
+		-- Lua modules.
+		coroutine = coroutine,
+		debug     = debug,
+		io        = io,
+		math      = math,
+		os        = os,
+		package   = package,
+		string    = string,
+		table     = table,
+
+		-- Lua libraries.
+		lfs = lfs,
+		xml = xmlLib,
+
+		-- Site objects. (Create at site generation.)
+		site = nil,
+		data = nil,
+
+		-- Page objects. (Create for each individual page. Store in context.)
+		page   = nil,
+		params = nil,
+		P      = nil,
+
+		-- Utility functions.
+		----------------------------------------------------------------
+
+		ceil             = math.ceil,
+		date             = os.date,
+		entities         = encodeHtmlEntities,
+		errorf           = errorf,
+		F                = F,
+		find             = itemWith,
+		findAll          = itemWithAll,
+		floor            = math.floor,
+		formatTemplate   = formatTemplate,
+		generatorMeta    = generatorMeta,
+		getFilename      = getFilename,
+		getKeys          = getKeys,
+		indexOf          = indexOf,
+		ipairsr          = ipairsr,
+		isAny            = isAny,
+		markdown         = markdownToHtml,
+		max              = math.max,
+		min              = math.min,
+		newStringBuilder = newStringBuilder, newBuffer = newStringBuilder, -- newBuffer() is @Deprecated, I guess? 2021-05-15
+		prettyUrl        = toPrettyUrl,
+		printf           = printf,
+		printfOnce       = printfOnce,
+		printObject      = printObject,
+		printOnce        = printOnce,
+		removeItem       = removeItem,
+		round            = round,
+		sortNatural      = sortNatural,
+		split            = splitString,
+		toLua            = serializeLua,
+		toTime           = datetimeToTime,
+		trim             = trim,
+		trimNewlines     = trimNewlines,
+		url              = toUrl,
+		urlAbs           = toUrlAbsolute,
+		urlExists        = urlExists,
+		urlize           = urlize,
+
+		chooseExistingFile = function(sitePathWithoutExt, exts)
+			local pathWithoutExt = sitePathToPath(sitePathWithoutExt)
+
+			for _, ext in ipairs(exts) do
+				local pathRel = pathWithoutExt.."."..ext
+				if isFile(DIR_CONTENT.."/"..pathRel) then  return (pathToSitePath(pathRel))  end
+			end
+
+			return nil
+		end,
+
+		chooseExistingImage = function(sitePathWithoutExt)
+			return (scriptEnvironmentGlobals.chooseExistingFile(sitePathWithoutExt, IMAGE_EXTENSIONS))
+		end,
+
+		fileExists = function(sitePath)
+			local pathRel = sitePathToPath(sitePath)
+			return (isFile(DIR_CONTENT.."/"..pathRel))
+		end,
+
+		fileExistsInOutput = function(sitePath, skipRewriting)
+			local pathRel       = sitePathToPath(sitePath)
+			local pathOutputRel = skipRewriting and pathRel or rewriteOutputPath(pathRel)
+			return (isFile(DIR_OUTPUT.."/"..pathOutputRel))
+		end,
+
+		getExtension = function(genericPath)
+			local getExtension_internal = getExtension -- :BetterTraceback :BetterNameForRedirectedFunctionInErrorMessage
+			return (getExtension_internal(getFilename(genericPath)))
+		end,
+
+		getBasename = function(genericPath)
+			local getBasename_internal = getBasename -- :BetterTraceback :BetterNameForRedirectedFunctionInErrorMessage
+			return (getBasename_internal(getFilename(genericPath)))
+		end,
+
+		X = function(node, tagName) -- @Doc
+			if type(node) ~= "table" then  error("Invalid XML argument.", 2)  end
+			return (itemWith(node, "tag", tagName))
+		end,
+
+		Xs = function(node, tagName) -- @Doc
+			if type(node) ~= "table" then  error("Invalid XML argument.", 2)  end
+			return (itemWithAll(node, "tag", tagName))
+		end,
+
+		forXml = function(node, tagName) -- @Doc
+			if type(node) ~= "table" then  error("Invalid XML argument.", 2)  end
+			return ipairs(itemWithAll(node, "tag", tagName))
+		end,
+
+		printXmlTree = function(node) -- @Doc
+			if type(node) ~= "table" then  error("Invalid XML argument.", 2)  end
+
+			local function printNode(node, indent)
+				print(("    "):rep(indent)..node.tag)
+
+				indent = indent+1
+				for _, childNode in ipairs(node) do
+					if type(childNode) == "table" then
+						printNode(childNode, indent)
+					end
+				end
+			end
+
+			if xmlLib.isElement(node) then
+				printNode(node, 0)
+			else
+				print("(xml array)")
+				for _, childNode in ipairs(node) do
+					printNode(childNode, 1)
+				end
+			end
+		end,
+
+		-- xmlGetTexts = function(node, tags)
+		-- 	local texts = {}
+		-- 	for i, tagName in ipairs(tags) do
+		-- 		texts[tagName] = itemWith(node, "tag", tagName):get_text()
+		-- 	end
+		-- 	return texts
+		-- end
+
+		-- xmlGetTexts = function(node, ...) -- Messy to call!
+		-- 	local function getText(tagName, ...)
+		-- 		if select("#", ...) > 0 then
+		-- 			return itemWith("tag", tagName):get_text(), getText(...)
+		-- 		end
+		-- 	end
+		-- 	return getText(...)
+		-- end
+
+		-- xmlGetTexts = function(node) -- Different than above.
+		-- 	local texts = {}
+		-- 	for i, childNode in ipairs(node) do
+		-- 		texts[i] = childNode:get_text()
+		-- 	end
+		-- 	return texts
+		-- end
+
+		-- html, thumbUrl, thumbWidth, thumbHeight = thumb( imagePath, thumbWidth [, thumbHeight ] [, isLink=false ] )
+		thumb = function(sitePathImageRel, thumbW, thumbH, isLink)
+			if type(thumbH) == "boolean" then
+				thumbH, isLink = 0, thumbH
+			end
+
+			local pathImageRel = sitePathToPath(sitePathImageRel)
+			local thumbInfo    = createThumbnail(pathImageRel, thumbW, thumbH, 2)
+			local thumbUrl     = toUrl("/"..thumbInfo.path)
+
+			local b = newStringBuilder()
+			if isLink then  b('<a href="%s" target="_blank">', toUrl("/"..pathImageRel))  end
+			b('<img src="%s" width="%d" height="%d" alt="">', encodeHtmlEntities(thumbUrl), thumbInfo.width, thumbInfo.height)
+			if isLink then  b('</a>')  end
+
+			return b(), thumbUrl, thumbInfo.width, thumbInfo.height
+		end,
+
+		cssPrefix = function(prop, v)
+			return F("-ms-%s: %s; -moz-%s: %s; -webkit-%s: %s; %s: %s;", prop, v, prop, v, prop, v, prop, v)
+		end,
+
+		warning = function(s)
+			s = F("!!! WARNING: %s !!!", s)
+
+			local border = ("!"):rep(#s)
+			print()
+			print(border)
+			print(s)
+			print(border)
+			print()
+		end,
+
+		warningOnce = function(s)
+			s = F("!!! WARNING: %s !!!", s)
+
+			if oncePrints[s] then  return  end
+			oncePrints[s] = true
+
+			local border = ("!"):rep(#s)
+			print()
+			print(border)
+			print(s)
+			print(border)
+			print()
+		end,
+
+		-- html = a( url [, label=prettyUrl ] )
+		a = function(url, label)
+			return F(
+				'<a href="%s">%s</a>',
+				encodeHtmlEntities(toUrl(url)),
+				encodeHtmlEntities(label or toPrettyUrl(url))
+			)
+		end,
+
+		-- html = img( url [, alt="", title ] )
+		-- html = img( url [, alt="", useAltAsTitle ] )
+		img = function(url, alt, title)
+			-- @Incomplete: Do we want to add 'width' and 'height' attributes here if the URL looks like a local image path?
+			-- Maybe we want a separate function for that, like imgLocal()? Not sure...
+			if title then
+				return F(
+					'<img src="%s" alt="%s" title="%s">',
+					encodeHtmlEntities(toUrl(url)),
+					encodeHtmlEntities(alt or ""),
+					encodeHtmlEntities(title == true and alt or title)
+				)
+			else
+				return F(
+					'<img src="%s" alt="%s">',
+					encodeHtmlEntities(toUrl(url)),
+					encodeHtmlEntities(alt or "")
+				)
+			end
+		end,
+
+		-- filePaths = files( folder, [ onlyFilenames=false, ] stringPattern )
+		-- filePaths = files( folder, [ onlyFilenames=false, ] fileExtensionArray )
+		-- filePaths = files( folder, [ onlyFilenames=false, ] filterFunction )
+		files = function(sitePath, onlyFilenames, filter)
+			if type(onlyFilenames) ~= "boolean" then
+				onlyFilenames, filter = false, onlyFilenames
+			end
+
+			local pathRel = sitePathToPath(sitePath)
+			local dirPath = pathRel == "" and DIR_CONTENT or DIR_CONTENT.."/"..pathRel
+			local sitePaths = {}
+
+			for name in lfs.dir(dirPath) do
+				if name ~= "." and name ~= ".." and isFile(dirPath.."/"..name) then
+					if filter == nil then
+						table.insert(sitePaths, (onlyFilenames and name or sitePath.."/"..name))
+
+					elseif type(filter) == "string" then
+						if name:find(filter) then
+							table.insert(sitePaths, (onlyFilenames and name or sitePath.."/"..name))
+						end
+
+					elseif type(filter) == "table" then
+						if indexOf(filter, getExtension(name)) then
+							table.insert(sitePaths, (onlyFilenames and name or sitePath.."/"..name))
+						end
+
+					elseif type(filter) == "function" then
+						if filter(name) then
+							table.insert(sitePaths, (onlyFilenames and name or sitePath.."/"..name))
+						end
+
+					else
+						errorf(2, "Invalid filter type '%s'. (Must be string, table or function)", type(filter))
+					end
+				end
+			end
+
+			return sitePaths
+		end,
+
+		toDatetime = function(time)
+			!ARGS "time:number"
+			return getDatetime(time)
+		end,
+
+		now = function()
+			return getDatetime()
+		end,
+
+		getCompleteOutputPath = function(sitePath)
+			local pathRel       = sitePathToPath(sitePath)
+			local pathOutputRel = rewriteOutputPath(pathRel)
+			return DIR_OUTPUT.."/"..pathOutputRel
+		end,
+
+		pairsSorted = function(t)
+			local pairsSorted_internal = pairsSorted -- :BetterTraceback :BetterNameForRedirectedFunctionInErrorMessage
+			return (pairsSorted_internal(isDataFolderReader(t) and preloadData(t) or t))
+		end,
+
+		validateUrls = function(urls)
+			-- @Robustness: Should we restrict context here? (I think not. 2021-05-01)
+			local ok = true
+
+			for _, url in ipairs(urls) do
+				if not urlExists(url) then
+					timestampPrintError("URL is missing: %s", url)
+					ok = false
+				end
+			end
+
+			if not ok then
+				error("URLs were missing.", 2)
+			end
+		end,
+
+		getImageDimensions = function(sitePath)
+			local getImageDimensions_internal = getImageDimensions -- :BetterTraceback :BetterNameForRedirectedFunctionInErrorMessage
+			local wOrNil, hOrErr              = getImageDimensions_internal(sitePathToPath(sitePath))
+			return wOrNil, hOrErr
+		end,
+
+		getOutputtedFiles = function()
+			-- There's no reason to restrict context for this function, I don't think. 2021-04-27
+
+			local fileInfos = {}
+
+			for _, entry in ipairs(writtenOutputEntries) do
+				table.insert(fileInfos, {
+					sourcePath = entry.path ~= "" and pathToSitePath(entry.path) or "",
+					path       = pathToSitePath(entry.pathOut),
+					url        = entry.url,
+				})
+			end
+
+			table.sort(fileInfos, function(a, b)
+				return a.url < b.url
+			end)
+
+			return fileInfos
+		end,
+
+		getDataTextParsers = function()
+			local _dataParsers = {}
+
+			for ext, dataParser in pairs(dataParsers) do
+				if not dataParserIsBinary[ext] then
+					_dataParsers[ext] = dataParser
+				end
+			end
+
+			return _dataParsers
+		end,
+
+		getDataBinaryParsers = function()
+			local _dataParsers = {}
+
+			for ext, dataParser in pairs(dataParsers) do
+				if dataParserIsBinary[ext] then
+					_dataParsers[ext] = dataParser
+				end
+			end
+
+			return _dataParsers
+		end,
+
+		-- Context functions.
+		----------------------------------------------------------------
+
+		echo = function(s)
+			assertContext("template", "echo")
+			s = tostringForTemplates(s)
+
+			local ctx = getContext"template"
+			if ctx.enableHtmlEncoding then
+				s = encodeHtmlEntities(s)
+			end
+
+			table.insert(ctx.out, s)
+		end,
+
+		echoRaw = function(s)
+			assertContext("template", "echoRaw")
+			table.insert(getContext"template".out, tostringForTemplates(s))
+		end,
+
+		echof = function(s, ...)
+			assertContext("template", "echof")
+			!ARGS "s:string"
+			scriptEnvironmentGlobals.echo(s:format(...))
+		end,
+
+		echofRaw = function(s, ...)
+			assertContext("template", "echofRaw")
+			!ARGS "s:string"
+			scriptEnvironmentGlobals.echoRaw(s:format(...))
+		end,
+
+		include = function(htmlFileBasename)
+			assertContext("template", "include")
+			if htmlFileBasename:find"^/" then
+				errorf(2, "Filename is not valid: %s", htmlFileBasename)
+			end
+
+			local path = F("%s/%s.html", DIR_LAYOUTS, htmlFileBasename)
+			local template, err = getFileContentsText(path)
+			if not template then
+				errorf(2, "Could not read file '%s': %s", path, err)
+			end
+
+			local html = parseAndRunTemplate(getContext().page, path, template, "html", true, nil)
+			return html
+		end,
+
+		generateFromTemplate = function(sitePathRel, template, paramsOrInit)
+			assertContext("config", "generateFromTemplate")
+			!ARGS "sitePathRel,template:string ? paramsOrInit:table,function"
+
+			local pathRel = sitePathToPath(sitePathRel)
+			local page    = newPage(pathRel, false)
+
+			if type(paramsOrInit) == "table" then
+				page.params.v = paramsOrInit
+			end
+
+			local onPageInit = (type(paramsOrInit) == "function") and paramsOrInit or nil
+			generateFromTemplateString(page, template, nil, onPageInit)
+
+			if page.isPage.v and not page._isSkipped then
+				table.insert(pages, page)
+			end
+
+			return (getProtectionWrapper(page, "page"))
+		end,
+
+		outputRaw = function(sitePathRel, contents)
+			assertContext("config", "outputRaw")
+			!ARGS "sitePathRel,contents:string"
+
+			local pathRel = sitePathToPath(sitePathRel)
+			writeOutputFile("raw", pathRel, sitePathRel, contents, nil, "")
+		end,
+
+		preserveRaw = function(sitePathRel)
+			assertContext("config", "preserveRaw")
+
+			local pathRel       = sitePathToPath(sitePathRel)
+			local pathOutputRel = rewriteOutputPath(pathRel)
+			local path          = DIR_OUTPUT.."/"..pathOutputRel
+
+			if not isFile(path) then
+				errorf(2, "File does not exist. (%s)", path)
+			end
+
+			preserveExistingOutputFile("raw", pathRel, sitePathRel, "")
+		end,
+
+		isCurrentUrl = function(url)
+			assertContext("template", "isCurrentUrl")
+			return getContext().page.url.v == url
+		end,
+
+		isCurrentUrlBelow = function(urlPrefix)
+			assertContext("template", "isCurrentUrlBelow")
+			return getContext().page.url.v:sub(1, #urlPrefix) == urlPrefix
+		end,
+
+		subpages = function(allowCurrentPage)
+			assertContext("template", "subpages")
+
+			local pageCurrent = getContext().page
+			local dir         = getDirectory(pageCurrent._path)
+			local subpages    = {}
+
+			for _, page in ipairs(pages) do
+				if (page ~= pageCurrent or allowCurrentPage) and page._path:sub(1, #dir) == dir then
+					if not page._isGenerated then
+						generateFromTemplateFile(page)
+					end
+					if not (page._isSkipped or page.isSpecial.v) then
+						table.insert(subpages, page)
+					end
+				end
+			end
+
+			table.sort(subpages, function(a, b)
+				local aDatetime = a.publishDate:g()
+				local bDatetime = b.publishDate:g()
+				if aDatetime ~= bDatetime then  return aDatetime > bDatetime  end
+
+				return a._path < b._path
+			end)
+
+			for i, page in ipairs(subpages) do
+				subpages[i] = getProtectionWrapper(page, "page")
+			end
+
+			return subpages
+		end,
+
+		lock = function()
+			assertContext("template", "lock")
+
+			local page     = getContext().page
+			page._isLocked = true -- Note: It's OK for this function to be called multiple times.
+			page._readonly = true
+		end,
+
+		-- Hacks. (These are not very robust!)
+		----------------------------------------------------------------
+
+		XXX_minimizeCss = function(s)
+			local oldLen = #s
+			local header = s:match"^/%*.-%*/" or ""
+
+			s = (header..s
+				:sub(#header+1)
+				:gsub("/%*.-%*/", "")   -- Remove comments.
+				:gsub("\t+",      "")   -- Remove all tabs.
+				:gsub("\n +",     "\n") -- Remove space indentations.
+				:gsub("  +",      " ")  -- Remove extra spaces.
+				:gsub("\n\n+",    "\n") -- Remove empty lines.
+				:gsub("%b{}",     function(scope)  return (scope:gsub("\n", " "))  end) -- Compress rules to one line each.
+			)
+
+			!if DEV then
+				if verbosePrint then  printf("[opti] %s  from %d  to %d  (diff=%d)", getFilename(path), oldLen, #s, oldLen-#s)  end
+			!end
+
+			return s
+		end,
+
+		XXX_minimizeJavaScript = function(s)
+			local oldLen = #s
+			local header = s:match"^/%*.-%*/" or ""
+
+			s = (header..s
+				:sub(#header+1)
+				:gsub("()/%*.-%*/", "")   -- Remove long comments.
+				:gsub("\n\t+",      "\n") -- Remove indentations.
+				:gsub("\n//[^\n]*", "\n") :gsub(" // [^\n]*", "") -- Remove all comment lines.
+				:gsub("\n\n+",      "\n") -- Remove empty lines.
+			)
+
+			!if DEV then
+				if verbosePrint then  printf("[opti] %s  from %d  to %d  (diff=%d)", getFilename(path), oldLen, #s, oldLen-#s)  end
+			!end
+
+			return s
+		end,
+
+		XXX_minimizeHtaccess = function(s)
+			local oldLen = #s
+
+			s = (s
+				:gsub("\n\t+",     "\n") -- Remove indentations.
+				:gsub("\n#[^\n]*", "\n") :gsub("^#[^\n]*", "") -- Remove all comments.
+				:gsub("\n\n+",     "\n") :gsub("^\n",      "") -- Remove empty lines.
+			)
+
+			!if DEV then
+				if verbosePrint then  printf("[opti] %s  from %d  to %d  (diff=%d)", getFilename(path), oldLen, #s, oldLen-#s)  end
+			!end
+
+			return s
+		end,
+
+		XXX_getMinimizingProcessors = function()
+			return {
+				["css"]      = scriptEnvironmentGlobals.XXX_minimizeCss,
+				["htaccess"] = scriptEnvironmentGlobals.XXX_minimizeHtaccess,
+				["js"]       = scriptEnvironmentGlobals.XXX_minimizeJavaScript,
+			}
+		end
+
+		----------------------------------------------------------------
 	}
 
-	local options = {}
+	-- These functions are used by metaprograms.
+	scriptEnvironmentGlobals.echo__        = scriptEnvironmentGlobals.echo
+	scriptEnvironmentGlobals.echoRaw__     = scriptEnvironmentGlobals.echoRaw
+	scriptEnvironmentGlobals.fori__        = ipairs
+	scriptEnvironmentGlobals.foriReverse__ = ipairsr
+	scriptEnvironmentGlobals.lock__        = scriptEnvironmentGlobals.lock
+	scriptEnvironmentGlobals.type__        = type
+	scriptEnvironmentGlobals.url__         = toUrl
 
-	while args[i] do
-		local argRaw = args[i]
-		local arg    = SHORT_TO_LONG_FORM[argRaw] or argRaw
 
-		if arg == "--force" then
-			_G.ignoreModificationTimes = true
 
-		elseif arg == "--autobuild" then
-			_G.autobuild = true
+	_G.scriptEnvironment = setmetatable({}, {
+		__index = function(env, k)
+			local v = scriptEnvironmentGlobals[k]
+			if v ~= nil then  return v  end
 
-		elseif arg == "--drafts" then
-			_G.includeDrafts = true
-
-		elseif arg == "--verbose" then
-			_G.verbosePrint = true
-
-		elseif arg == "--meta" then
-			_G.outputMetaprograms = true
-
-		elseif arg == "--nogc" then
-			_G.enableGc = false
-			collectgarbage("stop")
-
-		elseif arg:find"^%-" then
-			errorLine("Arguments: Unknown option '%s'.", argRaw)
-		else
-			errorLine("Arguments: Unknown argument '%s'.", argRaw)
-		end
-
-		table.insert(options, arg)
-		i = i+1
-	end
-
-	if not (isDirectory(DIR_CONTENT) or isDirectory(DIR_LAYOUTS) or isFile"config.lua") then
-		errorLine("The current folder doesn't seem to contain a site.")
-	end
-
-	print(os.date"%Y-%m-%d")
-
-	if options[1] then
-		printf("Options: %s", table.concat(options, ", "))
-	end
-	printf("SiteFolder: %s", getCwd())
-
-	-- Continue...
-
-----------------------------------------------------------------
-else
-	errorLine("Arguments: Unknown command '%s'.", command)
-end
-
-
-
--- Prepare log file.
---==============================================================
-
-do
-	if not isDirectory(DIR_LOGS) then
-		local ok, err = lfs.mkdir(DIR_LOGS)
-		if not ok then  errorLine(err)  end
-	end
-
-	local basePath = DIR_LOGS .. os.date"/%Y-%m-%d_%H-%M-%S"
-	local i        = 1
-	_G.logPath     = basePath .. ".log"
-
-	while isFile(logPath) do
-		i          = i + 1
-		_G.logPath = basePath .. "_" .. i .. ".log"
-	end
-
-	_G.logFile = io.open(logPath, "w")
-end
-
-
-
--- Prepare script environment.
---==============================================================
-
-_G.scriptEnvironmentGlobals = {
-	_WEBGEN_VERSION      = WEBGEN_VERSION, -- @Deprecated
-	DATA_FILE_EXTENSIONS = DATA_FILE_EXTENSIONS,
-	IMAGE_EXTENSIONS     = IMAGE_EXTENSIONS,
-	WEBGEN_VERSION       = WEBGEN_VERSION,
-
-	-- Lua globals.
-	_G             = nil, -- Deny direct access to the script environment.
-	_VERSION       = _VERSION,
-	assert         = assert,
-	collectgarbage = collectgarbage,
-	dofile         = dofile,
-	error          = error,
-	getfenv        = getfenv,
-	getmetatable   = getmetatable,
-	ipairs         = ipairs,
-	load           = load,
-	loadfile       = loadfile,
-	loadstring     = loadstring,
-	module         = module,
-	pcall          = pcall,
-	print          = print,
-	rawequal       = rawequal,
-	rawget         = rawget,
-	rawset         = rawset,
-	require        = require,
-	select         = select,
-	setfenv        = setfenv,
-	setmetatable   = setmetatable,
-	tonumber       = tonumber,
-	tostring       = tostringForTemplates,
-	type           = type,
-	unpack         = unpack,
-	xpcall         = xpcall,
-
-	next = function(t)
-		if isDataFolderReader(t) then  preloadData(t)  end
-
-		return next(t)
-	end,
-
-	pairs = function(t)
-		if isDataFolderReader(t) then
-			return (pairsSorted(preloadData(t)))
-		end
-		return pairs(t)
-	end,
-
-	-- Lua modules.
-	coroutine = coroutine,
-	debug     = debug,
-	io        = io,
-	math      = math,
-	os        = os,
-	package   = package,
-	string    = string,
-	table     = table,
-
-	-- Lua libraries.
-	lfs = lfs,
-	xml = xmlLib,
-
-	-- Site objects. (Create at site generation.)
-	site = nil,
-	data = nil,
-
-	-- Page objects. (Create for each individual page. Store in context.)
-	page   = nil,
-	params = nil,
-	P      = nil,
-
-	-- Utility functions.
-	----------------------------------------------------------------
-
-	ceil             = math.ceil,
-	date             = os.date,
-	entities         = encodeHtmlEntities,
-	errorf           = errorf,
-	F                = F,
-	find             = itemWith,
-	findAll          = itemWithAll,
-	floor            = math.floor,
-	formatTemplate   = formatTemplate,
-	generatorMeta    = generatorMeta,
-	getFilename      = getFilename,
-	getKeys          = getKeys,
-	indexOf          = indexOf,
-	ipairsr          = ipairsr,
-	isAny            = isAny,
-	markdown         = markdownToHtml,
-	max              = math.max,
-	min              = math.min,
-	newStringBuilder = newStringBuilder, newBuffer = newStringBuilder, -- newBuffer() is @Deprecated, I guess? 2021-05-15
-	prettyUrl        = toPrettyUrl,
-	printf           = printf,
-	printfOnce       = printfOnce,
-	printObject      = printObject,
-	printOnce        = printOnce,
-	removeItem       = removeItem,
-	round            = round,
-	sortNatural      = sortNatural,
-	split            = splitString,
-	toLua            = serializeLua,
-	toTime           = datetimeToTime,
-	trim             = trim,
-	trimNewlines     = trimNewlines,
-	url              = toUrl,
-	urlAbs           = toUrlAbsolute,
-	urlExists        = urlExists,
-	urlize           = urlize,
-
-	chooseExistingFile = function(sitePathWithoutExt, exts)
-		local pathWithoutExt = sitePathToPath(sitePathWithoutExt)
-
-		for _, ext in ipairs(exts) do
-			local pathRel = pathWithoutExt.."."..ext
-			if isFile(DIR_CONTENT.."/"..pathRel) then  return (pathToSitePath(pathRel))  end
-		end
-
-		return nil
-	end,
-
-	chooseExistingImage = function(sitePathWithoutExt)
-		return (scriptEnvironmentGlobals.chooseExistingFile(sitePathWithoutExt, IMAGE_EXTENSIONS))
-	end,
-
-	fileExists = function(sitePath)
-		local pathRel = sitePathToPath(sitePath)
-		return (isFile(DIR_CONTENT.."/"..pathRel))
-	end,
-
-	fileExistsInOutput = function(sitePath, skipRewriting)
-		local pathRel       = sitePathToPath(sitePath)
-		local pathOutputRel = skipRewriting and pathRel or rewriteOutputPath(pathRel)
-		return (isFile(DIR_OUTPUT.."/"..pathOutputRel))
-	end,
-
-	getExtension = function(genericPath)
-		local getExtension_internal = getExtension -- :BetterNameForRedirectedFunctionInErrorMessage
-		return (getExtension_internal(getFilename(genericPath)))
-	end,
-
-	getBasename = function(genericPath)
-		local getBasename_internal = getBasename -- :BetterNameForRedirectedFunctionInErrorMessage
-		return (getBasename_internal(getFilename(genericPath)))
-	end,
-
-	X = function(node, tagName) -- @Doc
-		if type(node) ~= "table" then  error("Invalid XML argument.", 2)  end
-		return (itemWith(node, "tag", tagName))
-	end,
-
-	Xs = function(node, tagName) -- @Doc
-		if type(node) ~= "table" then  error("Invalid XML argument.", 2)  end
-		return (itemWithAll(node, "tag", tagName))
-	end,
-
-	forXml = function(node, tagName) -- @Doc
-		if type(node) ~= "table" then  error("Invalid XML argument.", 2)  end
-		return ipairs(itemWithAll(node, "tag", tagName))
-	end,
-
-	printXmlTree = function(node) -- @Doc
-		if type(node) ~= "table" then  error("Invalid XML argument.", 2)  end
-
-		local function printNode(node, indent)
-			print(("    "):rep(indent)..node.tag)
-
-			indent = indent+1
-			for _, childNode in ipairs(node) do
-				if type(childNode) == "table" then
-					printNode(childNode, indent)
-				end
-			end
-		end
-
-		if xmlLib.isElement(node) then
-			printNode(node, 0)
-		else
-			print("(xml array)")
-			for _, childNode in ipairs(node) do
-				printNode(childNode, 1)
-			end
-		end
-	end,
-
-	-- xmlGetTexts = function(node, tags)
-	-- 	local texts = {}
-	-- 	for i, tagName in ipairs(tags) do
-	-- 		texts[tagName] = itemWith(node, "tag", tagName):get_text()
-	-- 	end
-	-- 	return texts
-	-- end
-
-	-- xmlGetTexts = function(node, ...) -- Messy to call!
-	-- 	local function getText(tagName, ...)
-	-- 		if select("#", ...) > 0 then
-	-- 			return itemWith("tag", tagName):get_text(), getText(...)
-	-- 		end
-	-- 	end
-	-- 	return getText(...)
-	-- end
-
-	-- xmlGetTexts = function(node) -- Different than above.
-	-- 	local texts = {}
-	-- 	for i, childNode in ipairs(node) do
-	-- 		texts[i] = childNode:get_text()
-	-- 	end
-	-- 	return texts
-	-- end
-
-	-- html, thumbUrl, thumbWidth, thumbHeight = thumb( imagePath, thumbWidth [, thumbHeight ] [, isLink=false ] )
-	thumb = function(sitePathImageRel, thumbW, thumbH, isLink)
-		if type(thumbH) == "boolean" then
-			thumbH, isLink = 0, thumbH
-		end
-
-		local pathImageRel = sitePathToPath(sitePathImageRel)
-		local thumbInfo    = createThumbnail(pathImageRel, thumbW, thumbH, 2)
-		local thumbUrl     = toUrl("/"..thumbInfo.path)
-
-		local b = newStringBuilder()
-		if isLink then  b('<a href="%s" target="_blank">', toUrl("/"..pathImageRel))  end
-		b('<img src="%s" width="%d" height="%d" alt="">', encodeHtmlEntities(thumbUrl), thumbInfo.width, thumbInfo.height)
-		if isLink then  b('</a>')  end
-
-		return b(), thumbUrl, thumbInfo.width, thumbInfo.height
-	end,
-
-	cssPrefix = function(prop, v)
-		return F("-ms-%s: %s; -moz-%s: %s; -webkit-%s: %s; %s: %s;", prop, v, prop, v, prop, v, prop, v)
-	end,
-
-	warning = function(s)
-		s = F("!!! WARNING: %s !!!", s)
-
-		local border = ("!"):rep(#s)
-		print()
-		print(border)
-		print(s)
-		print(border)
-		print()
-	end,
-
-	warningOnce = function(s)
-		s = F("!!! WARNING: %s !!!", s)
-
-		if oncePrints[s] then  return  end
-		oncePrints[s] = true
-
-		local border = ("!"):rep(#s)
-		print()
-		print(border)
-		print(s)
-		print(border)
-		print()
-	end,
-
-	-- html = a( url [, label=prettyUrl ] )
-	a = function(url, label)
-		return F(
-			'<a href="%s">%s</a>',
-			encodeHtmlEntities(toUrl(url)),
-			encodeHtmlEntities(label or toPrettyUrl(url))
-		)
-	end,
-
-	-- html = img( url [, alt="", title ] )
-	-- html = img( url [, alt="", useAltAsTitle ] )
-	img = function(url, alt, title)
-		-- @Incomplete: Do we want to add 'width' and 'height' attributes here if the URL looks like a local image path?
-		-- Maybe we want a separate function for that, like imgLocal()? Not sure...
-		if title then
-			return F(
-				'<img src="%s" alt="%s" title="%s">',
-				encodeHtmlEntities(toUrl(url)),
-				encodeHtmlEntities(alt or ""),
-				encodeHtmlEntities(title == true and alt or title)
-			)
-		else
-			return F(
-				'<img src="%s" alt="%s">',
-				encodeHtmlEntities(toUrl(url)),
-				encodeHtmlEntities(alt or "")
-			)
-		end
-	end,
-
-	-- filePaths = files( folder, [ onlyFilenames=false, ] stringPattern )
-	-- filePaths = files( folder, [ onlyFilenames=false, ] fileExtensionArray )
-	-- filePaths = files( folder, [ onlyFilenames=false, ] filterFunction )
-	files = function(sitePath, onlyFilenames, filter)
-		if type(onlyFilenames) ~= "boolean" then
-			onlyFilenames, filter = false, onlyFilenames
-		end
-
-		local pathRel = sitePathToPath(sitePath)
-		local dirPath = pathRel == "" and DIR_CONTENT or DIR_CONTENT.."/"..pathRel
-		local sitePaths = {}
-
-		for name in lfs.dir(dirPath) do
-			if name ~= "." and name ~= ".." and isFile(dirPath.."/"..name) then
-				if filter == nil then
-					table.insert(sitePaths, (onlyFilenames and name or sitePath.."/"..name))
-
-				elseif type(filter) == "string" then
-					if name:find(filter) then
-						table.insert(sitePaths, (onlyFilenames and name or sitePath.."/"..name))
-					end
-
-				elseif type(filter) == "table" then
-					if indexOf(filter, getExtension(name)) then
-						table.insert(sitePaths, (onlyFilenames and name or sitePath.."/"..name))
-					end
-
-				elseif type(filter) == "function" then
-					if filter(name) then
-						table.insert(sitePaths, (onlyFilenames and name or sitePath.."/"..name))
-					end
-
-				else
-					errorf(2, "Invalid filter type '%s'. (Must be string, table or function)", type(filter))
-				end
-			end
-		end
-
-		return sitePaths
-	end,
-
-	toDatetime = function(time)
-		!ARGS "time:number"
-		return getDatetime(time)
-	end,
-
-	now = function()
-		return getDatetime()
-	end,
-
-	getCompleteOutputPath = function(sitePath)
-		local pathRel       = sitePathToPath(sitePath)
-		local pathOutputRel = rewriteOutputPath(pathRel)
-		return DIR_OUTPUT.."/"..pathOutputRel
-	end,
-
-	pairsSorted = function(t)
-		local pairsSorted_internal = pairsSorted -- :BetterNameForRedirectedFunctionInErrorMessage
-		return (pairsSorted_internal(isDataFolderReader(t) and preloadData(t) or t))
-	end,
-
-	validateUrls = function(urls)
-		-- @Robustness: Should we restrict context here? (I think not. 2021-05-01)
-		local ok = true
-
-		for _, url in ipairs(urls) do
-			if not urlExists(url) then
-				timestampPrintError("URL is missing: %s", url)
-				ok = false
-			end
-		end
-
-		if not ok then
-			error("URLs were missing.", 2)
-		end
-	end,
-
-	getImageDimensions = function(sitePath)
-		local getImageDimensions_internal = getImageDimensions -- :BetterNameForRedirectedFunctionInErrorMessage
-		local wOrNil, hOrErr              = getImageDimensions_internal(sitePathToPath(sitePath))
-		return wOrNil, hOrErr
-	end,
-
-	getOutputtedFiles = function()
-		-- There's no reason to restrict context for this function, I don't think. 2021-04-27
-
-		local fileInfos = {}
-
-		for _, entry in ipairs(writtenOutputEntries) do
-			table.insert(fileInfos, {
-				sourcePath = entry.path ~= "" and pathToSitePath(entry.path) or "",
-				path       = pathToSitePath(entry.pathOut),
-				url        = entry.url,
-			})
-		end
-
-		table.sort(fileInfos, function(a, b)
-			return a.url < b.url
-		end)
-
-		return fileInfos
-	end,
-
-	getDataTextParsers = function()
-		local _dataParsers = {}
-
-		for ext, dataParser in pairs(dataParsers) do
-			if not dataParserIsBinary[ext] then
-				_dataParsers[ext] = dataParser
-			end
-		end
-
-		return _dataParsers
-	end,
-
-	getDataBinaryParsers = function()
-		local _dataParsers = {}
-
-		for ext, dataParser in pairs(dataParsers) do
-			if dataParserIsBinary[ext] then
-				_dataParsers[ext] = dataParser
-			end
-		end
-
-		return _dataParsers
-	end,
-
-	-- Context functions.
-	----------------------------------------------------------------
-
-	echo = function(s)
-		assertContext("template", "echo")
-		s = tostringForTemplates(s)
-
-		local ctx = getContext"template"
-		if ctx.enableHtmlEncoding then
-			s = encodeHtmlEntities(s)
-		end
-
-		table.insert(ctx.out, s)
-	end,
-
-	echoRaw = function(s)
-		assertContext("template", "echoRaw")
-		table.insert(getContext"template".out, tostringForTemplates(s))
-	end,
-
-	echof = function(s, ...)
-		assertContext("template", "echof")
-		!ARGS "s:string"
-		scriptEnvironmentGlobals.echo(s:format(...))
-	end,
-
-	echofRaw = function(s, ...)
-		assertContext("template", "echofRaw")
-		!ARGS "s:string"
-		scriptEnvironmentGlobals.echoRaw(s:format(...))
-	end,
-
-	include = function(htmlFileBasename)
-		assertContext("template", "include")
-		if htmlFileBasename:find"^/" then
-			errorf(2, "Filename is not valid: %s", htmlFileBasename)
-		end
-
-		local path = F("%s/%s.html", DIR_LAYOUTS, htmlFileBasename)
-		local template, err = getFileContentsText(path)
-		if not template then
-			errorf(2, "Could not read file '%s': %s", path, err)
-		end
-
-		local html = parseAndRunTemplate(getContext().page, path, template, "html", true, nil)
-		return html
-	end,
-
-	generateFromTemplate = function(sitePathRel, template, paramsOrInit)
-		assertContext("config", "generateFromTemplate")
-		!ARGS "sitePathRel,template:string ? paramsOrInit:table,function"
-
-		local pathRel = sitePathToPath(sitePathRel)
-		local page    = newPage(pathRel, false)
-
-		if type(paramsOrInit) == "table" then
-			page.params.v = paramsOrInit
-		end
-
-		local onPageInit = (type(paramsOrInit) == "function") and paramsOrInit or nil
-		generateFromTemplateString(page, template, nil, onPageInit)
-
-		if page.isPage.v and not page._isSkipped then
-			table.insert(pages, page)
-		end
-
-		return (getProtectionWrapper(page, "page"))
-	end,
-
-	outputRaw = function(sitePathRel, contents)
-		assertContext("config", "outputRaw")
-		!ARGS "sitePathRel,contents:string"
-
-		local pathRel = sitePathToPath(sitePathRel)
-		writeOutputFile("raw", pathRel, sitePathRel, contents, nil, "")
-	end,
-
-	preserveRaw = function(sitePathRel)
-		assertContext("config", "preserveRaw")
-
-		local pathRel       = sitePathToPath(sitePathRel)
-		local pathOutputRel = rewriteOutputPath(pathRel)
-		local path          = DIR_OUTPUT.."/"..pathOutputRel
-
-		if not isFile(path) then
-			errorf(2, "File does not exist. (%s)", path)
-		end
-
-		preserveExistingOutputFile("raw", pathRel, sitePathRel, "")
-	end,
-
-	isCurrentUrl = function(url)
-		assertContext("template", "isCurrentUrl")
-		return getContext().page.url.v == url
-	end,
-
-	isCurrentUrlBelow = function(urlPrefix)
-		assertContext("template", "isCurrentUrlBelow")
-		return getContext().page.url.v:sub(1, #urlPrefix) == urlPrefix
-	end,
-
-	subpages = function(allowCurrentPage)
-		assertContext("template", "subpages")
-
-		local pageCurrent = getContext().page
-		local dir         = getDirectory(pageCurrent._path)
-		local subpages    = {}
-
-		for _, page in ipairs(pages) do
-			if (page ~= pageCurrent or allowCurrentPage) and page._path:sub(1, #dir) == dir then
-				if not page._isGenerated then
-					generateFromTemplateFile(page)
-				end
-				if not (page._isSkipped or page.isSpecial.v) then
-					table.insert(subpages, page)
-				end
-			end
-		end
-
-		table.sort(subpages, function(a, b)
-			local aDatetime = a.publishDate:g()
-			local bDatetime = b.publishDate:g()
-			if aDatetime ~= bDatetime then  return aDatetime > bDatetime  end
-
-			return a._path < b._path
-		end)
-
-		for i, page in ipairs(subpages) do
-			subpages[i] = getProtectionWrapper(page, "page")
-		end
-
-		return subpages
-	end,
-
-	lock = function()
-		assertContext("template", "lock")
-
-		local page     = getContext().page
-		page._isLocked = true -- Note: It's OK for this function to be called multiple times.
-		page._readonly = true
-	end,
-
-	-- Hacks. (These are not very robust!)
-	----------------------------------------------------------------
-
-	XXX_minimizeCss = function(s)
-		local oldLen = #s
-		local header = s:match"^/%*.-%*/" or ""
-
-		s = (header..s
-			:sub(#header+1)
-			:gsub("/%*.-%*/", "")   -- Remove comments.
-			:gsub("\t+",      "")   -- Remove all tabs.
-			:gsub("\n +",     "\n") -- Remove space indentations.
-			:gsub("  +",      " ")  -- Remove extra spaces.
-			:gsub("\n\n+",    "\n") -- Remove empty lines.
-			:gsub("%b{}",     function(scope)  return (scope:gsub("\n", " "))  end) -- Compress rules to one line each.
-		)
-
-		!if DEV then
-			if verbosePrint then  printf("[opti] %s  from %d  to %d  (diff=%d)", getFilename(path), oldLen, #s, oldLen-#s)  end
-		!end
-
-		return s
-	end,
-
-	XXX_minimizeJavaScript = function(s)
-		local oldLen = #s
-		local header = s:match"^/%*.-%*/" or ""
-
-		s = (header..s
-			:sub(#header+1)
-			:gsub("()/%*.-%*/", "")   -- Remove long comments.
-			:gsub("\n\t+",      "\n") -- Remove indentations.
-			:gsub("\n//[^\n]*", "\n") :gsub(" // [^\n]*", "") -- Remove all comment lines.
-			:gsub("\n\n+",      "\n") -- Remove empty lines.
-		)
-
-		!if DEV then
-			if verbosePrint then  printf("[opti] %s  from %d  to %d  (diff=%d)", getFilename(path), oldLen, #s, oldLen-#s)  end
-		!end
-
-		return s
-	end,
-
-	XXX_minimizeHtaccess = function(s)
-		local oldLen = #s
-
-		s = (s
-			:gsub("\n\t+",     "\n") -- Remove indentations.
-			:gsub("\n#[^\n]*", "\n") :gsub("^#[^\n]*", "") -- Remove all comments.
-			:gsub("\n\n+",     "\n") :gsub("^\n",      "") -- Remove empty lines.
-		)
-
-		!if DEV then
-			if verbosePrint then  printf("[opti] %s  from %d  to %d  (diff=%d)", getFilename(path), oldLen, #s, oldLen-#s)  end
-		!end
-
-		return s
-	end,
-
-	XXX_getMinimizingProcessors = function()
-		return {
-			["css"]      = scriptEnvironmentGlobals.XXX_minimizeCss,
-			["htaccess"] = scriptEnvironmentGlobals.XXX_minimizeHtaccess,
-			["js"]       = scriptEnvironmentGlobals.XXX_minimizeJavaScript,
-		}
-	end
-
-	----------------------------------------------------------------
-}
-
--- These functions are used by metaprograms.
-scriptEnvironmentGlobals.echo__        = scriptEnvironmentGlobals.echo
-scriptEnvironmentGlobals.echoRaw__     = scriptEnvironmentGlobals.echoRaw
-scriptEnvironmentGlobals.fori__        = ipairs
-scriptEnvironmentGlobals.foriReverse__ = ipairsr
-scriptEnvironmentGlobals.lock__        = scriptEnvironmentGlobals.lock
-scriptEnvironmentGlobals.type__        = type
-scriptEnvironmentGlobals.url__         = toUrl
-
-
-
-_G.scriptEnvironment = setmetatable({}, {
-	__index = function(env, k)
-		local v = scriptEnvironmentGlobals[k]
-		if v ~= nil then  return v  end
-
-		if contextStack[1] then
 			v = getContext()._scriptEnvironmentGlobals[k]
 			if v ~= nil then  return v  end
-		end
 
-		v = scriptFunctions[k]
-		if v then  return v  end
+			v = scriptFunctions[k]
+			if v then  return v  end
 
-		local path = F("%s/%s.lua", DIR_SCRIPTS, k)
+			local path = F("%s/%s.lua", DIR_SCRIPTS, k)
 
-		if isFile(path) then
-			local chunk, err = loadfile(path)
-			if not chunk then
-				error(err, 2)
+			if isFile(path) then
+				local main_chunk, err = loadfile(path)
+				if not main_chunk then
+					error(err, 2)
+				end
+
+				setfenv(main_chunk, env)
+				v = main_chunk()
+				if type(v) ~= "function" then
+					errorNoPos("%s did not return a function.", path)
+				end
+
+				scriptFunctions[k] = v
+				return v
 			end
 
-			setfenv(chunk, env)
-			v = chunk()
-			if type(v) ~= "function" then
-				errorf(2, "%s did not return a function.", path)
-			end
+			errorf(2, "Tried to get non-existent global or script '%s'.", tostring(k))
+		end,
 
-			scriptFunctions[k] = v
-			return v
-		end
+		__newindex = function(env, k, v)
+			errorf(2, "Tried to set global '%s'. (Globals are disabled.)", tostring(k))
+		end,
+	})
 
-		errorf(2, "Tried to get non-existent global or script '%s'.", tostring(k))
-	end,
+	return false
+end
 
-	__newindex = function(env, k, v)
-		errorf(2, "Tried to set global '%s'. (Globals are disabled.)", tostring(k))
-	end,
-})
+
+
+local function xpcallErrorHandler(err)
+	local alsoPrintTraceback = (err:find("\n>-", 1, true) == nil) -- We don't need to show the traceback if it's a parsing error with a preview thing.
+
+	timestampPrintError(tostring(err))
+	logErrorTraceback(2, alsoPrintTraceback)
+end
+
+local appOk, done = xpcall(setup, xpcallErrorHandler)
+
+if not appOk then  return false  end
+if done      then  return true   end
 
 
 
@@ -974,7 +992,7 @@ local function buildWebsite()
 
 	local function lineAssertType(v, vType, s, ...)
 		if type(v) == vType then  return v  end
-		errorLine(s, ...)
+		errorNoPos(s, ...)
 	end
 
 	local function lineAssertTable(t, kType, vType, s, ...)
@@ -987,11 +1005,11 @@ local function buildWebsite()
 	end
 
 	if not isFile"config.lua" then
-		errorLine("Missing config.lua in site folder.")
+		errorNoPos("Missing config.lua in site folder.")
 	end
 
 	local chunk, err = loadfile"config.lua"
-	if not chunk then  errorLine(err)  end
+	if not chunk then  errorNoPos(err)  end
 
 	setfenv(chunk, scriptEnvironment)
 
@@ -1086,22 +1104,22 @@ local function buildWebsite()
 	end
 
 	if not isAny(type(outputPathFormat), "string","function") then
-		errorLine("config.lua: config.rewriteOutputPath must be a string or a function.")
+		errorNoPos("config.lua: config.rewriteOutputPath must be a string or a function.")
 	end
 
 	-- Validate config.types
 	for ext, fileType in pairs(fileTypes) do
 		if ext ~= ext:lower() then
-			errorLine("config.lua: File extensions must be lower case: config.types[\"%s\"]", ext)
+			errorNoPos("config.lua: File extensions must be lower case: config.types[\"%s\"]", ext)
 		elseif not FILE_TYPE_SET[fileType] then
-			errorLine("config.lua: Invalid generator file type '%s'.", fileType)
+			errorNoPos("config.lua: Invalid generator file type '%s'.", fileType)
 		end
 	end
 
 	-- Validate config.processors
 	for ext in pairs(fileProcessors) do
 		if ext ~= ext:lower() then
-			errorLine("config.lua: File extensions must be lower case: config.processors[\"%s\"]", ext)
+			errorNoPos("config.lua: File extensions must be lower case: config.processors[\"%s\"]", ext)
 		end
 	end
 
@@ -1109,23 +1127,23 @@ local function buildWebsite()
 	local parsedUrl = require"url".parse(site.baseUrl.v)
 
 	if site.baseUrl.v == "" then
-		errorLine("config.lua: config.baseUrl is missing or empty.", site.baseUrl.v)
+		errorNoPos("config.lua: config.baseUrl is missing or empty.", site.baseUrl.v)
 
 	elseif not parsedUrl.host then
-		errorLine("config.lua: Missing host in config.baseUrl (%s)", site.baseUrl.v)
+		errorNoPos("config.lua: Missing host in config.baseUrl (%s)", site.baseUrl.v)
 
 	elseif not parsedUrl.scheme then
-		errorLine("config.lua: Missing scheme in config.baseUrl (%s)", site.baseUrl.v)
+		errorNoPos("config.lua: Missing scheme in config.baseUrl (%s)", site.baseUrl.v)
 	elseif not isAny(parsedUrl.scheme, "http","https") then
-		errorLine("config.lua: Invalid scheme in config.baseUrl (Expected http or https, got '%s')", parsedUrl.scheme)
+		errorNoPos("config.lua: Invalid scheme in config.baseUrl (Expected http or https, got '%s')", parsedUrl.scheme)
 
 	elseif not (parsedUrl.path or ""):find"/$" then
-		errorLine("config.lua: config.baseUrl must end with '/'. (%s)", site.baseUrl.v)
+		errorNoPos("config.lua: config.baseUrl must end with '/'. (%s)", site.baseUrl.v)
 
 	elseif parsedUrl.query then
-		errorLine("config.lua: config.baseUrl Cannot contain a query. (%s)", site.baseUrl.v)
+		errorNoPos("config.lua: config.baseUrl Cannot contain a query. (%s)", site.baseUrl.v)
 	elseif parsedUrl.fragment then
-		errorLine("config.lua: config.baseUrl Cannot contain a fragment. (%s)", site.baseUrl.v)
+		errorNoPos("config.lua: config.baseUrl Cannot contain a fragment. (%s)", site.baseUrl.v)
 	end
 
 	-- Final config handling.
@@ -1136,7 +1154,7 @@ local function buildWebsite()
 		dataParserIsBinary[ext] = false
 
 		if customDataBinaryParsers[ext] then
-			errorLine("config.lua: Both config.dataTextParsers.%s and config.dataBinaryParsers.%s are defined.", ext, ext)
+			errorNoPos("config.lua: Both config.dataTextParsers.%s and config.dataBinaryParsers.%s are defined.", ext, ext)
 		end
 	end
 
@@ -1147,7 +1165,7 @@ local function buildWebsite()
 		dataParserIsBinary[ext] = true
 
 		if customDataTextParsers[ext] then
-			errorLine("config.lua: Both config.dataTextParsers.%s and config.dataBinaryParsers.%s are defined.", ext, ext)
+			errorNoPos("config.lua: Both config.dataTextParsers.%s and config.dataBinaryParsers.%s are defined.", ext, ext)
 		end
 	end
 
@@ -1163,10 +1181,10 @@ local function buildWebsite()
 	end
 
 	if onBefore then
-		pushContext("config")
-		local ok, errObj = !XPCALL `onBefore()`
-		popContext("config")
-		if not ok then  error(errObj)  end
+		!PUSH_CONTEXT "config"
+			local before = onBefore -- :BetterTraceback
+			before()
+		!POP_CONTEXT()
 	end
 
 	--
@@ -1224,10 +1242,10 @@ local function buildWebsite()
 	end
 
 	if onAfter then
-		pushContext("config")
-		local ok, errObj = !XPCALL `onAfter()`
-		popContext("config")
-		if not ok then  error(errObj)  end
+		!PUSH_CONTEXT "config"
+			local after = onAfter -- :BetterTraceback
+			after()
+		!POP_CONTEXT()
 	end
 
 	--
@@ -1270,7 +1288,7 @@ local function buildWebsite()
 				table.insert(buffer, "\n  -> ")
 				table.insert(buffer, url)
 
-				errorLine(table.concat(buffer))
+				errorNoPos(table.concat(buffer))
 			end
 		end
 
@@ -1281,7 +1299,7 @@ local function buildWebsite()
 	-- Validate targets.
 	for url, targetUrl in pairsSorted(allRedirections) do
 		if targetUrl:find"^/" and not writtenOutputUrls[targetUrl] then
-			errorLine("Missing target page for redirection: %s -> %s", url, targetUrl)
+			errorNoPos("Missing target page for redirection: %s -> %s", url, targetUrl)
 		end
 	end
 
@@ -1336,7 +1354,7 @@ local function buildWebsite()
 				-- that has changed. If so, we should test for multiple file locations. :ApacheErrorDocumentFile
 				--
 				if target:find"^/%S*$" and not isFile(DIR_OUTPUT..target) then
-					errorLine("Missing target page for error %d document (in output folder): %s%s", errCode, DIR_OUTPUT, target)
+					errorNoPos("Missing target page for error %d document (in output folder): %s%s", errCode, DIR_OUTPUT, target)
 				end
 
 				b("ErrorDocument %d %s\n", errCode, target)
@@ -1483,10 +1501,10 @@ local function buildWebsite()
 	end
 
 	if onValidate then
-		pushContext("validation")
-		local ok, errObj = !XPCALL `onValidate()`
-		popContext("validation")
-		if not ok then  error(errObj)  end
+		!PUSH_CONTEXT "validation"
+			local validate = onValidate -- :BetterTraceback
+			validate()
+		!POP_CONTEXT()
 	end
 
 	--
@@ -1506,10 +1524,6 @@ local function buildWebsite()
 
 	----------------------------------------------------------------
 
-	if contextStack[1] then
-		timestampPrintError("Context stack is not empty after generation. (Depth is %d)", #contextStack)
-	end
-
 	!local SEPARATOR = ("-"):rep(64)
 	local endTime    = getTimeBetter()
 
@@ -1528,7 +1542,7 @@ local function buildWebsite()
 	logFile:flush()
 end
 
-buildWebsite()
+appOk = xpcall(buildWebsite, xpcallErrorHandler)
 
 
 
@@ -1542,6 +1556,8 @@ if autobuild then
 
 		local dirTree          = {--[[ [path1]=modificationTime1, ... ]]}
 		local somethingChanged = false
+
+		-- @Incomplete: Don't raise any errors when checking files and folders - just stop and try again after another change is detected.
 
 		local function checkFile(path, silent)
 			dirTree[path] = assert(lfs.attributes(path, "modification"))
@@ -1593,7 +1609,9 @@ if autobuild then
 			end
 		end
 
-		if somethingChanged then  buildWebsite()  end -- @UX: Should we pcall this? Probably!
+		if somethingChanged then
+			appOk = xpcall(buildWebsite, xpcallErrorHandler)
+		end
 
 		if configChanged then
 			-- Recheck everything in case config.ignore* changed.
@@ -1612,7 +1630,9 @@ end
 
 --==============================================================
 
-if warningCount > 0 then
+if not appOk then
+	printf("Aborted after error!")
+elseif warningCount > 0 then
 	printf("Finished with %d warnings!", warningCount)
 else
 	printf("Finished!")
@@ -1625,3 +1645,5 @@ end
 printfNoLog("Check log for details: %s", logPath)
 logFile:close()
 _G.logFile = nil
+
+return appOk

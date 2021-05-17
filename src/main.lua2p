@@ -18,7 +18,11 @@ if package.cpath:find(".dll", 1, true) then
 	package.cpath = !!(DEV and `` or `package.cpath:gsub(";+$", "") .. ";" ..`) dirPrefix.."bin/?.dll" -- System libraries first.
 end
 
-_G.args = arg
+_G.programArguments = arg
+_G.arg              = nil
+
+io.stdout:setvbuf("no")
+io.stderr:setvbuf("no")
 
 math.randomseed(os.time())
 math.random() -- Gotta kickstart the randomness.
@@ -26,20 +30,10 @@ math.random() -- Gotta kickstart the randomness.
 require"globals"
 require"functions"
 
-io.stdout:setvbuf("no")
-io.stderr:setvbuf("no")
-
-local ok, err = xpcall(
-	function()
-		require"app"
-	end,
-	xpcallErrorHandler
-)
-
-if not ok then
-	timestampPrint(tostring(err))
+!PUSH_CONTEXT "none"
+	local appOk = assert(loadfile(dirPrefix.."srcgen/app.lua"))()
 
 	if logFile then  logFile:close()  end
 
-	os.exit(1)
-end
+	os.exit(appOk and 0 or 1)
+!POP_CONTEXT()

@@ -89,7 +89,12 @@ TOML.parse = function(toml, options)
 				end
 				line = line + 1
 			end
-			error("TOML: " .. message .. " on line " .. line .. ".", 4)
+			-- @Edit:
+			if options.pathForErrors then
+				error(options.pathForErrors .. ":" .. line .. ": [TOML] " .. message .. ".", 0)
+			else
+				error("[TOML] " .. message .. " on line " .. line .. ".", 4)
+			end
 		end
 	end
 

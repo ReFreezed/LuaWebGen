@@ -21,13 +21,13 @@
 	loadParams
 	makeDirectory, makeDirectoryRecursive, removeDirectory, removeDirectoryRecursive
 	NOSPACE
+	PUSH_CONTEXT, POP_CONTEXT
 	readFile, writeFile, writeTextFile
 	templateToLua
 	templateToString, templateToStringUtf16
 	toWindowsPath
 	traverseDirectory
 	utf16ToUtf8, utf8ToUtf16
-	XPCALL
 	zipDirectory, zipFiles
 
 --============================================================]]
@@ -72,7 +72,7 @@ function _G.loadParams()
 		if not (line == "" or line:find"^#") then
 			local k, v = line:match"^([%w_]+)%s*=%s*(.*)$"
 			if not k then
-				error(F("local/param.ini:%d: Bad line format: %s", ln, line))
+				errorf("local/param.ini:%d: Bad line format: %s", ln, line)
 			end
 
 			if     k == "pathGpp32"    then  params.pathGpp32    = v
@@ -135,7 +135,7 @@ function _G.executeRequired(cmd, args)
 
 	local exitCode = os.execute(cmd)
 	if exitCode ~= 0 then
-		error(F("Got code %d from command: %s", exitCode, cmd))
+		errorf("Got code %d from command: %s", exitCode, cmd)
 	end
 end
 
@@ -146,7 +146,7 @@ end
 function _G.templateToString(s, values, formatter)
 	return (s:gsub("${(%w+)}", function(k)
 		local v = values[k]
-		if not v     then  error(F("No value '%s'.", k))  end
+		if not v     then  errorf("No value '%s'.", k)  end
 		if formatter then  v = formatter(v)  end
 		return v
 	end))
@@ -158,7 +158,7 @@ function _G.templateToStringUtf16(params, s, values, formatter)
 	return (s:gsub("$%z{%z([%w%z]+)}%z", function(k)
 		k       = utf16ToUtf8(params, k)
 		local v = values[k]
-		if not v     then  error(F("No value '%s'.", k))  end
+		if not v     then  errorf("No value '%s'.", k)  end
 		if formatter then  v = formatter(v)  end
 		return utf8ToUtf16(params, v)
 	end))
@@ -297,7 +297,7 @@ function _G.makeDirectory(dir)
 
 	local ok, err = lfs.mkdir(dir)
 	if not ok then
-		error(F("Could not make directory '%s'. (%s)", dir, err))
+		errorf("Could not make directory '%s'. (%s)", dir, err)
 	end
 end
 function _G.makeDirectoryRecursive(dir)
@@ -311,7 +311,7 @@ function _G.removeDirectory(dir)
 
 	local ok, err = lfs.rmdir(dir)
 	if not ok then
-		error(F("Could not remove directory '%s'. (%s)", dir, err))
+		errorf("Could not remove directory '%s'. (%s)", dir, err)
 	end
 end
 function _G.removeDirectoryRecursive(dir)
@@ -375,14 +375,6 @@ end
 
 
 
--- ok, err = !XPCALL `lua`
-function XPCALL(lua)
-	__LUA"xpcall(function() "
-	__LUA(lua)
-	__LUA" end, xpcallErrorHandler)"
-end
-
-
 do
 	local function outputArgumentChecks(errLevel, argsStr)
 		local optionalPos = argsStr:find("?", 1, true) or #argsStr
@@ -434,6 +426,23 @@ end
 
 function errorf(s, ...)
 	error(s:format(...), 2)
+end
+
+
+
+local ctxName
+
+function _G.PUSH_CONTEXT(_ctxName)
+	ctxName = _ctxName
+	__LUA"do "
+		__LUA"local function "__LUA(ctxName)__LUA"Context(ctx)"
+end
+
+function _G.POP_CONTEXT()
+		__LUA"end "
+		__LUA"local ctx = pushContext("__VAL(ctxName)__LUA", "__LUA(ctxName)__LUA"Context) "
+		__LUA(ctxName)__LUA"Context(ctx) "
+	__LUA"end"
 end
 
 

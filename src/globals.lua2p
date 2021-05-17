@@ -128,7 +128,6 @@ function _G.resetSiteVariables()
 	_G.redirectionLayout          = ""
 
 	-- Other values.
-	_G.contextStack               = {--[[ context1,                    ... ]]}
 	_G.layoutTemplates            = {--[[ [path1]=template1,           ... ]]}
 	_G.scriptFunctions            = {--[[ [scriptName1]=function(...), ... ]]}
 

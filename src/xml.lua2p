@@ -136,17 +136,18 @@ end
 
 local documentCache = {}
 
+-- node = cacheIfXmlString( xmlString )
+-- node = cacheIfXmlString( node )
+-- Returns nil and a message on error.
 local function cacheIfXmlString(xmlStrOrEl)
 	if type(xmlStrOrEl) == "string" then
 		local xmlStr = xmlStrOrEl
 		local el     = documentCache[xmlStr]
 		if el then  return el  end
 
-		local err ; el, err = xml.parse(xmlStr) -- @Incomplete: Use parseXml instead!
+		local err ; el, err = xml.parse(xmlStr) -- @Incomplete: Use parseXml() instead!
+		-- local err ; el, err = xml.parseXml(xmlStr)
 		if not el then  return nil, err  end
-		-- local ok, elOrErr = pcall(xml.parseXml, xmlStr)
-		-- if not ok then  return nil, elOrErr  end
-		-- el = elOrErr
 
 		documentCache[xmlStr] = el
 		return el
@@ -306,7 +307,7 @@ local function parseAttributes(s, pos, pathForError, isHtml, attrs)
 
 		else
 			if not s:find("^=", pos) then
-				fileError(pathForError, s, pos, "Expected '=' after '%s'.", attrName)
+				fileError(pathForError, s, pos, "Expected '=' after attribute name '%s'.", attrName)
 			end
 			pos = pos + !(#"=")
 
@@ -1319,66 +1320,78 @@ Element.toHtml = xml.toHtml -- :Alias
 
 
 -- document = xml.parseXml( xmlString [, filePathForError ] )
+-- Returns nil and a message on error.
 function xml.parseXml(s, pathForError)
 	pathForError = pathForError or "[xml]"
+	local doc    = nil
 
-	if s:find"%z" then -- A valid UTF-16 file should always have NULLs in it.
-		fileError(pathForError, s, 1, "Only UTF-8 is supported.")
-	end
-
-	local docWrapper = xml.newElement("")
-	local pos        = parseElementContents(s, 1, pathForError, docWrapper, false, true)
-
-	if pos <= #s then
-		fileError(pathForError, s, pos, "Unexpected end tag.")
-	end
-
-	local doc = nil
-
-	for _, node in ipairs(docWrapper) do
-		if not !!(IS_TEXT`node`) then
-			if doc then
-				fileError(pathForError, s, #s, "There are multiple root elements.")
-			end
-			doc = node
+	local ok, err = pcall(function()
+		if s:find"%z" then -- A valid UTF-16 file should always have NULLs in it.
+			fileError(pathForError, s, 1, "Only UTF-8 is supported.")
 		end
-	end
 
-	if not doc then
-		fileError(pathForError, s, 0, "There is no document.")
+		local docWrapper = xml.newElement("")
+		local pos        = parseElementContents(s, 1, pathForError, docWrapper, false, true)
+
+		if pos <= #s then
+			fileError(pathForError, s, pos, "Unexpected end tag.")
+		end
+
+		for _, node in ipairs(docWrapper) do
+			if not !!(IS_TEXT`node`) then
+				if doc then
+					fileError(pathForError, s, #s+1, "There are multiple root elements.")
+				end
+				doc = node
+			end
+		end
+
+		if not doc then
+			fileError(pathForError, s, 0, "There is no document.")
+		end
+	end)
+
+	if not ok then
+		return nil, err
 	end
 
 	return doc
 end
 
 -- document = xml.parseHtml( xmlString [, filePathForError ] )
+-- Returns nil and a message on error.
 function xml.parseHtml(s, pathForError)
 	pathForError = pathForError or "[html]"
+	local doc    = nil
 
-	if s:find"%z" then -- A valid UTF-16 file should always have NULLs in it.
-		fileError(pathForError, s, 1, "Only UTF-8 is supported.")
-	end
-
-	local docWrapper = xml.newElement("")
-	local pos        = parseElementContents(s, 1, pathForError, docWrapper, true, true)
-
-	if pos <= #s then
-		fileError(pathForError, s, pos, "Unexpected end tag.")
-	end
-
-	local doc = nil
-
-	for _, node in ipairs(docWrapper) do
-		if not !!(IS_TEXT`node`) then
-			if doc then
-				fileError(pathForError, s, #s, "There are multiple root elements.")
-			end
-			doc = node
+	local ok, err = pcall(function()
+		if s:find"%z" then -- A valid UTF-16 file should always have NULL bytes in it.
+			fileError(pathForError, s, 1, "Only UTF-8 is supported.")
 		end
-	end
 
-	if not doc then
-		fileError(pathForError, s, 0, "There is no document.")
+		local docWrapper = xml.newElement("")
+		local pos        = parseElementContents(s, 1, pathForError, docWrapper, true, true)
+
+		if pos <= #s then
+			fileError(pathForError, s, pos, "Unexpected end tag.")
+		end
+
+		for _, node in ipairs(docWrapper) do
+			if not !!(IS_TEXT`node`) then
+				if doc then
+					fileError(pathForError, s, #s, "There are multiple root elements.")
+				end
+				doc = node
+			end
+		end
+
+		if not doc then
+			fileError(pathForError, s, 0, "There is no document.")
+		end
+	end)
+
+	if not ok then
+		return nil, err
 	end
 
 	return doc
@@ -1400,11 +1413,8 @@ function xml.parse(s, isFile, useBasic)
 		end
 	end
 
-	local ok, docOrErr = pcall(xml.parseXml, s)
-	if not ok then
-		return nil, tostring(isErrorObject(docOrErr) and docOrErr.message or docOrErr)
-	end
-	local doc = docOrErr
+	local doc, err = xml.parseXml(s)
+	if not doc then  return nil, err  end
 
 	xml.removeWhitespaceNodes(doc)
 	return doc
@@ -1418,9 +1428,9 @@ function xml.basic_parse(s, preserveAllWhitespace, isHtml)
 	local doc
 
 	if isHtml then
-		doc = xml.parseHtml(s)
+		doc = assert(xml.parseHtml(s))
 	else
-		doc = xml.parseXml(s)
+		doc = assert(xml.parseXml(s))
 	end
 
 	if not preserveAllWhitespace then
@@ -1461,7 +1471,7 @@ end
 
 -- bool = xml.isElement( value )
 function xml.isElement(v)
-	return type(v) == "table" and getmetatable(v) == Element
+	return getmetatable(v) == Element
 end
 xml.is_tag = xml.isElement -- :PenlightCompatibility
 
@@ -1611,7 +1621,7 @@ do
 			for tagName in tagNamesStr:gmatch"[^,]+" do
 				tagName = tagName:gsub("^%s+", ""):gsub("%s+$", "")
 				if tagName == "" then
-					error("A value in the comma-separated list is empty.")
+					error("A value in the comma-separated list is empty.", 2)
 				end
 
 				table.insert(tagNames, tagName)

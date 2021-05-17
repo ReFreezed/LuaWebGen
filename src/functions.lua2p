@@ -18,7 +18,7 @@
 	createThumbnail
 	datetimeToTime, getDatetime
 	encodeHtmlEntities
-	error, errorf, fileError, errorLine
+	error, errorf, fileError, errorNoPos
 	F, formatBytes, formatTemplate
 	generateFromTemplateString, generateFromTemplateFile, generateRedirection
 	generatorMeta
@@ -48,8 +48,8 @@
 	pairsSorted
 	parseAndRunTemplate
 	pathToSitePath, sitePathToPath
-	printNoLog, printfNoLog, log, print, printOnce, printf, printfOnce, timestampPrint, timestampPrintOnce, timestampPrintVerbose, timestampPrintError, timestampPrintWarning, timestampPrintWarningOnce, printObject
-	pushContext, popContext, assertContext, getContext
+	printNoLog, printfNoLog, log, print, printOnce, printf, printfOnce, timestampPrint, timestampPrintOnce, timestampPrintVerbose, timestampPrintError, timestampPrintWarning, timestampPrintWarningOnce, printObject, logErrorTraceback
+	pushContext, assertContext, getContext, isContext
 	removeItem
 	rewriteOutputPath
 	round
@@ -65,7 +65,6 @@
 	unindent
 	urlExists
 	writeOutputFile, preserveExistingOutputFile
-	xpcallErrorHandler, makeError, makeErrorf, isErrorObject
 
 --============================================================]]
 
@@ -698,40 +697,35 @@ do
 			!end
 		end
 
-		local chunk, err = loadstring(luaCode, "@"..path)
-		if not chunk then  errorLine(err)  end
+		local main_chunk, err = loadstring(luaCode, "@"..path)
+		if not main_chunk then  errorNoPos(err)  end
 
-		setfenv(chunk, scriptEnvironment)
+		setfenv(main_chunk, scriptEnvironment)
 
-		local ctx                            = pushContext("template")
-		ctx.page                             = page
-		ctx._scriptEnvironmentGlobals.page   = getProtectionWrapper(page, "page")
-		ctx._scriptEnvironmentGlobals.params = page.params.v
-		ctx._scriptEnvironmentGlobals.P      = page.params.v
-		ctx.out                              = {}
-		ctx.enableHtmlEncoding               = enableHtmlEncoding
+		local templateResult
 
-		local ok = true
-		local errObj
+		!PUSH_CONTEXT "template"
+			ctx.page                             = page
+			ctx._scriptEnvironmentGlobals.page   = getProtectionWrapper(page, "page")
+			ctx._scriptEnvironmentGlobals.params = page.params.v
+			ctx._scriptEnvironmentGlobals.P      = page.params.v
+			ctx.out                              = {}
+			ctx.enableHtmlEncoding               = enableHtmlEncoding
 
-		if onPageInit then
-			ok, errObj = xpcall(function()
+			if onPageInit then
 				-- Note: We don't strictly need to have the page as an argument for this
 				-- callback because globals work as usual - it's just in case there's a
 				-- problem with name shadowing for the user.
 				onPageInit(ctx._scriptEnvironmentGlobals.page)
-			end, xpcallErrorHandler)
-		end
+			end
 
-		if ok then  ok, errObj = xpcall(chunk, xpcallErrorHandler)  end
+			main_chunk()
 
-		popContext("template")
-		if not ok then  error(errObj)  end
-
-		local templateResult = (table.concat(ctx.out)
-			:gsub("[ \t]+\n", "\n"  ) -- :Beautify spaces at the end of lines.
-			:gsub("\n\n\n+",  "\n\n") -- :Beautify empty lines.  @Robustness: Not sure this is actually good. Might mess up <pre> tag contents.
-		)
+			templateResult = (table.concat(ctx.out)
+				:gsub("[ \t]+\n", "\n"  ) -- :Beautify spaces at the end of lines.
+				:gsub("\n\n\n+",  "\n\n") -- :Beautify empty lines.  @Robustness: Not sure this is actually good. Might mess up <pre> tag contents.
+			)
+		!POP_CONTEXT()
 
 		return templateResult
 	end
@@ -770,29 +764,10 @@ end
 
 
 
-local _error = error
-
--- error( message [, level=1 ] )
-function _G.error(err, level)
-	level = (level or 1) + 1
-	if isErrorObject(err) then  _error(err, level)  end
-
-	err = tostring(err)
-
-	local info = debug.getinfo(level, "Sl")
-	if info then
-		local sourceName = info.source:find"^@" and info.source:sub(2) or info.short_src
-		err              = sourceName .. (info.currentline > 0 and ":"..info.currentline or "") .. ": " .. err
-	end
-
-	local errObj = makeError(err, level)
-	_error(errObj, level)
-end
-
 -- errorf( [ level=1, ] formatString, ... )
 function _G.errorf(levelOrS, ...)
 	if type(levelOrS) == "number" then
-		error(F(...), levelOrS+1)
+		error(F(...), (levelOrS == 0 and 0 or 1+levelOrS))
 	else
 		error(F(levelOrS, ...), 2)
 	end
@@ -852,7 +827,7 @@ do
 			local toCutAfterLinePre2 = lengthLinePre2 - math.min(lastColumn, lengthLinePre2) -- @Incomplete: Handle tabs if indentation is different from the main line.
 
 			-- @Incomplete: Handle tabs that's aren't part of the indentation better.
-			s = F("%s\n>\n%s%s%s>-%s^",
+			s = F("%s\n>\n%s%s%s>-%s^\n",
 				s,
 				(linePre2Start < linePre1Start and linePre2Start <= linePre2End) and F("> %s\n", (contents:sub(linePre2Start + columnsToCut, linePre2End - toCutAfterLinePre2):gsub("\t", "    "))) or "",
 				(linePre1Start < lineStart     and linePre1Start <= linePre1End) and F("> %s\n", (contents:sub(linePre1Start + columnsToCut, linePre1End - toCutAfterLinePre1):gsub("\t", "    "))) or "",
@@ -868,23 +843,22 @@ do
 	-- fileError( path, contents, position,   formatString, ... )
 	-- fileError( path, nil,      lineNumber, formatString, ... )
 	function _G.fileError(path, contents, pos, s, ...)
-		s = formatFileMessage(path, contents, pos, s, ...)
-		errorLine(s)
+		errorNoPos(formatFileMessage(path, contents, pos, s, ...))
 	end
 
 	-- fileWarning( path, contents, position,   formatString, ... )
 	-- fileWarning( path, nil,      lineNumber, formatString, ... )
 	function _G.fileWarning(path, contents, pos, s, ...)
-		s = formatFileMessage(path, contents, pos, s, ...)
-		timestampPrintWarning(s)
+		timestampPrintWarning(formatFileMessage(path, contents, pos, s, ...))
 	end
 end
 
--- errorLine( message )
--- errorLine( formatString, ... )
-function _G.errorLine(s, ...)
+-- Error with no code position prepended.
+-- errorNoPos( message )
+-- errorNoPos( formatString, ... )
+function _G.errorNoPos(s, ...)
 	if select("#", ...) > 0 then  s = F(s, ...)  end
-	_error(makeError(s, 0))
+	error(s, 0)
 end
 
 
@@ -907,10 +881,9 @@ function _G.writeOutputFile(category, pathRel, url, data, modTime, sourcePath)
 	local extLower = getExtension(filename):lower()
 
 	if fileProcessors[extLower] then
-		pushContext("none")
-		local ok, errObj = !XPCALL `data = fileProcessors[extLower](data)`
-		popContext("none")
-		if not ok then  error(errObj)  end
+		!PUSH_CONTEXT "none"
+			data = fileProcessors[extLower](data)
+		!POP_CONTEXT()
 
 		if type(data) ~= "string" then
 			errorf("File processor for '%s' files did not return a string.", extLower)
@@ -1025,7 +998,7 @@ end
 -- Note: Print functions log, but log functions do not print.
 --
 
--- log( string )
+-- log( message )
 -- log( formatString, ... )
 function _G.log(s, ...)
 	if select("#", ...) > 0 then  s = F(s, ...)  end
@@ -1084,16 +1057,16 @@ function _G.printfOnce(s, ...)
 	printOnce(F(s, ...))
 end
 
--- timestampLog( string )
+-- timestampLog( message )
 -- timestampLog( formatString, ... )
 function _G.timestampLog(s, ...)
 	if select("#", ...) > 0 then  s = F(s, ...)  end
 	log("[%s] %s", os.date"%H:%M:%S", s)
 end
 
--- timestampPrint( string )
+-- timestampPrint( message )
 -- timestampPrint( formatString, ... )
--- timestampPrintOnce( string )
+-- timestampPrintOnce( message )
 -- timestampPrintOnce( formatString, ... )
 function _G.timestampPrint(s, ...)
 	if select("#", ...) > 0 then  s = F(s, ...)  end
@@ -1109,7 +1082,7 @@ function _G.timestampPrintOnce(s, ...)
 	printf("[%s] %s", os.date"%H:%M:%S", s)
 end
 
--- timestampPrintVerbose( string )
+-- timestampPrintVerbose( message )
 -- timestampPrintVerbose( formatString, ... )
 function _G.timestampPrintVerbose(...)
 	if verbosePrint then
@@ -1119,7 +1092,7 @@ function _G.timestampPrintVerbose(...)
 	end
 end
 
--- timestampPrintError( string )
+-- timestampPrintError( message )
 -- timestampPrintError( formatString, ... )
 function _G.timestampPrintError(s, ...)
 	if select("#", ...) > 0 then
@@ -1131,9 +1104,9 @@ function _G.timestampPrintError(s, ...)
 	log(s)
 end
 
--- timestampPrintWarning( string )
+-- timestampPrintWarning( message )
 -- timestampPrintWarning( formatString, ... )
--- timestampPrintWarningOnce( string )
+-- timestampPrintWarningOnce( message )
 -- timestampPrintWarningOnce( formatString, ... )
 function _G.timestampPrintWarning(s, ...)
 	if select("#", ...) > 0 then  s = F(s, ...)  end
@@ -1225,6 +1198,51 @@ do
 		end
 		stdoutWrite("\n")
 	end
+end
+
+function _G.logErrorTraceback(level, alsoPrint)
+	log("stack traceback:")
+	if alsoPrint then  io.stderr:write("stack traceback:", "\n")  end
+
+	local stack = {}
+
+	for level = 1+level, 1/0 do
+		local info = debug.getinfo(level, "nSl")
+		if not info then  break  end
+
+		local sourceName = (info.source:match"^@(.+)" or info.short_src)
+		local buffer     = {"\t"}
+
+		table.insert(buffer, F("%s:", sourceName))
+
+		if info.currentline > 0 then
+			table.insert(buffer, F("%d:", info.currentline))
+		end
+
+		if (info.name or "") ~= "" then
+			table.insert(buffer, F(" in '%s'", info.name))
+		elseif info.what == "main" then
+			table.insert(buffer, " in main chunk")
+		elseif info.what == "C" or info.what == "tail" then
+			table.insert(buffer, " ?")
+		else
+			table.insert(buffer, F(" in <%s:%d>", sourceName:gsub("^.*[/\\]", ""), info.linedefined))
+		end
+
+		table.insert(stack, table.concat(buffer))
+	end
+
+	while stack[#stack] == "\t[C]: ?" do
+		stack[#stack] = nil
+	end
+
+	for _, s in ipairs(stack) do
+		log(s)
+		if alsoPrint then  io.stderr:write(s, "\n")  end
+	end
+
+	log("")
+	if alsoPrint then  io.stderr:write("\n")  end
 end
 
 
@@ -1410,7 +1428,9 @@ _G.dataParserIsBinary = {}
 
 -- dataParserIsBinary.html = false
 -- function dataParsers.html(dataStr, path) -- Why would anyone use this? Just, why?
--- 	return (assert(xmlLib.parseHtml(dataStr, path)))
+-- 	local doc, err = xmlLib.parseHtml(dataStr, path)
+-- 	if not doc then  errorNoPos(err)  end
+-- 	return doc
 -- end
 
 dataParserIsBinary.lua = false
@@ -1430,12 +1450,16 @@ end
 
 dataParserIsBinary.toml = false
 function dataParsers.toml(dataStr, path)
-	return (assert(tomlLib.parse(dataStr)))
+	local ok, tOrErr = pcall(tomlLib.parse, dataStr, {pathForErrors=path})
+	if not ok then  errorNoPos(tOrErr)  end
+	return tOrErr
 end
 
 dataParserIsBinary.xml = false
 function dataParsers.xml(dataStr, path)
-	return (assert(xmlLib.parseXml(dataStr, path)))
+	local doc, err = xmlLib.parseXml(dataStr, path)
+	if not doc then  errorNoPos(err)  end
+	return doc
 end
 
 dataParserIsBinary.svg  = false ; dataParsers.svg  = dataParsers.xml
@@ -1474,10 +1498,9 @@ function _G.newDataFolderReader(dir, checkDirExistance)
 						found         = true
 						local dataStr = assert((dataParserIsBinary[ext] and getFileContentsBinary or getFileContentsText)(path))
 
-						pushContext("none")
-						local ok, errObj = !XPCALL `dataObj = dataParser(dataStr, path)`
-						popContext("none")
-						if not ok then  error(errObj)  end
+						!PUSH_CONTEXT "none"
+							dataObj = dataParser(dataStr, path)
+						!POP_CONTEXT()
 
 						if dataObj == nil then
 							errorf(2, "Data parser for '%s' files returned nothing. (%s)", ext, path)
@@ -1707,9 +1730,9 @@ function _G.generateRedirection(url, targetUrl, sourcePath)
 	!ARGS "url,targetUrl,sourcePath:string"
 
 	if not url:find"^/" then
-		errorLine("Redirection URLs must begin with '/'. (%s)", url)
+		errorNoPos("Redirection URLs must begin with '/'. (%s)", url)
 	elseif url:find("#", 1, true) then
-		errorLine("Redirection URLs cannot have fragments. (%s)", url)
+		errorNoPos("Redirection URLs cannot have fragments. (%s)", url)
 	end
 
 	if url:find("?", 1, true) or not url:find"/$" then
@@ -1717,7 +1740,7 @@ function _G.generateRedirection(url, targetUrl, sourcePath)
 			timestampPrintWarning("Duplicate redirect from '%s' to '%s'.", url, targetUrl)
 			return
 		elseif unwrittenRedirects[url] then
-			errorLine("Duplicate redirect from '%s' (to different targets).", url)
+			errorNoPos("Duplicate redirect from '%s' (to different targets).", url)
 		end
 
 		unwrittenRedirects[url] = targetUrl
@@ -1729,7 +1752,7 @@ function _G.generateRedirection(url, targetUrl, sourcePath)
 		timestampPrintWarning("Duplicate redirect from '%s' to '%s'.", url, targetUrl)
 		return
 	elseif writtenRedirects[url] then
-		errorLine("Duplicate redirect from '%s' (to different targets).", url)
+		errorNoPos("Duplicate redirect from '%s' (to different targets).", url)
 	end
 
 	if redirectionLayout ~= "" then
@@ -1782,17 +1805,6 @@ function _G.generateRedirection(url, targetUrl, sourcePath)
 	end
 
 	writtenRedirects[url] = targetUrl
-end
-
-
-
-_G._assert = assert
-
-function _G.assert(v, ...)
-	if v then  return v, ...  end
-
-	local message = (... ~= nil) and tostring(...) or "Assertion failed!"
-	_error(message, 2)
 end
 
 
@@ -1920,48 +1932,60 @@ end
 
 
 
-function _G.pushContext(ctxName)
-	local ctx = {_name=ctxName, _scriptEnvironmentGlobals={}}
-	table.insert(contextStack, ctx)
+local contextMetatable = {__index=_G}
+
+-- context = pushContext( contextName, chunk )
+-- chunk   = function( context )
+function _G.pushContext(ctxName, chunk)
+	local ctx = setmetatable({_name=ctxName, _scriptEnvironmentGlobals={}}, contextMetatable)
+	setfenv(chunk, ctx)
 	return ctx
 end
 
-function _G.popContext(ctxName)
-	assertContext(ctxName)
-	table.remove(contextStack)
-end
-
--- assertContext( contextName  [, functionContext, errorLevel=2 ] )
--- assertContext( contextNames [, functionContext, errorLevel=2 ] )
-function _G.assertContext(ctxName, funcContext, errLevel)
-	local ctx = contextStack[#contextStack]
-
+local function _assertContext(ctx, ctxName, funcContext, errLevel)
 	if type(ctxName) == "table" then
 		if not (ctx and isAny(ctx._name, unpack(ctxName))) then
-			errLevel = (errLevel or 2) + 1
 			if funcContext then
-				errorf(errLevel, "[%s] Context is wrong. (Expected '%s', but is '%s')", funcContext, table.concat(ctxName, "' or '"), (ctx and ctx._name or "none"))
+				errorf(1+errLevel, "[%s] Context is wrong. (Expected '%s', but is '%s')", funcContext, table.concat(ctxName, "' or '"), (ctx and ctx._name or "none"))
 			else
-				errorf(errLevel,      "Context is wrong. (Expected '%s', but is '%s')",              table.concat(ctxName, "' or '"), (ctx and ctx._name or "none"))
+				errorf(1+errLevel,      "Context is wrong. (Expected '%s', but is '%s')",              table.concat(ctxName, "' or '"), (ctx and ctx._name or "none"))
 			end
 		end
 	else
 		if not (ctx and ctx._name == ctxName) then
-			errLevel = (errLevel or 2) + 1
 			if funcContext then
-				errorf(errLevel, "[%s] Context is wrong. (Expected '%s', but is '%s')", funcContext, ctxName, (ctx and ctx._name or "none"))
+				errorf(1+errLevel, "[%s] Context is wrong. (Expected '%s', but is '%s')", funcContext, ctxName, (ctx and ctx._name or "none"))
 			else
-				errorf(errLevel,      "Context is wrong. (Expected '%s', but is '%s')",              ctxName, (ctx and ctx._name or "none"))
+				errorf(1+errLevel,      "Context is wrong. (Expected '%s', but is '%s')",              ctxName, (ctx and ctx._name or "none"))
 			end
 		end
 	end
 end
 
+-- assertContext( contextName  [, functionContext, errorLevel=2 ] )
+-- assertContext( contextNames [, functionContext, errorLevel=2 ] )
+function _G.assertContext(ctxName, funcContext, errLevel)
+	errLevel = 1 + (errLevel or 2)
+	_assertContext(getContext(), ctxName, funcContext, errLevel)
+end
+
 -- context = getContext( [ requiredContextName=any  ] )
 -- context = getContext( [ requiredContextNames=any ] )
 function _G.getContext(ctxName)
-	if ctxName then  assertContext(ctxName)  end
-	return contextStack[#contextStack] or error("There is no context.", 2)
+	for level = 3, 1/0 do -- Assume the caller is a webgen function, so start at level 3.
+		local ctx = getfenv(level) -- We shouldn't reach an invalid level because pretty much the whole program runs in a context.
+
+		if isContext(ctx) then
+			if ctxName then  _assertContext(ctx, ctxName, nil, 2)  end
+			return ctx
+		end
+	end
+
+	error("Internal error: There is no context.", 2) -- We should never get here as getfenv() should raise an error first.
+end
+
+function _G.isContext(v)
+	return getmetatable(v) == contextMetatable
 end
 
 
@@ -1978,7 +2002,7 @@ do
 	function _G.createThumbnail(pathImageRel, thumbW, thumbH, errLevel)
 		thumbW   = thumbW or 0
 		thumbH   = thumbH or 0
-		errLevel = (errLevel or 1)+1
+		errLevel = 1 + (errLevel or 1)
 
 		local gd = pcall(require, "gd") and require"gd" or nil
 
@@ -2464,89 +2488,6 @@ end
 
 
 
-do
-	local errMt = {
-		__tostring = function(errObj)
-			return
-				errObj.stack[1]
-				and F(
-					"ERROR: %s\nstack traceback:\n\t%s\n",
-					errObj.message, table.concat(errObj.stack, "\n\t")
-				)
-				or F("ERROR: %s\n", errObj.message)
-		end,
-	}
-
-	function _G.xpcallErrorHandler(err)
-		return isErrorObject(err) and err or makeError(tostring(err), 2)
-	end
-
-	function _G.makeError(message, level)
-		!ARGS "message:string ? level:number"
-
-		level       = (level == 0) and 0 or (level or 1)
-		local stack = {}
-
-		if level > 0 then
-			while level < 1/0 do
-				level = level + 1
-
-				local info = debug.getinfo(level, "nSl")
-				if not info then  break  end
-
-				local isFile     = info.source:find"^@" ~= nil
-				local sourceName = cleanupPath(isFile and info.source:sub(2) or info.short_src)
-
-				if isFile then
-					sourceName = cleanupPath(sourceName)
-				end
-
-				local b = newStringBuilder()
-				b("%s:", sourceName)
-
-				if info.currentline > 0 then
-					b("%d:", info.currentline)
-				end
-
-				if info.name then
-					b(" in '%s'", info.name)
-				elseif info.what == "main" then
-					b(" in main chunk")
-				elseif info.what == "C" or info.what == "tail" then
-					b(" ?")
-				else
-					b(" in <%s:%d>", getFilename(sourceName), info.linedefined)
-				end
-
-				table.insert(stack, b())
-			end
-
-			while stack[#stack] == "[C]: ?" do
-				stack[#stack] = nil
-			end
-		end
-
-		message = message:gsub("^.-:%d+: ", cleanupPath)
-
-		local errObj = setmetatable({message=message, stack=stack}, errMt)
-		return errObj
-	end
-
-	function _G.makeErrorf(level, s, ...)
-		if type(level) == "number" then
-			return (makeError(F(s, ...), level+1))
-		else
-			return (makeError(F(level, s, ...), 2))
-		end
-	end
-
-	function _G.isErrorObject(v)
-		return type(v) == "table" and getmetatable(v) == errMt
-	end
-end
-
-
-
 function _G.cleanupPath(someKindOfPath)
 	local path = toNormalPath(someKindOfPath)
 
@@ -2620,7 +2561,7 @@ do
 		gd      = pcall(require, "gd") and require"gd" or nil
 
 		if not gd then
-			error("Failed loading Lua-GD.")
+			error("Failed loading Lua-GD.", 3)
 		end
 
 		imageLoaders = {
