@@ -5,6 +5,10 @@
 --=  Requires LuaFileSystem!
 --=  Preparing a release requires a lot more things!
 --=
+--=  $ lua build/build.lua
+--=  $ lua build/build.lua release
+--=  $ lua build/build.lua dev [pathToLuaPreprocess]
+--=
 --=-------------------------------------------------------------
 --=
 --=  LuaWebGen - static website generator in Lua!
@@ -22,15 +26,11 @@ local buildStartTime = os.clock()
 
 local DIR_HERE = debug.getinfo(1, "S").source:match"^@(.+)":gsub("\\", "/"):gsub("/?[^/]+$", ""):gsub("^$", ".")
 
-local pp  = require"build.preprocess"
-local lfs = require"lfs"
-
-local devMode   = false
-local doRelease = false
-
 --
 -- Parse args
 --
+local devMode   = false
+local doRelease = false
 
 if arg[1] == "dev" then
 	devMode = true
@@ -43,6 +43,11 @@ elseif arg[1] then
 end
 
 assert(not (devMode and doRelease))
+
+local ppPath = (devMode) and arg[2] or nil
+
+local pp  = ppPath and dofile(ppPath) or require"build.preprocess"
+local lfs = require"lfs"
 
 --
 -- Metaprogram stuff

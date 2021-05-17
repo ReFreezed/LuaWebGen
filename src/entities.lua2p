@@ -1,0 +1,97 @@
+-- Source: https://en.wikipedia.org/wiki/List_of_XML_and_HTML_character_entity_references#Character_entity_references_in_HTML
+return {
+	nameToUtf8 = {
+		!(
+		local stringChar = string.char
+
+		local function _codepointToUtf8(cp)
+			if cp < 0 or cp > 0x10ffff then
+				errorf("Codepoint %d is out of the valid range.", cp)
+			end
+
+			if cp < 128 then  return stringChar(cp)  end
+
+			local suffix = cp % 64
+			local c4     = 128 + suffix
+			cp           = (cp - suffix) / 64
+			if cp < 32 then  return stringChar(192+cp, c4)  end
+
+			suffix   = cp % 64
+			local c3 = 128 + suffix
+			cp       = (cp - suffix) / 64
+			if cp < 16 then  return stringChar(224+cp, c3, c4)  end
+
+			suffix = cp % 64
+			cp     = (cp - suffix) / 64
+			return stringChar(240+cp, 128+suffix, c3, c4)
+		end
+
+		local cache = {}
+
+		local function codepointToUtf8(cp)
+			local c   = cache[cp] or _codepointToUtf8(cp)
+			cache[cp] = c
+			return c
+		end
+
+		local extraEntitiesToAlwaysEncode = {
+			-- Order matters!
+
+			-- Not extra (we handle these explicitly elsewhere):
+			-- "amp",
+			-- "lt",
+			-- "gt",
+			-- "quot",
+			-- "apos",
+
+			-- 2 characters:
+			"ThickSpace",
+
+			-- 1 character:
+			"nbsp",
+			"shy",
+			"ensp",
+			"emsp",
+			"emsp13",
+			"emsp14",
+			"numsp",
+			"puncsp",
+			"thinsp",
+			"hairsp",
+			"ZeroWidthSpace",
+			"zwnj",
+			"zwj",
+			"lrm",
+			"rlm",
+			"MediumSpace",
+			"NoBreak",
+			"ApplyFunction",
+			"InvisibleTimes",
+			"InvisibleComma",
+		}
+
+		for line in io.lines("build/htmlEntities.txt") do
+			local name = line:match"%S+"
+
+			__LUA"\n\t\t["
+			__VAL(name)
+			__LUA"]="
+
+			local cs = {}
+			for cp in line:gmatch"0x(%S+)" do
+				table.insert(cs, codepointToUtf8(tonumber(cp, 16)))
+			end
+			local c = table.concat(cs)
+
+			__VAL(c)
+			__LUA","
+
+			if indexOf(extraEntitiesToAlwaysEncode, name) then
+				extraEntitiesToAlwaysEncode[name] = table.concat(cs)
+			end
+		end
+		)
+	},
+
+	extraEntitiesToAlwaysEncode = !(extraEntitiesToAlwaysEncode),
+}

@@ -61,7 +61,8 @@ end
 
 
 
-local ENTITY_NAME_TO_UTF8 = require"entities"
+local ENTITY_NAME_TO_UTF8             = require"entities".nameToUtf8
+local EXTRA_ENTITIES_TO_ALWAYS_ENCODE = require"entities".extraEntitiesToAlwaysEncode
 
 local CHAR_TO_ENTITY = {
 	["&"] = "&amp;",
@@ -90,9 +91,14 @@ local HTML_EMPTY_ELEMENTS = {
 	wbr     = true,
 }
 
+local HTML_XML_ENTRY_TAGS = {
+	math = true, -- MathML
+	svg  = true, -- SVG
+}
+
 local HTML_END_TAG_PATTERNS_FOR_TAGS_WITH_UNENCODED_CONTENTS = {
-	["script"] = "</[Ss][Cc][Rr][Ii][Pp][Tt]%s*>",
-	["style"]  = "</[Ss][Tt][Yy][Ll][Ee]%s*>",
+	script = "</[Ss][Cc][Rr][Ii][Pp][Tt]%s*>",
+	style  = "</[Ss][Tt][Yy][Ll][Ee]%s*>",
 }
 
 
@@ -155,6 +161,22 @@ end
 
 
 
+local function encodeEntities(s)
+	s = s:gsub("[&<>\"']", CHAR_TO_ENTITY)
+
+	-- Note: We encode HTML entities in XML documents too. It's probably fine, but who knows!
+	for _, name in ipairs(EXTRA_ENTITIES_TO_ALWAYS_ENCODE) do
+		local c = EXTRA_ENTITIES_TO_ALWAYS_ENCODE[name]
+		if s:find(c, 1, true) then
+			s = s:gsub(c, "&"..name..";")
+		end
+	end
+
+	return s
+end
+
+
+
 local function insertNode(el, node)
 	if node == "" then
 		-- void
@@ -200,7 +222,7 @@ local function decodeEntities(s, pos, sForError, posOffsetForError, pathForError
 			if s:find("^#[Xx]", pos) then
 				pos = pos + !(#"#x")
 
-				local i1, i2, cpStr = s:find(!("^(0*[%dA-Fa-f]+)"), pos)
+				local i1, i2, cpStr = s:find(!("^(0*%x+)"), pos)
 				if not i1 then
 					fileError(pathForError, sForError, posOffsetForError+pos, "Invalid format for hexadecimal entity number.")
 				end
@@ -344,17 +366,6 @@ local function parseElementContents(s, pos, pathForError, el, isHtml, isTop)
 
 			pos = pos + !(#"<?")
 
-			local i1, i2, target = s:find(!("^("..PATTERN_NAME_CHAR.."+)"), pos)
-			if not i1 then
-				fileError(pathForError, s, pos, "Invalid format for processing instruction.")
-			end
-
-			target = target:lower()
-			if target ~= "xml" then
-				fileError(pathForError, s, pos, "Invalid processing instruction target '%s'. (Must be 'xml')", target)
-			end
-			pos = i2 + 1
-
 			while true do
 				local posQuoteStart = s:find("[\"']", pos)
 				local posPiEnd      = s:find("?>",    pos, true)
@@ -451,11 +462,16 @@ local function parseElementContents(s, pos, pathForError, el, isHtml, isTop)
 
 		-- Start tag, or empty tag.
 		elseif s:find("^<", pos) then
+			local isHtml = isHtml -- Local variable because we may want to switch to XML parsing mode for the tag.
+
 			pos = pos + !(#"<")
 
 			local i1, i2, tagName = s:find(!("^("..PATTERN_NAME_CHAR.."+)"), pos)
 			if not i1 then
 				fileError(pathForError, s, pos, "Expected tag name after '<'.")
+			end
+			if isHtml and HTML_XML_ENTRY_TAGS[tagName] then
+				isHtml = false
 			end
 			if isHtml then
 				tagName = tagName:lower()
@@ -497,7 +513,7 @@ local function parseElementContents(s, pos, pathForError, el, isHtml, isTop)
 					end
 					pos = i1
 
-					childEl[1] = s:sub(specialTextNodeStart, pos-1) -- No entity decoding!
+					childEl[1] = s:sub(specialTextNodeStart, pos-1) -- No entity decoding in this case!
 
 				else
 					pos = parseElementContents(s, pos, pathForError, childEl, isHtml, false)
@@ -1065,69 +1081,6 @@ end
 
 
 
-local function nodeToHtml(buffer, node)
-	if !!(IS_TEXT`node`) then
-		table.insert(buffer, (node:gsub("[&<>\"']", CHAR_TO_ENTITY)))
-		return
-	end
-
-	local el = node
-
-	table.insert(buffer, "<")
-	table.insert(buffer, el.tag)
-
-	for attrName, attrValue in pairsSorted(el.attr) do
-		table.insert(buffer, " ")
-		table.insert(buffer, attrName)
-
-		if attrValue ~= "" then
-			table.insert(buffer, '="')
-			table.insert(buffer, (attrValue:gsub("[&<>\"']", CHAR_TO_ENTITY)))
-			table.insert(buffer, '"')
-		end
-	end
-
-	table.insert(buffer, ">")
-
-	if not HTML_EMPTY_ELEMENTS[el.tag:lower()] then
-		if el[1] then
-			if HTML_END_TAG_PATTERNS_FOR_TAGS_WITH_UNENCODED_CONTENTS[el.tag:lower()] then
-				if el:getFirstElement() then
-					errorf("HTML <%s> element has child elements, which is illegal.", el.tag)
-				end
-				for _, childNode in ipairs(el) do
-					table.insert(buffer, childNode) -- We trust that there's no </script> or anything in here.
-				end
-			else
-				for _, childNode in ipairs(el) do
-					nodeToHtml(buffer, childNode)
-				end
-			end
-		end
-
-		table.insert(buffer, "</")
-		table.insert(buffer, el.tag)
-		table.insert(buffer, ">")
-
-	elseif el[1] then
-		errorf("HTML <%s> element should be empty, but it is not.", el.tag)
-	end
-end
-
--- htmlString = xml.toHtml( node [, prefaceDoctype=false ] )
--- htmlString = xml.toHtml( node, doctypeToPreface )
-function xml.toHtml(node, preface)
-	local buffer = {}
-	if preface then
-		buffer[1] = (type(preface) == "string") and preface or !(HTML_STANDARD_PREFACE.."\n")
-	end
-	nodeToHtml(buffer, node)
-	return table.concat(buffer, "")
-end
-Element.toHtml = xml.toHtml -- :Alias
-
-
-
 local function shouldEncodeAsCdata(s)
 	if s:find("]]>", 1, true) then  return false  end
 
@@ -1152,7 +1105,7 @@ local function nodeToXml(buffer, node)
 			table.insert(buffer, node)
 			table.insert(buffer, "]]>")
 		else
-			table.insert(buffer, (node:gsub("[&<>\"']", CHAR_TO_ENTITY)))
+			table.insert(buffer, encodeEntities(node))
 		end
 		return
 	end
@@ -1166,7 +1119,7 @@ local function nodeToXml(buffer, node)
 		table.insert(buffer, " ")
 		table.insert(buffer, attrName)
 		table.insert(buffer, '="')
-		table.insert(buffer, (attrValue:gsub("[&<>\"']", CHAR_TO_ENTITY)))
+		table.insert(buffer, encodeEntities(attrValue))
 		table.insert(buffer, '"')
 	end
 
@@ -1209,7 +1162,7 @@ local function nodeToXmlPretty(buffer, node, initialIndent,indent,attrIndent, in
 			table.insert(buffer, node)
 			table.insert(buffer, "]]>")
 		else
-			table.insert(buffer, (node:gsub("[&<>\"']", CHAR_TO_ENTITY)))
+			table.insert(buffer, encodeEntities(node))
 		end
 		return
 	end
@@ -1232,7 +1185,7 @@ local function nodeToXmlPretty(buffer, node, initialIndent,indent,attrIndent, in
 
 		table.insert(buffer, attrName)
 		table.insert(buffer, '="')
-		table.insert(buffer, (attrValue:gsub("[&<>\"']", CHAR_TO_ENTITY)))
+		table.insert(buffer, encodeEntities(attrValue))
 		table.insert(buffer, '"')
 	end
 
@@ -1292,6 +1245,76 @@ end
 Element.toPrettyXml = xml.toPrettyXml -- :Alias
 xml.tostring        = xml.toPrettyXml -- :PenlightCompatibility
 Element.__tostring  = xml.toPrettyXml -- :PenlightCompatibility
+
+
+
+local function nodeToHtml(buffer, node)
+	if !!(IS_TEXT`node`) then
+		table.insert(buffer, encodeEntities(node))
+		return
+	end
+
+	local el = node
+
+	if HTML_XML_ENTRY_TAGS[el.tag] then
+		nodeToXml(buffer, el)
+		return
+	end
+
+	local tagName = el.tag -- (Don't call :lower() because that may make HTML_XML_ENTRY_TAGS[tagName] true and we end up in a weird situation. Only normalize when parsing!)
+
+	table.insert(buffer, "<")
+	table.insert(buffer, tagName)
+
+	for attrName, attrValue in pairsSorted(el.attr) do
+		table.insert(buffer, " ")
+		table.insert(buffer, attrName)
+
+		if attrValue ~= "" then
+			table.insert(buffer, '="')
+			table.insert(buffer, encodeEntities(attrValue))
+			table.insert(buffer, '"')
+		end
+	end
+
+	table.insert(buffer, ">")
+
+	if not HTML_EMPTY_ELEMENTS[tagName] then
+		if el[1] then
+			if HTML_END_TAG_PATTERNS_FOR_TAGS_WITH_UNENCODED_CONTENTS[tagName] then
+				if el:getFirstElement() then
+					errorf("HTML <%s> element has child elements, which is illegal.", tagName)
+				end
+				for _, childNode in ipairs(el) do
+					table.insert(buffer, childNode) -- We trust that there's no </script> or anything in here.
+				end
+			else
+				for _, childNode in ipairs(el) do
+					nodeToHtml(buffer, childNode)
+				end
+			end
+		end
+
+		table.insert(buffer, "</")
+		table.insert(buffer, tagName)
+		table.insert(buffer, ">")
+
+	elseif el[1] then
+		errorf("HTML <%s> element should be empty, but it is not.", tagName)
+	end
+end
+
+-- htmlString = xml.toHtml( node [, prefaceDoctype=false ] )
+-- htmlString = xml.toHtml( node, doctypeToPreface )
+function xml.toHtml(node, preface)
+	local buffer = {}
+	if preface then
+		buffer[1] = (type(preface) == "string") and preface or !(HTML_STANDARD_PREFACE.."\n")
+	end
+	nodeToHtml(buffer, node)
+	return table.concat(buffer, "")
+end
+Element.toHtml = xml.toHtml -- :Alias
 
 
 

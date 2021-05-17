@@ -12,9 +12,11 @@
 	ARGS
 	convertTextFileEncoding, addBomToUft16File
 	copyFile, copyFilesInDirectory, copyDirectoryRecursive
+	errorf
 	execute, executeRequired
 	F
 	getReleaseVersion
+	indexOf
 	isFile, isDirectory
 	loadParams
 	makeDirectory, makeDirectoryRecursive, removeDirectory, removeDirectoryRecursive
@@ -426,6 +428,12 @@ do
 			end
 		end
 	end
+end
+
+
+
+function errorf(s, ...)
+	error(s:format(...), 2)
 end
 
 

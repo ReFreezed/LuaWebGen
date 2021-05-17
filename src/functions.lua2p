@@ -1276,7 +1276,7 @@ do
 		end
 
 		url = urlLib.escape(url)
-		url = url:gsub("%%[0-9a-f][0-9a-f]", URI_PERCENT_CODES_TO_NOT_ENCODE)
+		url = url:gsub("%%%x%x", URI_PERCENT_CODES_TO_NOT_ENCODE)
 
 		return url
 	end
