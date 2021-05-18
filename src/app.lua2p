@@ -337,8 +337,13 @@ local function setup()
 		table     = table,
 
 		-- Lua libraries.
-		lfs = lfs,
-		xml = xmlLib,
+		json = jsonLib,
+		lfs  = lfs,
+		xml  = xmlLib,
+
+		toml = { -- @Cleanup: Don't use 3rd party TOML library.
+			parse = dataParsers.toml,
+		},
 
 		-- Site objects. (Create at site generation.)
 		site = nil,

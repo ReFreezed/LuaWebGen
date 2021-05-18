@@ -1,0 +1,9 @@
+{
+	"s": "foo\nbar \u004A",
+	"pi": 3.14,
+	"arr": [
+		-1e-1,
+		{ "b":false, "n":null },
+		true
+	]
+}

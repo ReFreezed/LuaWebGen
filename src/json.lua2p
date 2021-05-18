@@ -1,0 +1,277 @@
+--[[============================================================
+--=
+--=  JSON parsing module
+--=
+--=-------------------------------------------------------------
+--=
+--=  LuaWebGen - static website generator in Lua!
+--=  - Written by Marcus 'ReFreezed' Thunström
+--=  - MIT License (See LICENSE.txt)
+--=
+--==============================================================
+
+	parse
+
+--============================================================]]
+
+local json = {}
+
+
+
+!local EAT_WHITESPACE = `
+	do
+		local i1, i2 = s:find("^%s*", pos)
+		pos          = i2 + 1
+	end
+`
+
+local function parseString(s, path, pos)
+	local stringStartPos = pos
+
+	if not s:find('^"', pos) then
+		fileError(path, s, pos, "Expected '\"' to start a string.")
+	end
+	pos = pos + 1
+
+	local parts = {}
+
+	while true do
+		if pos > #s then
+			fileError(path, s, stringStartPos, "Unfinished string. (Reached EOF.)")
+
+		elseif s:find('^"', pos) then
+			pos = pos + 1
+			break
+
+		elseif s:find("^\\", pos) then
+			pos = pos + 1
+
+			-- \"
+			if s:find('^"', pos) then
+				table.insert(parts, '"')
+				pos = pos + 1
+
+			-- \\
+			elseif s:find("^\\", pos) then
+				table.insert(parts, "\\")
+				pos = pos + 1
+			-- \/
+			elseif s:find("^/", pos) then
+				table.insert(parts, "/")
+				pos = pos + 1
+
+			-- \b
+			elseif s:find("^b", pos) then
+				table.insert(parts, "\b")
+				pos = pos + 1
+			-- \f
+			elseif s:find("^f", pos) then
+				table.insert(parts, "\f")
+				pos = pos + 1
+			-- \n
+			elseif s:find("^n", pos) then
+				table.insert(parts, "\n")
+				pos = pos + 1
+			-- \r
+			elseif s:find("^r", pos) then
+				table.insert(parts, "\r")
+				pos = pos + 1
+			-- \t
+			elseif s:find("^t", pos) then
+				table.insert(parts, "\t")
+				pos = pos + 1
+
+			-- \uXXXX
+			elseif s:find("^u", pos) then
+				pos = pos + 1
+
+				local hex = s:match("^%x%x%x%x", pos)
+				if not hex then
+					fileError(path, s, pos, "Expected four hexadecimal digits.")
+				end
+				codepointToUtf8(tonumber(hex, 16), parts)
+				pos = pos + 4
+
+			else
+				fileError(path, s, pos-1, "Invalid escape sequence.")
+			end
+
+		elseif s:find("^[%z\1-\31]", pos) then
+			fileError(path, s, pos, "Invalid character in string.")
+
+		else
+			local i1, i2, charSequence = s:find('^([^%z\1-\31"\\]+)', pos)
+			table.insert(parts, charSequence)
+			pos = i2 + 1
+		end
+	end
+
+	!!(EAT_WHITESPACE)
+
+	return table.concat(parts), pos
+end
+
+local function parseValue(s, path, pos)
+	-- String.
+	if s:find('^"', pos) then
+		local stringValue, pos = parseString(s, path, pos)
+		return stringValue, pos
+
+	-- Number.
+	elseif s:find("^[-%d]", pos) then
+		local numberStartPos = pos
+
+		-- Sign.
+		if s:find("^%-", pos) then
+			pos = pos + 1
+		end
+
+		-- Integral.
+		if s:find("^0", pos) then
+			-- I guess they want to avoid numbers that look octal,
+			-- i.e. numbers that begins with 0 in some languages.
+			pos = pos + 1
+		else
+			local i1, i2 = s:find("^%d+", pos)
+			pos          = i2 + 1
+		end
+
+		-- Fraction.
+		local i1, i2 = s:find("^%.%d+", pos)
+		if i1 then  pos = i2 + 1  end
+
+		-- Exponent.
+		local i1, i2 = s:find("^[Ee][-+]?%d+", pos)
+		if i1 then  pos = i2 + 1  end
+
+		local nStr = s:sub(numberStartPos, pos-1)
+		local n    = tonumber(nStr)
+
+		if not n then
+			fileError(path, s, numberStartPos, "Internal error: Could not parse number '%s'.", nStr)
+		end
+
+		!!(EAT_WHITESPACE)
+		return n, pos
+
+	-- Object.
+	elseif s:find("^{", pos) then
+		pos = pos + 1
+		!!(EAT_WHITESPACE)
+
+		local t = {}
+
+		if s:find("^}", pos) then
+			pos = pos + 1
+
+		else
+			while true do
+				local k;k, pos = parseString(s, path, pos)
+
+				if not s:find("^:", pos) then
+					fileError(path, s, pos, "Expected ':' after key in object.")
+				end
+				pos = pos + 1
+				!!(EAT_WHITESPACE)
+
+				t[k], pos = parseValue(s, path, pos)
+
+				if s:find("^}", pos) then
+					pos = pos + 1
+					break
+
+				elseif s:find("^,", pos) then
+					pos = pos + 1
+					!!(EAT_WHITESPACE)
+					-- Continue loop...
+
+				else
+					fileError(path, s, pos, "Expected '}' or ',' after value in object.")
+				end
+			end
+		end
+
+		!!(EAT_WHITESPACE)
+		return t, pos
+
+	-- Array.
+	elseif s:find("^%[", pos) then
+		pos = pos + 1
+		!!(EAT_WHITESPACE)
+
+		local t = {}
+
+		if s:find("^%]", pos) then
+			pos = pos + 1
+			!!(EAT_WHITESPACE)
+
+		else
+			for i = 1, 1/0 do
+				t[i], pos = parseValue(s, path, pos)
+
+				if s:find("^%]", pos) then
+					pos = pos + 1
+					!!(EAT_WHITESPACE)
+					break
+
+				elseif s:find("^,", pos) then
+					pos = pos + 1
+					!!(EAT_WHITESPACE)
+					-- Continue loop...
+
+				else
+					fileError(path, s, pos, "Expected ']' or ',' after value in array.")
+				end
+			end
+		end
+
+		return t, pos
+
+	-- Keyword.
+	elseif s:find("^%a", pos) then
+		local i1, i2, word = s:find("^(%a+)", pos)
+		local v
+
+		if word == "true" then
+			v = true
+		elseif word == "false" then
+			v = false
+		elseif word == "null" then
+			v = nil
+			-- v = nullReplacement -- @Incomplete: Should we have something like nullReplacement?
+		else
+			fileError(path, s, pos, "Invalid value.")
+		end
+
+		pos = i2 + 1
+		!!(EAT_WHITESPACE)
+		return v, pos
+
+	else
+		fileError(path, s, pos, "Invalid value.")
+	end
+end
+
+-- value = json.parse( jsonString [, filePathForErrors ] )
+-- Returns nil and a message on error.
+function json.parse(s, path)
+	path      = path or "<json>"
+	local pos = 1
+
+	!!(EAT_WHITESPACE)
+
+	local ok, vOrErr, pos = pcall(parseValue, s, path, pos)
+	if not ok then  return nil, vOrErr  end
+	local v = vOrErr
+
+	if pos <= #s then
+		local _, err = pcall(fileError, path, s, pos, "Garbage at the end of the file.")
+		return nil, err
+	end
+
+	return v
+end
+
+
+
+return json

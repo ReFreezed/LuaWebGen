@@ -200,7 +200,8 @@ Cats, in reverse:
 - {{i}}: {{it.name}} (age {{it.age}})
 {{end}}
 
-{{ print("XML:", data.barf:getFirstElement()) }}
+{{ io.write("JSON: ") ; printObject(data.random) }}
+{{ io.write("XML: ")  ; print(data.barf:getFirstElement()) }}
 
 
 

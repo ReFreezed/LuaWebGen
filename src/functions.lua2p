@@ -13,6 +13,7 @@
 	assert
 	attributeWith, attributeWithAny
 	cleanupPath
+	codepointToUtf8
 	countString, countSubString
 	createDirectory, isDirectoryEmpty, removeEmptyDirectories
 	createThumbnail
@@ -1434,6 +1435,13 @@ _G.dataParserIsBinary = {}
 -- 	return doc
 -- end
 
+dataParserIsBinary.json = false
+function dataParsers.json(dataStr, path)
+	local v, err = jsonLib.parse(dataStr, path)
+	if not v then  errorNoPos(err)  end
+	return v
+end
+
 dataParserIsBinary.lua = false
 function dataParsers.lua(dataStr, path)
 	local chunk, err = loadstring(dataStr, "@"..path)
@@ -2732,6 +2740,70 @@ function _G.countSubString(s, pos, posEnd, needle, plain)
 
 		count = count + 1
 		pos   = i2    + 1
+	end
+end
+
+
+
+local byteToString = string.char
+local tableInsert  = table.insert
+
+-- string = codepointToUtf8( cp )
+-- codepointToUtf8( cp, outputBuffer )
+function _G.codepointToUtf8(cp, buffer)
+	if cp < 0 or cp > 0x10ffff then
+		errorf("Codepoint %d is outside the valid range (0..10FFFF).", cp)
+	end
+
+	if cp >= 128 then
+		-- void
+	elseif buffer then
+		tableInsert(buffer, byteToString(cp))
+		return
+	else
+		return byteToString(cp)
+	end
+
+	local suffix = cp % 64
+	local c4     = 128 + suffix
+	cp           = (cp - suffix) / 64
+
+	if cp >= 32 then
+		-- void
+	elseif buffer then
+		tableInsert(buffer, byteToString(192+cp))
+		tableInsert(buffer, byteToString(c4))
+		return
+	else
+		return byteToString(192+cp, c4) -- @Speed @Memory
+	end
+
+	suffix   = cp % 64
+	local c3 = 128 + suffix
+	cp       = (cp - suffix) / 64
+
+	if cp >= 16 then
+		-- void
+	elseif buffer then
+		tableInsert(buffer, byteToString(224+cp))
+		tableInsert(buffer, byteToString(c3))
+		tableInsert(buffer, byteToString(c4))
+		return
+	else
+		return byteToString(224+cp, c3, c4) -- @Speed @Memory
+	end
+
+	suffix = cp % 64
+	cp     = (cp - suffix) / 64
+
+	if buffer then
+		tableInsert(buffer, byteToString(240+cp))
+		tableInsert(buffer, byteToString(128+suffix))
+		tableInsert(buffer, byteToString(c3))
+		tableInsert(buffer, byteToString(c4))
+		return
+	else
+		return byteToString(240+cp, 128+suffix, c3, c4) -- @Speed @Memory
 	end
 end
 

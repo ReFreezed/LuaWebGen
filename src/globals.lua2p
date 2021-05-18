@@ -32,7 +32,7 @@ _G.AUTOBUILD_MIN_INTERVAL = 1.00
 _G.FILE_TYPE_SET       = {["markdown"]=true, ["html"]=true, ["othertemplate"]=true}
 _G.OUTPUT_CATEGORY_SET = {["page"]=true, ["template"]=true, ["raw"]=true}
 
-_G.DATA_FILE_EXTENSIONS = {"lua","toml","xml"}
+_G.DATA_FILE_EXTENSIONS = {"json","lua","toml","xml"}
 _G.IMAGE_EXTENSIONS     = {"png","jpg","jpeg","gif"}
 
 _G.NOOP = function()end
@@ -44,6 +44,7 @@ _G.NOOP = function()end
 _G.lfs = require"lfs"
 
 _G.dateLib     = require"date"
+_G.jsonLib     = require"json"
 _G.markdownLib = require"markdown"
 _G.tomlLib     = require"toml"
 _G.urlLib      = require"url"

@@ -103,30 +103,6 @@ Element.__index = Element
 
 
 
-local function codepointToUtf8(cp)
-	if cp < 0 or cp > 0x10ffff then
-		errorf("Codepoint %d is out of the valid range.", cp)
-	end
-
-	if cp < 128 then  return string.char(cp)  end
-
-	local suffix = cp % 64
-	local c4     = 128 + suffix
-	cp           = (cp - suffix) / 64
-	if cp < 32 then  return string.char(192+cp, c4)  end
-
-	suffix   = cp % 64
-	local c3 = 128 + suffix
-	cp       = (cp - suffix) / 64
-	if cp < 16 then  return string.char(224+cp, c3, c4)  end
-
-	suffix = cp % 64
-	cp     = (cp - suffix) / 64
-	return string.char(240+cp, 128+suffix, c3, c4)
-end
-
-
-
 local documentCache = {}
 
 -- node = cacheIfXmlString( xmlString )
