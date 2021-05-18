@@ -656,7 +656,6 @@ local function setup()
 
 		getOutputtedFiles = function()
 			-- There's no reason to restrict context for this function, I don't think. 2021-04-27
-
 			local fileInfos = {}
 
 			for _, entry in ipairs(writtenOutputEntries) do
@@ -672,6 +671,19 @@ local function setup()
 			end)
 
 			return fileInfos
+		end,
+
+		getGeneratedPages = function() -- @Doc
+			-- Just like getOutputtedFiles(), there's no reason to restrict context for this function, I don't think. 2021-05-18
+			local generatedPages = {}
+
+			for _, page in ipairs(pages) do
+				if page._isGenerated then
+					table.insert(generatedPages, getProtectionWrapper(page, "page"))
+				end
+			end
+
+			return generatedPages -- Should we sort these?
 		end,
 
 		getDataTextParsers = function()
