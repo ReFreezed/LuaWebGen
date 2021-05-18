@@ -2033,7 +2033,13 @@ end
 -- context = getContext( [ requiredContextNames=any ] )
 function _G.getContext(ctxName)
 	for level = 3, 1/0 do -- Assume the caller is a webgen function, so start at level 3.
-		local ctx = getfenv(level) -- We shouldn't reach an invalid level because pretty much the whole program runs in a context.
+		if not debug.getinfo(level, "") then  break  end
+
+		-- Note: We shouldn't reach an invalid level because pretty much the
+		-- whole program runs in a 'none' context. However, if a level is a
+		-- tail call then getfenv() will raise an error.
+		local ok, ctx = pcall(getfenv, level)
+		if not ok then  ctx = nil  end
 
 		if isContext(ctx) then
 			if ctxName then  _assertContext(ctx, ctxName, nil, 2)  end
@@ -2041,7 +2047,7 @@ function _G.getContext(ctxName)
 		end
 	end
 
-	error("Internal error: There is no context.", 2) -- We should never get here as getfenv() should raise an error first.
+	error("Internal error: There is no context.", 2)
 end
 
 function _G.isContext(v)
