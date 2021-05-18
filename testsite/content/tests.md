@@ -200,6 +200,8 @@ Cats, in reverse:
 - {{i}}: {{it.name}} (age {{it.age}})
 {{end}}
 
+{{ print("XML:", data.barf:getFirstElement()) }}
+
 
 
 ## Scripts

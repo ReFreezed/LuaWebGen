@@ -1833,19 +1833,8 @@ end
 
 
 
-do
-	local ENTITIES = {
-		["&"] = "&amp;",
-		["<"] = "&lt;",
-		[">"] = "&gt;",
-		['"'] = "&quot;",
-		["'"] = "&apos;",
-	}
-
-	function _G.encodeHtmlEntities(s)
-		return (s:gsub("[&<>\"']", ENTITIES))
-	end
-end
+-- html = encodeHtmlEntities( text )
+_G.encodeHtmlEntities = xmlLib.encodeRequiredEntities
 
 
 

@@ -21,6 +21,7 @@
 
 	xml.clone
 	xml.compare
+	xml.encodeRequiredEntities, xml.encodeMoreEntities
 	xml.isElement, xml.isText
 	xml.makeElementConstructors
 	xml.newElement, xml.element
@@ -63,14 +64,6 @@ end
 
 local ENTITY_NAME_TO_UTF8             = require"entities".nameToUtf8
 local EXTRA_ENTITIES_TO_ALWAYS_ENCODE = require"entities".extraEntitiesToAlwaysEncode
-
-local CHAR_TO_ENTITY = {
-	["&"] = "&amp;",
-	["<"] = "&lt;",
-	[">"] = "&gt;",
-	['"'] = "&quot;",
-	["'"] = "&apos;",
-}
 
 local HTML_EMPTY_ELEMENTS = {
 	area    = true,
@@ -158,22 +151,6 @@ local function cacheIfXmlString(xmlStrOrEl)
 	else
 		return nil, "Template is not a document."
 	end
-end
-
-
-
-local function encodeEntities(s)
-	s = s:gsub("[&<>\"']", CHAR_TO_ENTITY)
-
-	-- Note: We encode HTML entities in XML documents too. It's probably fine, but who knows!
-	for _, name in ipairs(EXTRA_ENTITIES_TO_ALWAYS_ENCODE) do
-		local c = EXTRA_ENTITIES_TO_ALWAYS_ENCODE[name]
-		if s:find(c, 1, true) then
-			s = s:gsub(c, "&"..name..";")
-		end
-	end
-
-	return s
 end
 
 
@@ -1106,7 +1083,7 @@ local function nodeToXml(buffer, node)
 			table.insert(buffer, node)
 			table.insert(buffer, "]]>")
 		else
-			table.insert(buffer, encodeEntities(node))
+			table.insert(buffer, xml.encodeMoreEntities(node))
 		end
 		return
 	end
@@ -1120,7 +1097,7 @@ local function nodeToXml(buffer, node)
 		table.insert(buffer, " ")
 		table.insert(buffer, attrName)
 		table.insert(buffer, '="')
-		table.insert(buffer, encodeEntities(attrValue))
+		table.insert(buffer, xml.encodeMoreEntities(attrValue))
 		table.insert(buffer, '"')
 	end
 
@@ -1163,7 +1140,7 @@ local function nodeToXmlPretty(buffer, node, initialIndent,indent,attrIndent, in
 			table.insert(buffer, node)
 			table.insert(buffer, "]]>")
 		else
-			table.insert(buffer, encodeEntities(node))
+			table.insert(buffer, xml.encodeMoreEntities(node))
 		end
 		return
 	end
@@ -1186,7 +1163,7 @@ local function nodeToXmlPretty(buffer, node, initialIndent,indent,attrIndent, in
 
 		table.insert(buffer, attrName)
 		table.insert(buffer, '="')
-		table.insert(buffer, encodeEntities(attrValue))
+		table.insert(buffer, xml.encodeMoreEntities(attrValue))
 		table.insert(buffer, '"')
 	end
 
@@ -1251,7 +1228,7 @@ Element.__tostring  = xml.toPrettyXml -- :PenlightCompatibility
 
 local function nodeToHtml(buffer, node)
 	if !!(IS_TEXT`node`) then
-		table.insert(buffer, encodeEntities(node))
+		table.insert(buffer, xml.encodeMoreEntities(node))
 		return
 	end
 
@@ -1273,7 +1250,7 @@ local function nodeToHtml(buffer, node)
 
 		if attrValue ~= "" then
 			table.insert(buffer, '="')
-			table.insert(buffer, encodeEntities(attrValue))
+			table.insert(buffer, xml.encodeMoreEntities(attrValue))
 			table.insert(buffer, '"')
 		end
 	end
@@ -1322,7 +1299,7 @@ Element.toHtml = xml.toHtml -- :Alias
 -- document = xml.parseXml( xmlString [, filePathForError ] )
 -- Returns nil and a message on error.
 function xml.parseXml(s, pathForError)
-	pathForError = pathForError or "[xml]"
+	pathForError = pathForError or "<xml>"
 	local doc    = nil
 
 	local ok, err = pcall(function()
@@ -1361,7 +1338,7 @@ end
 -- document = xml.parseHtml( xmlString [, filePathForError ] )
 -- Returns nil and a message on error.
 function xml.parseHtml(s, pathForError)
-	pathForError = pathForError or "[html]"
+	pathForError = pathForError or "<html>"
 	local doc    = nil
 
 	local ok, err = pcall(function()
@@ -1651,6 +1628,36 @@ function xml.removeWhitespaceNodes(doc)
 	end
 end
 Element.removeWhitespaceNodes = xml.removeWhitespaceNodes -- :Alias
+
+
+
+local CHAR_TO_ENTITY = {
+	["&"] = "&amp;",
+	["<"] = "&lt;",
+	[">"] = "&gt;",
+	['"'] = "&quot;",
+	["'"] = "&apos;",
+}
+
+-- Encode special characters.
+function xml.encodeRequiredEntities(s)
+	return (s:gsub("[&<>\"']", CHAR_TO_ENTITY))
+end
+
+-- Encode special characters and some additional characters (like non-breaking space).
+function xml.encodeMoreEntities(s)
+	s = xml.encodeRequiredEntities(s)
+
+	-- Note: We encode HTML entities in XML documents too. It's probably fine, but who knows!
+	for _, name in ipairs(EXTRA_ENTITIES_TO_ALWAYS_ENCODE) do
+		local c = EXTRA_ENTITIES_TO_ALWAYS_ENCODE[name]
+		if s:find(c, 1, true) then
+			s = s:gsub(c, "&"..name..";")
+		end
+	end
+
+	return s
+end
 
 
 

@@ -48,9 +48,6 @@ config.before = function()
 		local path = F("/dogs/%s.md", urlize(dog.name))
 		generateFromTemplate(path, dogPageTemplate, {dog=dog})
 	end
-
-	-- Try accessing some XML data.
-	print("XML:", data.barf:getFirstElement())
 end
 
 
