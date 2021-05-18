@@ -75,82 +75,12 @@ _G.scriptIsPreloaded   = setmetatable({--[[ [scriptFolderReader1]=true,  ... ]]}
 _G.protectionWrappers  = setmetatable({--[[ [object1]=wrapper1, ... ]]}, {__mode="kv"})
 _G.protectionedObjects = setmetatable({--[[ [wrapper1]=object1, ... ]]}, {__mode="kv"})
 
+-- Site variables. (These are reset in buildWebsite().)
+_G.site         = nil
 _G.oncePrints   = {--[[ [message1]=true, ... ]]}
 _G.warningCount = 0
+--
 
-_G._ = nil -- Dummy.
-
-
-
--- Site variables. These are reset in buildWebsite() (including oncePrints and warningCount).
-function _G.resetSiteVariables()
-	_G.site = {
-		_readonly = true,
-
-		title = {
-			v = "",
-			g = function(field)  return field.v  end,
-		},
-		baseUrl = {
-			v = "",
-			g = function(field)  return field.v  end,
-		},
-		languageCode = {
-			v = "",
-			g = function(field)  return field.v  end,
-		},
-		defaultLayout = {
-			v = "page",
-			g = function(field)  return field.v  end,
-		},
-
-		redirections = {
-			v = {--[[ [url1]=targetUrl1, ... ]]},
-			g = function(field)  return field.v  end,
-		},
-	}
-
-	-- @Cleanup: It would make sense to store all these values on the site object, but whatever!
-
-	-- Settings.
-	_G.ignoreFiles                = {--[[ filenamePattern1, ... ]]}
-	_G.ignoreFolders              = {--[[ filenamePattern1, ... ]]}
-	_G.ignorePaths                = {--[[ pathPattern1, ... ]]}
-
-	_G.fileTypes                  = {["md"]="markdown", ["html"]="html", ["css"]="othertemplate"}
-	_G.fileProcessors             = {--[[ [extension1]=function(data, sitePath), ... ]]}
-
-	_G.htaErrors                  = {--[[ [httpStatusCode1]=document1, ... ]]}
-
-	_G.outputPathFormat           = "%s"
-	_G.rewriteExcludes            = {--[[ pathPattern1, ... ]]}
-
-	_G.autoLockPages              = false
-	_G.noTrailingSlash            = false
-
-	_G.redirectionLayout          = ""
-
-	-- Other values.
-	_G.layoutTemplates            = {--[[ [path1]=template1,                         ... ]]}
-	_G.scriptFunctions            = {--[[ [scriptName1]=function|scriptFolderReader, ... ]]} -- @Cleanup: Replace this table with a script folder reader.
-
-	_G.pages                      = {--[[ page1, ... ]]}
-	_G.pagesGenerating            = {--[[ [pathRelOut1]=true, ... ]]}
-
-	_G.writtenOutputEntries       = {--[[ { path=pathRel1, pathOut=pathOutputRel1, url=url1 }, ... ]]}
-	_G.writtenOutputFiles         = {--[[ [pathOutputRel1]=true, pathOutputRel1, ... ]]}
-	_G.writtenOutputUrls          = {--[[ [url1]=true,           url1,           ... ]]}
-	_G.writtenRedirects           = {--[[ [url1]=targetUrl1, ... ]]}
-	_G.unwrittenRedirects         = {--[[ [url1]=targetUrl1, ... ]]} -- We use this for redirection of special URLs in .htaccess (e.g. URLs with queries).
-	_G.outputFileCount            = 0
-	_G.outputFileCounts           = {--[[ [category1]=count1, ... ]]}
-	_G.outputFileByteCount        = 0
-	_G.outputFilePreservedCount   = 0 -- This should only count raw files. @Cleanup: Maybe rename the variable?
-	_G.outputFileSkippedPageCount = 0
-
-	_G.thumbnailInfos             = {--[[ [thumbIdString1]={ path=thumbPathRel, width=thumbWidth, height=thumbHeight }, ... ]]}
-end
-
-resetSiteVariables()
+_G._ = nil -- Dummy variable.  @Cleanup: make sure all dummy variables are local.
 
 

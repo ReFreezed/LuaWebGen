@@ -280,8 +280,8 @@ local function setup()
 
 	_G.scriptEnvironmentGlobals = {
 		_WEBGEN_VERSION      = WEBGEN_VERSION, -- @Deprecated
-		DATA_FILE_EXTENSIONS = DATA_FILE_EXTENSIONS,
-		IMAGE_EXTENSIONS     = IMAGE_EXTENSIONS,
+		DATA_FILE_EXTENSIONS = {unpack(DATA_FILE_EXTENSIONS)},
+		IMAGE_EXTENSIONS     = {unpack(IMAGE_EXTENSIONS)},
 		WEBGEN_VERSION       = WEBGEN_VERSION,
 
 		-- Lua globals.
@@ -314,16 +314,16 @@ local function setup()
 		xpcall         = xpcall,
 
 		next = function(t)
-			if isDataFolderReader(t) then  preloadData(t)  end
+			if     isDataFolderReader(t)   then  preloadData(t)
+			elseif isScriptFolderReader(t) then  preloadScripts(t)  end
 
 			return next(t)
 		end,
 
 		pairs = function(t)
-			if isDataFolderReader(t) then
-				return (pairsSorted(preloadData(t)))
-			end
-			return pairs(t)
+			if isDataFolderReader(t)   then  return pairsSorted(preloadData(t)),    t, nil  end
+			if isScriptFolderReader(t) then  return pairsSorted(preloadScripts(t)), t, nil  end
+			return next, t, nil
 		end,
 
 		-- Lua modules.
@@ -628,8 +628,11 @@ local function setup()
 		end,
 
 		pairsSorted = function(t)
+			if     isDataFolderReader(t)   then  preloadData(t)
+			elseif isScriptFolderReader(t) then  preloadScripts(t)  end
+
 			local pairsSorted_internal = pairsSorted -- :BetterTraceback :BetterNameForRedirectedFunctionInErrorMessage
-			return (pairsSorted_internal(isDataFolderReader(t) and preloadData(t) or t))
+			return (pairsSorted_internal(t))
 		end,
 
 		validateUrls = function(urls)
@@ -658,7 +661,7 @@ local function setup()
 			-- There's no reason to restrict context for this function, I don't think. 2021-04-27
 			local fileInfos = {}
 
-			for _, entry in ipairs(writtenOutputEntries) do
+			for _, entry in ipairs(site._writtenOutputEntries) do
 				table.insert(fileInfos, {
 					sourcePath = entry.path ~= "" and pathToSitePath(entry.path) or "",
 					path       = pathToSitePath(entry.pathOut),
@@ -677,7 +680,7 @@ local function setup()
 			-- Just like getOutputtedFiles(), there's no reason to restrict context for this function, I don't think. 2021-05-18
 			local generatedPages = {}
 
-			for _, page in ipairs(pages) do
+			for _, page in ipairs(site._pages) do
 				if page._isGenerated then
 					table.insert(generatedPages, getProtectionWrapper(page, "page"))
 				end
@@ -773,7 +776,7 @@ local function setup()
 			generateFromTemplateString(page, template, nil, onPageInit)
 
 			if page.isPage.v and not page._isSkipped then
-				table.insert(pages, page)
+				table.insert(site._pages, page)
 			end
 
 			return (getProtectionWrapper(page, "page"))
@@ -818,7 +821,7 @@ local function setup()
 			local dir         = getDirectory(pageCurrent._path)
 			local subpages    = {}
 
-			for _, page in ipairs(pages) do
+			for _, page in ipairs(site._pages) do
 				if (page ~= pageCurrent or allowCurrentPage) and page._path:sub(1, #dir) == dir then
 					if not page._isGenerated then
 						generateFromTemplateFile(page)
@@ -941,7 +944,7 @@ local function setup()
 			v = getContext()._scriptEnvironmentGlobals[k]
 			if v ~= nil then  return v  end
 
-			v = scriptFunctions[k]
+			v = site._scriptFunctions[k]
 			if v then  return v  end
 
 			local basePath = F("%s/%s", DIR_SCRIPTS, k)
@@ -960,12 +963,12 @@ local function setup()
 					errorNoPos("%s did not return a function.", path)
 				end
 
-				scriptFunctions[k] = v
+				site._scriptFunctions[k] = v
 				return v
 
 			elseif isDirectory(basePath) then
-				v                  = newScriptFolderReader(basePath)
-				scriptFunctions[k] = v
+				v                        = newScriptFolderReader(basePath)
+				site._scriptFunctions[k] = v
 				return v
 			end
 
@@ -1002,9 +1005,9 @@ if done      then  return true   end
 local function buildWebsite()
 	local startTime = getTimeBetter()
 
+	_G.site         = newSite()
 	_G.oncePrints   = {}
 	_G.warningCount = 0
-	resetSiteVariables()
 
 	scriptEnvironmentGlobals.site = getProtectionWrapper(site, "site")
 	scriptEnvironmentGlobals.data = newDataFolderReader(DIR_DATA, true)
@@ -1090,35 +1093,35 @@ local function buildWebsite()
 
 	site.redirections.v           = getT("redirections",      site.redirections.v,   "string", "string")
 
-	_G.ignoreFiles                = getA("ignoreFiles",       ignoreFiles,           "string")
-	_G.ignoreFolders              = getA("ignoreFolders",     ignoreFolders,         "string")
-	_G.ignorePaths                = getA("ignorePaths",       ignorePaths,           "string")
+	site._ignoreFiles             = getA("ignoreFiles",       site._ignoreFiles,     "string")
+	site._ignoreFolders           = getA("ignoreFolders",     site._ignoreFolders,   "string")
+	site._ignorePaths             = getA("ignorePaths",       site._ignorePaths,     "string")
 
-	_G.fileTypes                  = getT("types",             fileTypes,             "string", "string")
-	_G.fileProcessors             = getT("processors",        fileProcessors,        "string", "function")
+	site._fileTypes               = getT("types",             site._fileTypes,       "string", "string")
+	site._fileProcessors          = getT("processors",        site._fileProcessors,  "string", "function")
 	local customDataTextParsers   = getT("dataTextParsers",   {},                    "string", "function") -- @Doc
 	local customDataBinaryParsers = getT("dataBinaryParsers", {},                    "string", "function") -- @Doc
 
 	local htaRedirect             = getV("htaccess.redirect", false,                 "boolean")
 	local htaWww                  = getV("htaccess.www",      false,                 "boolean")
-	_G.htaErrors                  = getT("htaccess.errors",   htaErrors,             "number", "string")
+	site._htaErrors               = getT("htaccess.errors",   site._htaErrors,       "number", "string")
 	local htaNoIndexes            = getV("htaccess.noIndexes",false,                 "boolean")
 	local htaPrettyUrlDir         = getV("htaccess.XXX_prettyUrlDirectory", "",      "string")
 	local htaDenyAccess           = getA("htaccess.XXX_denyDirectAccess",   {},      "string")
 	local htaccess                = getT("htaccess",          nil,                   "string")
 	local handleHtaccess          = htaccess ~= nil
 
-	_G.outputPathFormat           = get("rewriteOutputPath", "%s", NOOP)
-	_G.rewriteExcludes            = getA("rewriteExcludes",   rewriteExcludes,       "string")
+	site._outputPathFormat        = get("rewriteOutputPath", "%s", NOOP)
+	site._rewriteExcludes         = getA("rewriteExcludes",   site._rewriteExcludes, "string")
 
 	local onBefore                = getV("before",            nil,                   "function")
 	local onAfter                 = getV("after",             nil,                   "function")
 	local onValidate              = getV("validate",          nil,                   "function")
 
-	_G.autoLockPages              = getV("autoLockPages",     false,                 "boolean")
-	_G.noTrailingSlash            = getV("removeTrailingSlashFromPermalinks", false, "boolean") -- @Doc? @Hack? Also, this affects page.url too now. 2021-04-28
+	site._autoLockPages           = getV("autoLockPages",     site._autoLockPages,   "boolean")
+	site._noTrailingSlash         = getV("removeTrailingSlashFromPermalinks", site._noTrailingSlash, "boolean") -- @Doc? @Hack? Also, this affects page.url too now. 2021-04-28
 
-	_G.redirectionLayout          = getV("redirectionLayout", redirectionLayout,     "string")
+	site._redirectionLayout       = getV("redirectionLayout", site._redirectionLayout, "string")
 
 	for k in pairs(config) do
 		timestampPrintWarning("Unknown config field '%s'.", k)
@@ -1127,12 +1130,12 @@ local function buildWebsite()
 		timestampPrintWarning("Unknown config.htaccess field '%s'.", k)
 	end
 
-	if not isAny(type(outputPathFormat), "string","function") then
+	if not isAny(type(site._outputPathFormat), "string","function") then
 		errorNoPos("config.lua: config.rewriteOutputPath must be a string or a function.")
 	end
 
 	-- Validate config.types
-	for ext, fileType in pairs(fileTypes) do
+	for ext, fileType in pairs(site._fileTypes) do
 		if ext ~= ext:lower() then
 			errorNoPos("config.lua: File extensions must be lower case: config.types[\"%s\"]", ext)
 		elseif not FILE_TYPE_SET[fileType] then
@@ -1141,7 +1144,7 @@ local function buildWebsite()
 	end
 
 	-- Validate config.processors
-	for ext in pairs(fileProcessors) do
+	for ext in pairs(site._fileProcessors) do
 		if ext ~= ext:lower() then
 			errorNoPos("config.lua: File extensions must be lower case: config.processors[\"%s\"]", ext)
 		end
@@ -1201,7 +1204,7 @@ local function buildWebsite()
 	timestampPrint("Generating website...")
 
 	for category in pairs(OUTPUT_CATEGORY_SET) do
-		outputFileCounts[category] = 0
+		site._outputFileCounts[category] = 0
 	end
 
 	if onBefore then
@@ -1216,18 +1219,18 @@ local function buildWebsite()
 	--
 	local nonPagePages = {}
 
-	traverseFiles(DIR_CONTENT, ignoreFolders, function(path, pathRel, filename, extLower)
+	traverseFiles(DIR_CONTENT, site._ignoreFolders, function(path, pathRel, filename, extLower)
 		-- Ignored.
 		if
-			(ignoreFiles[1] and isStringMatchingAnyPattern(filename,                ignoreFiles)) or
-			(ignorePaths[1] and isStringMatchingAnyPattern(pathToSitePath(pathRel), ignorePaths))
+			(site._ignoreFiles[1] and isStringMatchingAnyPattern(filename,                site._ignoreFiles)) or
+			(site._ignorePaths[1] and isStringMatchingAnyPattern(pathToSitePath(pathRel), site._ignorePaths))
 		then
 			-- void
 
 		-- Template.
-		elseif fileTypes[extLower] then
+		elseif site._fileTypes[extLower] then
 			-- Generate these later so e.g. urlExists() works better.
-			local pagesArray = (fileTypes[extLower] == "othertemplate" and nonPagePages or pages)
+			local pagesArray = (site._fileTypes[extLower] == "othertemplate" and nonPagePages or site._pages)
 			table.insert(pagesArray, newPage(pathRel, false))
 
 		-- Special.
@@ -1241,7 +1244,7 @@ local function buildWebsite()
 
 			-- Non-templates should be OK to preserve (if there's no file processor).
 			local oldModTime = (
-				not ignoreModificationTimes and not fileProcessors[extLower]
+				not ignoreModificationTimes and not site._fileProcessors[extLower]
 				and lfs.attributes(DIR_OUTPUT.."/"..pathOutputRel, "modification")
 				or  nil
 			)
@@ -1259,7 +1262,7 @@ local function buildWebsite()
 		generateFromTemplateFile(page)
 	end
 
-	for _, page in ipairs(pages) do
+	for _, page in ipairs(site._pages) do
 		if not (page._isGenerated or page._isSkipped) then
 			generateFromTemplateFile(page)
 		end
@@ -1284,7 +1287,7 @@ local function buildWebsite()
 		allRedirections[url] = targetUrl
 	end
 
-	for _, page in ipairs(pages) do
+	for _, page in ipairs(site._pages) do
 		if page.isPage.v and not page._isSkipped then
 			assert(page._isGenerated)
 
@@ -1322,13 +1325,13 @@ local function buildWebsite()
 
 	-- Validate targets.
 	for url, targetUrl in pairsSorted(allRedirections) do
-		if targetUrl:find"^/" and not writtenOutputUrls[targetUrl] then
+		if targetUrl:find"^/" and not site._writtenOutputUrls[targetUrl] then
 			errorNoPos("Missing target page for redirection: %s -> %s", url, targetUrl)
 		end
 	end
 
 	-- Write redirections.
-	for _, page in ipairs(pages) do
+	for _, page in ipairs(site._pages) do
 		if page.isPage.v and not page._isSkipped then
 			for _, url in ipairs(page.aliases.v) do
 				generateRedirection(url, page.url.v, page._path)
@@ -1340,7 +1343,7 @@ local function buildWebsite()
 		local sourcePath = ""
 
 		if targetUrl:find"^/" then
-			for _, page in ipairs(pages) do
+			for _, page in ipairs(site._pages) do
 				if page.url.v == targetUrl then
 					sourcePath = page._path
 					break
@@ -1368,10 +1371,10 @@ local function buildWebsite()
 			contents = contents.."\nOptions -Indexes\n"
 		end
 
-		if next(htaErrors) then
+		if next(site._htaErrors) then
 			local b = newStringBuilder()
 
-			for errCode, target in pairsSorted(htaErrors) do
+			for errCode, target in pairsSorted(site._htaErrors) do
 				-- The target may be a URL or HTML code.
 				--
 				-- @Incomplete: Does Apache rewrite URLs to error documents? I don't think v2.2 did, but maybe
@@ -1417,11 +1420,11 @@ local function buildWebsite()
 			b("\n")
 		end
 
-		if htaRedirect and (next(writtenRedirects) or next(unwrittenRedirects)) then
+		if htaRedirect and (next(site._writtenRedirects) or next(site._unwrittenRedirects)) then
 			handlingSpecialRedirections = true
 			b("\t# Redirect moved resources.\n")
 
-			for url, targetUrl in pairsSorted(writtenRedirects) do
+			for url, targetUrl in pairsSorted(site._writtenRedirects) do
 				if targetUrl:sub(1, #site.baseUrl.v) == site.baseUrl.v then
 					targetUrl = targetUrl:sub(#site.baseUrl.v) -- Note: We keep the initial '/'.
 				end
@@ -1430,7 +1433,7 @@ local function buildWebsite()
 				b('\tRewriteRule .* "%s" [R=301,L]\n', escapeRuleSub(targetUrl))
 			end
 
-			for url, targetUrl in pairsSorted(unwrittenRedirects) do
+			for url, targetUrl in pairsSorted(site._unwrittenRedirects) do
 				if targetUrl:sub(1, #site.baseUrl.v) == site.baseUrl.v then
 					targetUrl = targetUrl:sub(#site.baseUrl.v) -- Note: We keep the initial '/'.
 				end
@@ -1454,7 +1457,7 @@ local function buildWebsite()
 			b("\n")
 		end
 
-		if noTrailingSlash then
+		if site._noTrailingSlash then
 			b("\t# Remove trailing slash.\n")
 			b("\tRewriteCond %{REQUEST_FILENAME} !-d\n")
 			b("\tRewriteCond %{REQUEST_URI} ./$\n")
@@ -1513,11 +1516,11 @@ local function buildWebsite()
 		writeOutputFile("raw", ".htaccess", "/.htaccess", contents, nil, (fileExisted and ".htaccess" or ""))
 	end--if handleHtaccess
 
-	if not handlingSpecialRedirections and next(unwrittenRedirects) then
-		local count = #getKeys(unwrittenRedirects)
+	if not handlingSpecialRedirections and next(site._unwrittenRedirects) then
+		local count = #getKeys(site._unwrittenRedirects)
 		timestampPrintWarning("%d URL redirection%s could not be satisfied:", count, (count == 1 and "" or "s"))
 
-		for url, targetUrl in pairsSorted(unwrittenRedirects) do
+		for url, targetUrl in pairsSorted(site._unwrittenRedirects) do
 			local s = F("    %s", url, targetUrl)
 			io.stderr:write(s, "\n")
 			log(s)
@@ -1535,7 +1538,7 @@ local function buildWebsite()
 	-- Clean up old generated files and folders
 	--
 	traverseFiles(DIR_OUTPUT, nil, function(path, pathOutputRel, filename, extLower)
-		if not writtenOutputFiles[pathOutputRel] then
+		if not site._writtenOutputFiles[pathOutputRel] then
 			timestampPrintVerbose("Removing: %s", path)
 			assert(os.remove(path))
 		end
@@ -1552,14 +1555,14 @@ local function buildWebsite()
 	local endTime    = getTimeBetter()
 
 	print!(SEPARATOR)
-	printf("Files: %d", outputFileCount)
-	printf("    Pages:           %d  (Skipped: %d)", outputFileCounts["page"], outputFileSkippedPageCount)
-	printf("    OtherTemplates:  %d", outputFileCounts["template"])
+	printf("Files: %d", site._outputFileCount)
+	printf("    Pages:           %d  (Skipped: %d)", site._outputFileCounts["page"], site._outputFileSkippedPageCount)
+	printf("    OtherTemplates:  %d", site._outputFileCounts["template"])
 	printf("    OtherFiles:      %d  (Preserved: %d, %.1f%%)",
-		outputFileCounts["raw"], outputFilePreservedCount,
-		outputFileCounts["raw"] == 0 and 100 or outputFilePreservedCount/outputFileCounts["raw"]*100
+		site._outputFileCounts["raw"], site._outputFilePreservedCount,
+		site._outputFileCounts["raw"] == 0 and 100 or site._outputFilePreservedCount/site._outputFileCounts["raw"]*100
 	)
-	printf("TotalSize: %s", formatBytes(outputFileByteCount))
+	printf("TotalSize: %s", formatBytes(site._outputFileByteCount))
 	printf("Time: %.2f seconds", endTime-startTime)
 	print!(SEPARATOR)
 
@@ -1595,13 +1598,13 @@ if autobuild then
 		end
 
 		local function checkDirectory(dir, silent)
-			traverseDirectory(dir, ignoreFolders, function(path, pathRel, filename, itemType)
+			traverseDirectory(dir, site._ignoreFolders, function(path, pathRel, filename, itemType)
 				if itemType == "directory" then
 					dirTree[path] = -1
 
 				elseif itemType == "file" then
-					if ignoreFiles[1] and isStringMatchingAnyPattern(filename,                ignoreFiles) then  return  end
-					if ignorePaths[1] and isStringMatchingAnyPattern(pathToSitePath(pathRel), ignorePaths) then  return  end
+					if site._ignoreFiles[1] and isStringMatchingAnyPattern(filename,                site._ignoreFiles) then  return  end
+					if site._ignorePaths[1] and isStringMatchingAnyPattern(pathToSitePath(pathRel), site._ignorePaths) then  return  end
 					checkFile(path, silent)
 				end
 

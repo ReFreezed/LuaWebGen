@@ -43,8 +43,8 @@
 	loadImage, getImageDimensions
 	markdownToHtml
 	newDataFolderReader, isDataFolderReader, preloadData
-	newPage
 	newScriptFolderReader, isScriptFolderReader, preloadScripts
+	newSite, newPage
 	newStringBuilder
 	pack
 	pairsSorted
@@ -372,7 +372,7 @@ do
 			local blockI1Trimmed, blockI1, doTrim, blockContentsI1 = template:match(!(NOSPACE"() %s* () {{ (%*?) ()"), pos)
 			if not blockI1 then  break  end
 
-			local autoLock = (autoLockPages and blockI1Trimmed == 1)
+			local autoLock = (site._autoLockPages and blockI1Trimmed == 1)
 			doTrim         = (doTrim == "*")
 			local echoI2   = (doTrim and blockI1Trimmed or blockI1) - 1
 
@@ -737,7 +737,7 @@ do
 	function _G.parseAndRunTemplate(page, path, template, fileType, useCache, onPageInit)
 		if template == "" and not onPageInit then  return ""  end
 
-		fileType = (fileType or fileTypes[page._extension])
+		fileType = (fileType or site._fileTypes[page._extension])
 
 		!local PRINT_RESULT = DEV and 1==0
 		local result
@@ -874,17 +874,17 @@ end
 -- writeOutputFile( category, pathRelative, url, dataString, modificationTime=now, sourcePath )
 function _G.writeOutputFile(category, pathRel, url, data, modTime, sourcePath)
 	local pathOutputRel = rewriteOutputPath(pathRel)
-	if writtenOutputFiles[pathOutputRel] then
+	if site._writtenOutputFiles[pathOutputRel] then
 		errorf("Duplicate output file '%s'.", pathOutputRel)
 	end
-	assert(not writtenOutputUrls[url])
+	assert(not site._writtenOutputUrls[url])
 
 	local filename = getFilename(pathRel)
 	local extLower = getExtension(filename):lower()
 
-	if fileProcessors[extLower] then
+	if site._fileProcessors[extLower] then
 		!PUSH_CONTEXT "none"
-			data = fileProcessors[extLower](data)
+			data = site._fileProcessors[extLower](data)
 		!POP_CONTEXT()
 
 		if type(data) ~= "string" then
@@ -908,26 +908,26 @@ function _G.writeOutputFile(category, pathRel, url, data, modTime, sourcePath)
 		end
 	end
 
-	table.insert(writtenOutputEntries, {path=sourcePath, pathOut=pathOutputRel, url=url})
-	table.insert(writtenOutputFiles,   pathOutputRel)
-	table.insert(writtenOutputUrls,    url)
-	writtenOutputFiles[pathOutputRel] = true
-	writtenOutputUrls[url]            = true
+	table.insert(site._writtenOutputEntries, {path=sourcePath, pathOut=pathOutputRel, url=url})
+	table.insert(site._writtenOutputFiles,   pathOutputRel)
+	table.insert(site._writtenOutputUrls,    url)
+	site._writtenOutputFiles[pathOutputRel] = true
+	site._writtenOutputUrls[url]            = true
 
 	assert(OUTPUT_CATEGORY_SET[category], category)
-	_G.outputFileCount         = outputFileCount            + 1
-	outputFileCounts[category] = outputFileCounts[category] + 1
+	site._outputFileCount            = site._outputFileCount            + 1
+	site._outputFileCounts[category] = site._outputFileCounts[category] + 1
 
-	_G.outputFileByteCount = outputFileByteCount + #data
+	site._outputFileByteCount = site._outputFileByteCount + #data
 end
 
 -- preserveExistingOutputFile( category, pathRelative, url, sourcePath )
 function _G.preserveExistingOutputFile(category, pathRel, url, sourcePath)
 	local pathOutputRel = rewriteOutputPath(pathRel)
-	if writtenOutputFiles[pathOutputRel] then
+	if site._writtenOutputFiles[pathOutputRel] then
 		errorf("Duplicate output file '%s'.", pathOutputRel)
 	end
-	assert(not writtenOutputUrls[url])
+	assert(not site._writtenOutputUrls[url])
 
 	local path = DIR_OUTPUT.."/"..pathOutputRel
 	timestampPrintVerbose("Preserving: %s", path)
@@ -938,18 +938,18 @@ function _G.preserveExistingOutputFile(category, pathRel, url, sourcePath)
 		dataLen = 0
 	end
 
-	table.insert(writtenOutputEntries, {path=sourcePath, pathOut=pathOutputRel, url=url})
-	table.insert(writtenOutputFiles,   pathOutputRel)
-	table.insert(writtenOutputUrls,    url)
-	writtenOutputFiles[pathOutputRel] = true
-	writtenOutputUrls[url]            = true
+	table.insert(site._writtenOutputEntries, {path=sourcePath, pathOut=pathOutputRel, url=url})
+	table.insert(site._writtenOutputFiles,   pathOutputRel)
+	table.insert(site._writtenOutputUrls,    url)
+	site._writtenOutputFiles[pathOutputRel] = true
+	site._writtenOutputUrls[url]            = true
 
 	assert(OUTPUT_CATEGORY_SET[category], category)
-	_G.outputFileCount          = outputFileCount            + 1
-	outputFileCounts[category]  = outputFileCounts[category] + 1
-	_G.outputFilePreservedCount = outputFilePreservedCount   + 1
+	site._outputFileCount            = site._outputFileCount            + 1
+	site._outputFileCounts[category] = site._outputFileCounts[category] + 1
+	site._outputFilePreservedCount   = site._outputFilePreservedCount   + 1
 
-	_G.outputFileByteCount = outputFileByteCount + dataLen
+	site._outputFileByteCount = site._outputFileByteCount + dataLen
 end
 
 
@@ -1543,6 +1543,7 @@ function _G.isDataFolderReader(t)
 	return dataReaderPaths[t] ~= nil
 end
 
+-- dataFolderReader = preloadData( dataFolderReader )
 function _G.preloadData(dataFolderReader)
 	if dataIsPreloaded[dataFolderReader] then  return dataFolderReader  end
 
@@ -1556,8 +1557,8 @@ function _G.preloadData(dataFolderReader)
 				and indexOf(DATA_FILE_EXTENSIONS, getExtension(filename))
 				and (
 					-- Not sure these ignore* checks belong here. Seems like a mistake. 2021-04-27
-					(isFile(path)      --[[and not (ignoreFiles  [1] and isStringMatchingAnyPattern(filename, ignoreFiles  ))]]) or
-					(isDirectory(path) --[[and not (ignoreFolders[1] and isStringMatchingAnyPattern(filename, ignoreFolders))]])
+					(isFile(path)      --[[and not (site._ignoreFiles  [1] and isStringMatchingAnyPattern(filename, site._ignoreFiles  ))]]) or
+					(isDirectory(path) --[[and not (site._ignoreFolders[1] and isStringMatchingAnyPattern(filename, site._ignoreFolders))]])
 				)
 			then
 				local _ = dataFolderReader[basename]
@@ -1621,6 +1622,7 @@ function _G.isScriptFolderReader(t)
 	return scriptReaderPaths[t] ~= nil
 end
 
+-- scriptFolderReader = preloadScripts( scriptFolderReader )
 function _G.preloadScripts(scriptFolderReader)
 	if scriptIsPreloaded[scriptFolderReader] then  return scriptFolderReader  end
 
@@ -1732,12 +1734,12 @@ function _G.generateFromTemplateString(page, template, modTime, onPageInit)
 	if page._isGenerated then
 		errorf(2, "Page has already generated. (%s)", page._path)
 	end
-	if page._isGenerating or pagesGenerating[page._pathOut] then
+	if page._isGenerating or site._pagesGenerating[page._pathOut] then
 		errorf(2, "Recursive page generation detected. (You may want to call lock() in '%s')", page._path)
 	end
 
-	page._isGenerating             = true
-	pagesGenerating[page._pathOut] = true
+	page._isGenerating                   = true
+	site._pagesGenerating[page._pathOut] = true
 
 	local pathRel  = page._path
 	local filename = getFilename(pathRel)
@@ -1756,11 +1758,11 @@ function _G.generateFromTemplateString(page, template, modTime, onPageInit)
 			(page.isDraft.v and not includeDrafts            ) or -- Is draft?
 			(datetimeToTime(page.publishDate:g()) > os.time())    -- Is in future?
 		then
-			page._isSkipped               = true
-			_G.outputFileSkippedPageCount = outputFileSkippedPageCount + 1
+			page._isSkipped                  = true
+			site._outputFileSkippedPageCount = site._outputFileSkippedPageCount + 1
 
-			page._isGenerating             = false
-			pagesGenerating[page._pathOut] = nil
+			page._isGenerating                   = false
+			site._pagesGenerating[page._pathOut] = nil
 			return
 		end
 
@@ -1786,8 +1788,8 @@ function _G.generateFromTemplateString(page, template, modTime, onPageInit)
 	writeOutputFile(page._category, page._pathOut, page.url.v, result, modTime, page._path)
 	page._isGenerated = true
 
-	page._isGenerating             = false
-	pagesGenerating[page._pathOut] = nil
+	page._isGenerating                   = false
+	site._pagesGenerating[page._pathOut] = nil
 end
 
 function _G.generateFromTemplateFile(page)
@@ -1815,26 +1817,26 @@ function _G.generateRedirection(url, targetUrl, sourcePath)
 	end
 
 	if url:find("?", 1, true) or not url:find"/$" then
-		if unwrittenRedirects[url] == targetUrl then
+		if site._unwrittenRedirects[url] == targetUrl then
 			timestampPrintWarning("Duplicate redirect from '%s' to '%s'.", url, targetUrl)
 			return
-		elseif unwrittenRedirects[url] then
+		elseif site._unwrittenRedirects[url] then
 			errorNoPos("Duplicate redirect from '%s' (to different targets).", url)
 		end
 
-		unwrittenRedirects[url] = targetUrl
+		site._unwrittenRedirects[url] = targetUrl
 		return
 	end
 
 	-- @Copypaste from above.
-	if writtenRedirects[url] == targetUrl then
+	if site._writtenRedirects[url] == targetUrl then
 		timestampPrintWarning("Duplicate redirect from '%s' to '%s'.", url, targetUrl)
 		return
-	elseif writtenRedirects[url] then
+	elseif site._writtenRedirects[url] then
 		errorNoPos("Duplicate redirect from '%s' (to different targets).", url)
 	end
 
-	if redirectionLayout ~= "" then
+	if site._redirectionLayout ~= "" then
 		--
 		-- We're doing things a bit backwards here with the page's path
 		-- because we don't have a real source page file and thus no source
@@ -1852,7 +1854,7 @@ function _G.generateRedirection(url, targetUrl, sourcePath)
 		local pathRel = url:gsub("/?$", ".html", 1):gsub("^/", "")
 		local page    = newPage(pathRel, true)
 
-		page.layout.v            = redirectionLayout
+		page.layout.v            = site._redirectionLayout
 		page.redirectionTarget.v = targetUrl
 
 		generateFromTemplateString(page, "", nil, nil) -- The content for this super special page is always empty - we only want to process the layout!
@@ -1883,7 +1885,7 @@ function _G.generateRedirection(url, targetUrl, sourcePath)
 		writeOutputFile("page", pathRel, url, contents, nil, sourcePath)
 	end
 
-	writtenRedirects[url] = targetUrl
+	site._writtenRedirects[url] = targetUrl
 end
 
 
@@ -1932,7 +1934,7 @@ end
 function _G.getLayoutTemplate(page)
 	local path = F("%s/%s.html", DIR_LAYOUTS, page.layout.v)
 
-	local template = layoutTemplates[path]
+	local template = site._layoutTemplates[path]
 	if template then  return template, path  end
 
 	local template, err = getFileContentsText(path)
@@ -1940,7 +1942,7 @@ function _G.getLayoutTemplate(page)
 		errorf("%s: Could not load layout '%s'. (%s)", page._path, page.layout.v, err)
 	end
 
-	layoutTemplates[path] = template
+	site._layoutTemplates[path] = template
 	return template, path
 end
 
@@ -2087,8 +2089,8 @@ do
 		end
 
 		local id = F("%s:%dx%d", pathImageRel, thumbW, thumbH)
-		if thumbnailInfos[id] then
-			return thumbnailInfos[id]
+		if site._thumbnailInfos[id] then
+			return site._thumbnailInfos[id]
 		end
 
 		local filename  = getFilename(pathImageRel)
@@ -2154,7 +2156,7 @@ do
 			writeOutputFile("raw", pathThumbRel, "/"..pathThumbRel, contents, modTimeImage, pathImageRel)
 		end
 
-		thumbnailInfos[id] = thumbInfo
+		site._thumbnailInfos[id] = thumbInfo
 		return thumbInfo
 	end
 
@@ -2187,6 +2189,74 @@ end
 
 
 
+function _G.newSite()
+	return {
+		_readonly = true,
+
+		-- Settings.
+		_ignoreFiles                = {--[[ filenamePattern1, ... ]]},
+		_ignoreFolders              = {--[[ filenamePattern1, ... ]]},
+		_ignorePaths                = {--[[ pathPattern1, ... ]]},
+
+		_fileTypes                  = {["md"]="markdown", ["html"]="html", ["css"]="othertemplate"},
+		_fileProcessors             = {--[[ [extension1]=function(data, sitePath), ... ]]},
+
+		_htaErrors                  = {--[[ [httpStatusCode1]=document1, ... ]]},
+
+		_outputPathFormat           = "%s",
+		_rewriteExcludes            = {--[[ pathPattern1, ... ]]},
+
+		_autoLockPages              = false,
+		_noTrailingSlash            = false,
+
+		_redirectionLayout          = "",
+		--
+
+		-- Other values.
+		_layoutTemplates            = {--[[ [path1]=template1,                         ... ]]},
+		_scriptFunctions            = {--[[ [scriptName1]=function|scriptFolderReader, ... ]]}, -- @Cleanup: Replace this table with a script folder reader.
+
+		_pages                      = {--[[ page1, ... ]]},
+		_pagesGenerating            = {--[[ [pathRelOut1]=true, ... ]]},
+
+		_writtenOutputEntries       = {--[[ { path=pathRel1, pathOut=pathOutputRel1, url=url1 }, ... ]]},
+		_writtenOutputFiles         = {--[[ [pathOutputRel1]=true, pathOutputRel1, ... ]]},
+		_writtenOutputUrls          = {--[[ [url1]=true,           url1,           ... ]]},
+		_writtenRedirects           = {--[[ [url1]=targetUrl1, ... ]]},
+		_unwrittenRedirects         = {--[[ [url1]=targetUrl1, ... ]]}, -- We use this for redirection of special URLs in .htaccess (e.g. URLs with queries).
+		_outputFileCount            = 0,
+		_outputFileCounts           = {--[[ [category1]=count1, ... ]]},
+		_outputFileByteCount        = 0,
+		_outputFilePreservedCount   = 0, -- This should only count raw files. @Cleanup: Maybe rename the variable?
+		_outputFileSkippedPageCount = 0,
+
+		_thumbnailInfos             = {--[[ [thumbIdString1]={ path=thumbPathRel, width=thumbWidth, height=thumbHeight }, ... ]]},
+		--
+
+		title = {
+			v = "",
+			g = function(field)  return field.v  end,
+		},
+		baseUrl = {
+			v = "",
+			g = function(field)  return field.v  end,
+		},
+		languageCode = {
+			v = "",
+			g = function(field)  return field.v  end,
+		},
+		defaultLayout = {
+			v = "page",
+			g = function(field)  return field.v  end,
+		},
+
+		redirections = {
+			v = {--[[ [url1]=targetUrl1, ... ]]},
+			g = function(field)  return field.v  end,
+		},
+	}
+end
+
 do
 	local function removeIndexFilename(pathRel)
 		local sitePath = pathToSitePath(pathRel) :gsub("/index%.%w+$", "/")
@@ -2200,11 +2270,11 @@ do
 		local ext      = getExtension(filename)
 		local extLower = ext:lower()
 
-		if not fileTypes[extLower] then
+		if not site._fileTypes[extLower] then
 			errorf("Invalid template extension '%s'. (You may want to specify config.types[\"%s\"])", extLower, extLower)
 		end
 
-		local isPage  = isAny(fileTypes[extLower], "markdown","html")
+		local isPage  = isAny(site._fileTypes[extLower], "markdown","html")
 		local isIndex = isPage  and getBasename(filename) == "index" and not isRedirection
 		local isHome  = isIndex and pathRel == filename
 
@@ -2222,7 +2292,7 @@ do
 		local isSpecial = (
 			not isPage
 			or isRedirection
-			or attributeWithAny(htaErrors,
+			or attributeWithAny(site._htaErrors,
 				-- Doing all these tests may be overkill. :ApacheErrorDocumentFile
 				"/"..permalinkRel,
 				"/"..pathRelOut,
@@ -2304,11 +2374,11 @@ do
 			},
 
 			url = {
-				v = "/" .. (noTrailingSlash and permalinkRel:gsub("/$", "") or permalinkRel),
+				v = "/" .. (site._noTrailingSlash and permalinkRel:gsub("/$", "") or permalinkRel),
 				g = function(field)  return field.v  end,
 			},
 			permalink = {
-				v = site.baseUrl.v .. (noTrailingSlash and permalinkRel:gsub("/$", "") or permalinkRel),
+				v = site.baseUrl.v .. (site._noTrailingSlash and permalinkRel:gsub("/$", "") or permalinkRel),
 				g = function(field)  return field.v  end,
 			},
 			rssLink = { -- @Incomplete @Doc
@@ -2447,7 +2517,7 @@ function _G.urlExists(url)
 	if not url:find"^/" then
 		errorf(2, "Local URLs must begin with '/'. (%s)", url)
 	end
-	return writtenOutputUrls[url] == true
+	return site._writtenOutputUrls[url] == true
 end
 
 
@@ -2465,12 +2535,12 @@ end
 function _G.rewriteOutputPath(pathRel)
 	local sitePath = pathToSitePath(pathRel)
 
-	for _, pat in ipairs(rewriteExcludes) do
+	for _, pat in ipairs(site._rewriteExcludes) do
 		if sitePath:find(pat) then  return pathRel  end
 	end
 
-	if type(outputPathFormat) == "function" then
-		local sitePathNew = outputPathFormat(sitePath)
+	if type(site._outputPathFormat) == "function" then
+		local sitePathNew = site._outputPathFormat(sitePath)
 
 		if type(sitePathNew) ~= "string" then
 			errorf("config.rewriteOutputPath() did not return a string. (%s)", sitePath)
@@ -2481,7 +2551,7 @@ function _G.rewriteOutputPath(pathRel)
 		return (sitePathToPath(sitePathNew))
 
 	else
-		return (sitePathToPath(F(outputPathFormat, sitePath)))
+		return (sitePathToPath(F(site._outputPathFormat, sitePath)))
 	end
 end
 
