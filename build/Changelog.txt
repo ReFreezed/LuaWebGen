@@ -1,6 +1,18 @@
 Changelog
 LuaWebGen
 
+v1.2 (2021-05-18)
+- Added config.dataTextParsers and config.dataBinaryParsers for defining custom data file parsers.
+- Added getDataTextParsers() and getDataBinaryParsers().
+- Added new XML/HTML parsing module (available through the global object 'xml') to replace the now-removed Penlight+LuaExpat dependency. (The Penlight API still works.)
+- Fixed --autobuild stopping the program if there was an error during the build.
+- The scripts folder can new have subfolders (just like the data folder).
+- Fixed the context being wrong sometimes.
+- All errors now (at least) log the traceback.
+- Improved some parsing error messages.
+- Rewrote/simplified the internal error handling system.
+- Apache/htaccess: Error documents pointing to files are validated at the end of builds.
+
 v1.1 (2021-05-06)
 - Added variant of generateFromTemplate() that takes a page initializer callback function.
 - Added printObject().
