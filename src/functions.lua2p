@@ -43,6 +43,7 @@
 	markdownToHtml
 	newDataFolderReader, isDataFolderReader, preloadData
 	newPage
+	newScriptFolderReader, isScriptFolderReader, preloadScripts
 	newStringBuilder
 	pack
 	pairsSorted
@@ -1558,6 +1559,76 @@ function _G.preloadData(dataFolderReader)
 
 	dataIsPreloaded[dataFolderReader] = true
 	return dataFolderReader
+end
+
+
+
+-- scriptFolderReader = newScriptFolderReader( directory )
+function _G.newScriptFolderReader(dir)
+	local scriptFolderReader = {}
+
+	setmetatable(scriptFolderReader, {
+		__index = function(scriptFolderReader, k)
+			local scriptObj
+
+			if type(k) ~= "string" then
+				return nil
+
+			elseif k == "." or k == ".." then
+				errorf(2, "Bad script key '%s'.", k)
+
+			elseif isFile(F("%s/%s.lua", dir, k)) then
+				local path = F("%s/%s.lua", dir, k)
+
+				-- :ScriptFunctionInit
+				local main_chunk, err = loadfile(path)
+				if not main_chunk then
+					error(err, 2)
+				end
+
+				setfenv(main_chunk, scriptEnvironment)
+				scriptObj = main_chunk()
+				if type(scriptObj) ~= "function" then
+					errorNoPos("%s did not return a function.", path)
+				end
+
+			elseif isDirectory(F("%s/%s", dir, k)) then
+				scriptObj = newScriptFolderReader(F("%s/%s", dir, k))
+
+			else
+				errorf(2, "Bad script path '%s/%s'.", dir, k)
+			end
+
+			assert(scriptObj ~= nil)
+			rawset(scriptFolderReader, k, scriptObj)
+			return scriptObj
+		end,
+	})
+
+	scriptReaderPaths[scriptFolderReader] = dir
+	return scriptFolderReader
+end
+
+function _G.isScriptFolderReader(t)
+	return scriptReaderPaths[t] ~= nil
+end
+
+function _G.preloadScripts(scriptFolderReader)
+	if scriptIsPreloaded[scriptFolderReader] then  return scriptFolderReader  end
+
+	for filename in lfs.dir(scriptReaderPaths[scriptFolderReader]) do
+		if filename:find"%.lua$" then
+			local path     = scriptReaderPaths[scriptFolderReader] .. "/" .. filename
+			local basename = getBasename(filename)
+
+			if not rawget(scriptFolderReader, basename) and isFile(path) then
+				local _ = scriptFolderReader[basename]
+			end
+		end
+	end
+
+	scriptIsPreloaded[scriptFolderReader] = true
+	return scriptFolderReader
 end
 
 

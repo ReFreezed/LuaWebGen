@@ -69,6 +69,8 @@ _G.scriptEnvironmentGlobals = nil
 
 _G.dataReaderPaths     = setmetatable({--[[ [dataFolderReader1]=path1, ... ]]}, {__mode="k"})
 _G.dataIsPreloaded     = setmetatable({--[[ [dataFolderReader1]=true,  ... ]]}, {__mode="k"})
+_G.scriptReaderPaths   = setmetatable({--[[ [scriptFolderReader1]=path1, ... ]]}, {__mode="k"})
+_G.scriptIsPreloaded   = setmetatable({--[[ [scriptFolderReader1]=true,  ... ]]}, {__mode="k"})
 _G.protectionWrappers  = setmetatable({--[[ [object1]=wrapper1, ... ]]}, {__mode="kv"})
 _G.protectionedObjects = setmetatable({--[[ [wrapper1]=object1, ... ]]}, {__mode="kv"})
 
@@ -128,8 +130,8 @@ function _G.resetSiteVariables()
 	_G.redirectionLayout          = ""
 
 	-- Other values.
-	_G.layoutTemplates            = {--[[ [path1]=template1,           ... ]]}
-	_G.scriptFunctions            = {--[[ [scriptName1]=function(...), ... ]]}
+	_G.layoutTemplates            = {--[[ [path1]=template1,                         ... ]]}
+	_G.scriptFunctions            = {--[[ [scriptName1]=function|scriptFolderReader, ... ]]} -- @Cleanup: Replace this table with a script folder reader.
 
 	_G.pages                      = {--[[ page1, ... ]]}
 	_G.pagesGenerating            = {--[[ [pathRelOut1]=true, ... ]]}

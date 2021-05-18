@@ -70,6 +70,6 @@ end
 
 
 
-runTests()
+tests.runTests()
 
 return config

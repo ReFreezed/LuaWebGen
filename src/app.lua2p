@@ -927,9 +927,11 @@ local function setup()
 			v = scriptFunctions[k]
 			if v then  return v  end
 
-			local path = F("%s/%s.lua", DIR_SCRIPTS, k)
+			local basePath = F("%s/%s", DIR_SCRIPTS, k)
+			local path     = basePath..".lua"
 
 			if isFile(path) then
+				-- :ScriptFunctionInit
 				local main_chunk, err = loadfile(path)
 				if not main_chunk then
 					error(err, 2)
@@ -941,6 +943,11 @@ local function setup()
 					errorNoPos("%s did not return a function.", path)
 				end
 
+				scriptFunctions[k] = v
+				return v
+
+			elseif isDirectory(basePath) then
+				v                  = newScriptFolderReader(basePath)
 				scriptFunctions[k] = v
 				return v
 			end

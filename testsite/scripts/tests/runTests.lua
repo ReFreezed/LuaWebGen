@@ -28,8 +28,8 @@ return function()
 
 	--[[ XML module tests.
 	-- require"pl.xml"
-	timerStart("our") ; xmlTests(xml)             ; timerEnd()
-	-- timerStart("pl")  ; xmlTests(require"pl.xml") ; timerEnd()
+	timerStart("our") ; tests.xmlTests(xml)             ; timerEnd()
+	-- timerStart("pl")  ; tests.xmlTests(require"pl.xml") ; timerEnd()
 	--]]
 
 	--[==[ XML parsing.
@@ -73,8 +73,11 @@ return function()
 				<head>
 					<SCRIPT>function bitAnd(a, b) { return a && b; }</SCRIPT>
 				</head>
+
 				<BODY id="foo & bar">
-					<h1 super duper=yes>Hello, world &amp; all bananas!</h1>
+					<h1>Hello, world &&amp; all bananas!</h1>
+					<input type=text disabled>
+
 					<svg width="391" height="391" viewBox="-70.5 -70.5 391 391" foo="">
 						<rect fill="#fff" stroke="#000" x="-70" y="-70" width="390" height="390"/>
 						<g opacity="0.8">
@@ -84,6 +87,7 @@ return function()
 							<line x1="50" y1="50" x2="200" y2="200" stroke="blue" stroke-width="4" />
 						</g>
 					</svg>
+
 					<math>
 						<mi>&pi;</mi>
 						<mo>&InvisibleTimes;</mo>
