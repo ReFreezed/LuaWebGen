@@ -1589,7 +1589,6 @@ function _G.newScriptFolderReader(dir)
 			elseif isFile(F("%s/%s.lua", dir, k)) then
 				local path = F("%s/%s.lua", dir, k)
 
-				-- :ScriptFunctionInit
 				local main_chunk, err = loadfile(path)
 				if not main_chunk then
 					error(err, 2)
@@ -2213,8 +2212,9 @@ function _G.newSite()
 		--
 
 		-- Other values.
-		_layoutTemplates            = {--[[ [path1]=template1,                         ... ]]},
-		_scriptFunctions            = {--[[ [scriptName1]=function|scriptFolderReader, ... ]]}, -- @Cleanup: Replace this table with a script folder reader.
+		_layoutTemplates            = {--[[ [path1]=template1, ... ]]},
+
+		_scripts                    = newScriptFolderReader(DIR_SCRIPTS),
 
 		_pages                      = {--[[ page1, ... ]]},
 		_pagesGenerating            = {--[[ [pathRelOut1]=true, ... ]]},

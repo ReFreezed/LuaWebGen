@@ -944,32 +944,12 @@ local function setup()
 			v = getContext()._scriptEnvironmentGlobals[k]
 			if v ~= nil then  return v  end
 
-			v = site._scriptFunctions[k]
+			v = rawget(site._scripts, k)
 			if v then  return v  end
 
-			local basePath = F("%s/%s", DIR_SCRIPTS, k)
-			local path     = basePath..".lua"
-
-			if isFile(path) then
-				-- :ScriptFunctionInit
-				local main_chunk, err = loadfile(path)
-				if not main_chunk then
-					error(err, 2)
-				end
-
-				setfenv(main_chunk, env)
-				v = main_chunk()
-				if type(v) ~= "function" then
-					errorNoPos("%s did not return a function.", path)
-				end
-
-				site._scriptFunctions[k] = v
-				return v
-
-			elseif isDirectory(basePath) then
-				v                        = newScriptFolderReader(basePath)
-				site._scriptFunctions[k] = v
-				return v
+			local scriptPath = F("%s/%s", DIR_SCRIPTS, k)
+			if isFile(scriptPath..".lua") or isDirectory(scriptPath) then
+				return site._scripts[k] -- Should succeed (unless there's a parsing error or something, of course).
 			end
 
 			errorf(2, "Tried to get non-existent global or script '%s'.", tostring(k))
@@ -1009,8 +989,9 @@ local function buildWebsite()
 	_G.oncePrints   = {}
 	_G.warningCount = 0
 
-	scriptEnvironmentGlobals.site = getProtectionWrapper(site, "site")
-	scriptEnvironmentGlobals.data = newDataFolderReader(DIR_DATA, true)
+	scriptEnvironmentGlobals.site    = getProtectionWrapper(site, "site")
+	scriptEnvironmentGlobals.data    = newDataFolderReader(DIR_DATA, true)
+	scriptEnvironmentGlobals.scripts = site._scripts
 
 
 

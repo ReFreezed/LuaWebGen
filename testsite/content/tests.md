@@ -10,17 +10,17 @@ P.foo = "bar"
 
 Paragraph with [a link](http://foo.example.com/).
 
-Paragraph with [a link]({{url"/relative-link"}}).
+Paragraph with [a link]({{ url"/relative-link" }}).
 
-Paragraph with [a link]({{/relative-link}}).
+Paragraph with [a link]({{ /relative-link }}).
 
-Paragraph with [a link]({{urlAbs"/absolute-link"}}).
+Paragraph with [a link]({{ urlAbs"/absolute-link" }}).
 
-An image: ![the alt]({{/images/head.png}})
+An image: ![the alt]({{ /images/head.png }})
 
-An image < <img src="{{/images/head.png}}"> > inside markdown.
+An image < <img src="{{ /images/head.png }}"> > inside markdown.
 
-An image < {{'<img src="'..url'/images/head.png'..'">'}} > inside markdown.
+An image < {{ '<img src="'..url'/images/head.png'..'">' }} > inside markdown.
 
 {{-- Line comment. {{"nope"}}
 }}
@@ -32,7 +32,7 @@ An image < {{'<img src="'..url'/images/head.png'..'">'}} > inside markdown.
 local localVar = function()end
 -- localVar = globalVar -- Error: Cannot access non-existing globals!
 }}
-{{localVar}}
+{{ localVar }}
 
 {{
 -- function()end -- Error: Invalid expression!
@@ -55,7 +55,7 @@ for i = 1, 3 do
 end
 }}
 
-foo < {{P.foo}} == "baz" > 0? <hr>
+foo < {{ P.foo }} == "baz" > 0? <hr>
 
 Two variations of control structures:
 
@@ -66,6 +66,10 @@ for i = 1, 3 do
 	echo(i)
 end
 }}
+
+{{if(1+2==3)}}
+No spaces.
+{{end}}
 
 {{  if  1+2  ==  3  }}
 Extra spaces.
@@ -112,93 +116,93 @@ Markdown parsing, solution: [Snake!](<https://en.wikipedia.org/wiki/Snake_(video
 
 ## Value Expressions
 
-String: {{"Water"}}
+String: {{ "Water" }}
 
-Operations: {{1+2*3}}
+Operations: {{ 1+2*3 }}
 
-Operations: {{"a-".."-b" -- Inline comment.
+Operations: {{ "a-".."-b" -- Inline comment.
 }}
 
-Operations: {{1 + --[[ Inline comment. ]] 2}}
+Operations: {{ 1 + --[[ Inline comment. ]] 2 }}
 
-Value from function: {{date"%Y-%m-%d"}}
+Value from function: {{ date"%Y-%m-%d" }}
 
-No value from function: {{print("Just a print to console.")}}
+No value from function: {{ print("Just a print to console.") }}
 
-Field: {{page.title}}
+Field: {{ page.title }}
 
-Table: {{site}}
+Table: {{ site }}
 
-Param: {{P.foo}}
+Param: {{ P.foo }}
 
-Text: {{"foo <img>"}}
+Text: {{ "foo <img>" }}
 
-Html: {{"<img>"}}
+Html: {{ "<img>" }}
 
-echo: {{echo('<img src="/images/head.png">')}}
+echo: {{ echo('<img src="/images/head.png">') }}
 
-echoRaw: {{echoRaw('<img src="/images/head.png">')}}
+echoRaw: {{ echoRaw('<img src="/images/head.png">') }}
 
 
 
 ## Control Structures
 
-{{local depth = 0}}
-{{do}}
-{{local depth = 1}}
-{{do}}
-{{local depth = 2}}
-Inner do...end at {{depth}}.
-{{end}}
-Outer do...end at {{depth}}.
-{{end}}
-Outside do...end at {{depth}}.
+{{ local depth = 0 }}
+{{ do }}
+{{ local depth = 1 }}
+{{ do }}
+{{ local depth = 2 }}
+Inner do...end at {{ depth }}.
+{{ end }}
+Outer do...end at {{ depth }}.
+{{ end }}
+Outside do...end at {{ depth }}.
 
-{{local favoriteFruit = "banana"}}
-{{if favoriteFruit == "apple"}}
+{{ local favoriteFruit = "banana" }}
+{{ if favoriteFruit == "apple" }}
 Favorite fruit is apple!
-{{elseif favoriteFruit == "banana"}}
+{{ elseif favoriteFruit == "banana" }}
 Favorite fruit is banana!
-{{else}}
+{{ else }}
 Favorite fruit is neither apple nor banana. :(
-{{end}}
+{{ end }}
 
-{{for i = 1, 3}}
-- For {{i}}
-{{end}}
+{{ for i = 1, 3 }}
+- For {{ i }}
+{{ end }}
 
-{{for 3}}
-- Short form {{i}}
-{{end}}
+{{ for 3 }}
+- Short form {{ i }}
+{{ end }}
 
-{{for < 3}}
-- Backwards {{i}}
-{{end}}
+{{ for < 3 }}
+- Backwards {{ i }}
+{{ end }}
 
-{{local n = 3}}
-{{while n > 0}}
-- Countdown #{{n}}
-{{n = n-1}}
-{{end}}
+{{ local n = 3 }}
+{{ while n > 0 }}
+- Countdown #{{ n }}
+{{ n = n-1 }}
+{{ end }}
 
-{{repeat}}
-{{n = n+1}}
-- Count #{{n}}
-{{until n >= 3}}
+{{ repeat }}
+{{ n = n+1 }}
+- Count #{{ n }}
+{{ until n >= 3 }}
 
 
 
 ## Data
 
 Dogs:
-{{fori dog in data.dogs}}
-- {{i}}: {{dog.name}} (age {{dog.age}})
-{{end}}
+{{ fori dog in data.dogs }}
+- {{ i }}: {{ dog.name }} (age {{ dog.age }})
+{{ end }}
 
 Cats, in reverse:
-{{fori < data.cats.cats}}
-- {{i}}: {{it.name}} (age {{it.age}})
-{{end}}
+{{ fori < data.cats.cats }}
+- {{ i }}: {{ it.name }} (age {{ it.age }})
+{{ end }}
 
 {{ io.write("JSON: ") ; printObject(data.random) }}
 {{ io.write("XML: ")  ; print(data.barf:getFirstElement()) }}
@@ -207,11 +211,11 @@ Cats, in reverse:
 
 ## Scripts
 
-ipsum: {{ipsum()}}
+ipsum: {{ ipsum() }}
 
-echoOgres: {{echoOgres()}}
+echoOgres: {{ scripts.echoOgres() --[[ echoOgres() and scripts.echoOgres() refer to the same script. ]] }}
 
-fullscreenImage: {{fullscreenImage"/images/head.png"}}
+fullscreenImage: {{ fullscreenImage"/images/head.png" }}
 
 
 
