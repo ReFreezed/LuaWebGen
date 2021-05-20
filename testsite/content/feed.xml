@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+	<channel>
+		<title>{{ echo(site.title) }}</title>
+		<link>{{ url(site.baseUrl) }}</link>
+		<atom:link href="{{ url(page.permalink) }}" rel="self" type="application/rss+xml"/>
+		<description>{{ echo(site.description) }}</description>
+		<language>{{ site.languageCode }}</language>
+		<lastBuildDate>{{ os.date"%Y-%m-%d" }}</lastBuildDate>
+
+		{{ fori subpage in clampArray(subpages(), 15) }}
+		<item>
+			<title>{{ echo(subpage.title) }}</title>
+			<description><![CDATA[{{ subpage.description ~= "" and subpage.description or summarize(subpage.content, 400, true) }}]]></description>
+			<pubDate>{{ os.date("!%a, %d %b %Y %H:%M:%S GMT", toTime(subpage.publishDate)) }}</pubDate>
+			<link>{{ url(subpage.permalink) }}</link>
+			<guid>{{ url(subpage.permalink) }}</guid>
+		</item>
+		{{ end }}
+	</channel>
+</rss>

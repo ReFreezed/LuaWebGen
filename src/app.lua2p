@@ -339,6 +339,7 @@ local function setup()
 		-- Lua libraries.
 		json = jsonLib,
 		lfs  = lfs,
+		utf8 = utf8, -- @Doc
 		xml  = xmlLib,
 
 		toml = { -- @Cleanup: Don't use 3rd party TOML library.
@@ -369,9 +370,11 @@ local function setup()
 		generatorMeta    = generatorMeta,
 		getFilename      = getFilename,
 		getKeys          = getKeys,
+		gmatchAndBetween = gmatchAndBetween, -- @Doc
 		indexOf          = indexOf,
 		ipairsr          = ipairsr,
 		isAny            = isAny,
+		isValueHtml      = doesValueLookLikeHtml, -- @Doc
 		markdown         = markdownToHtml,
 		max              = math.max,
 		min              = math.min,
@@ -713,12 +716,140 @@ local function setup()
 			return _dataParsers
 		end,
 
+		-- array = function( array, length ) -- @Doc
+		clampArray = function(t, len)
+			for i = #t, len+1, -1 do
+				t[i] = nil
+			end
+			return t
+		end,
+
+		-- html = summarize( html, maxCharacters [, keepAnchorsAndImages=false ] ) -- @Doc
+		summarize = function(html, maxChars, keepSomeElements)
+			html      = "<div>" .. html .. "</div>"
+			local doc = assert(xmlLib.parseHtml(html))
+			local protected
+
+			-- Protect certain things, like links.
+			if keepSomeElements then
+				protected = {--[[ element1, ... ]]}
+
+				xmlLib.walk(doc, false, function(tag, el)
+					for i, childNode in ipairs(el) do
+						if xmlLib.isText(childNode) then
+							-- void
+
+						elseif childNode.tag == "a" and childNode.attr.href and not childNode.attr.href:find"^javascript:" then
+							table.insert(protected, xmlLib.element("a", {href=childNode.attr.href, childNode:getText()}))
+							el[i] = "$$PLACEHOLDER" .. #protected .. "$$" -- @Robustness: Make sure the string doesn't exist in the original content.
+
+						elseif childNode.tag == "img" and childNode.attr.src then
+							table.insert(protected, xmlLib.element("img", {src=childNode.attr.src, alt=(childNode.attr.alt or "")}))
+							el[i] = "$$PLACEHOLDER" .. #protected .. "$$" -- @Robustness: Make sure the string doesn't exist in the original content.
+						end
+					end
+				end)
+			end
+
+			-- Make the content into a list of paragraphs or similar.
+			for i, childNode in ipairsr(doc) do
+				if xmlLib.isText(childNode) then
+					table.remove(doc, i)
+
+				else
+					if childNode.tag == "ul" or childNode.tag == "ol" then
+						doc[i] = xmlLib.newElement(childNode.tag)
+
+						for li in childNode:eachChildElement() do
+							local text = trim(li:getText():gsub("%s+", " "))
+							table.insert(doc[i], xmlLib.element("li", text))
+						end
+
+					else
+						local text = trim(childNode:getText():gsub("%s+", " "))
+						doc[i]     = xmlLib.element("p", text)
+					end
+
+					if doc[i+1] then  table.insert(doc, i+1, "\n")  end -- Not needed, but it looks nicer.
+				end
+			end
+
+			-- Remove protections.
+			if keepSomeElements then
+				xmlLib.walk(doc, true, function(tag, el)
+					for i, childNode in ipairsr(el) do
+						if xmlLib.isText(childNode) and childNode:find("$$PLACEHOLDER", 1, true) then
+							local newNodes = {}
+
+							for pos, isMatch, textOrProtIndex in gmatchAndBetween(childNode, "%$%$PLACEHOLDER(%d+)%$%$") do
+								if isMatch then
+									table.insert(newNodes, protected[tonumber(textOrProtIndex)])
+								else
+									table.insert(newNodes, textOrProtIndex)
+								end
+							end
+
+							table.remove(el, i)
+
+							for _, node in ipairsr(newNodes) do
+								table.insert(el, i, node)
+							end
+						end
+					end
+				end)
+			end
+
+			-- Limit text length.
+			local charsRemaining = maxChars
+			local hasText        = {}
+
+			local function limit(node, parentEl, i)
+				if charsRemaining <= 0 then
+					parentEl[i] = ""
+
+				elseif xmlLib.isText(node) then
+					hasText[parentEl] = true
+					local len         = utf8.getLength(node)
+					charsRemaining    = charsRemaining - len
+
+					if charsRemaining < 0 then
+						!local ELLIPSIS    = "(...)"
+						local  nextCharPos = #node + 1
+
+						for i = charsRemaining, !(#ELLIPSIS-1) do
+							nextCharPos = utf8.getStartOfCharacter(node, nextCharPos-1)
+
+							if not nextCharPos then
+								nextCharPos = 1
+								break
+							end
+						end
+
+						parentEl[i] = node:sub(1, nextCharPos-1) .. !(ELLIPSIS)
+					end
+
+				else
+					for i, childNode in ipairs(node) do
+						limit(childNode, node, i)
+					end
+
+					if hasText[node] and parentEl then
+						hasText[parentEl] = true
+					end
+				end
+			end
+
+			limit(doc, nil, nil)
+
+			return (doc:contentsToHtml())
+		end,
+
 		-- Context functions.
 		----------------------------------------------------------------
 
-		echo = function(s)
+		echo = function(v)
 			assertContext("template", "echo")
-			s = tostringForTemplates(s)
+			local s = tostringForTemplates(v)
 
 			local ctx = getContext"template"
 			if ctx.enableHtmlEncoding then
@@ -731,6 +862,17 @@ local function setup()
 		echoRaw = function(s)
 			assertContext("template", "echoRaw")
 			table.insert(getContext"template".out, tostringForTemplates(s))
+		end,
+
+		echoSmart = function(v) -- @Doc
+			assertContext("template", "echoSmart")
+			if v == nil then
+				-- void  Echo nothing.
+			elseif doesValueLookLikeHtml(v) then
+				scriptEnvironmentGlobals.echoRaw(v)
+			else
+				scriptEnvironmentGlobals.echo(v)
+			end
 		end,
 
 		echof = function(s, ...)
@@ -928,6 +1070,7 @@ local function setup()
 	-- These functions are used by metaprograms.
 	scriptEnvironmentGlobals.echo__        = scriptEnvironmentGlobals.echo
 	scriptEnvironmentGlobals.echoRaw__     = scriptEnvironmentGlobals.echoRaw
+	scriptEnvironmentGlobals.echoSmart__   = scriptEnvironmentGlobals.echoSmart
 	scriptEnvironmentGlobals.fori__        = ipairs
 	scriptEnvironmentGlobals.foriReverse__ = ipairsr
 	scriptEnvironmentGlobals.lock__        = scriptEnvironmentGlobals.lock
@@ -1067,10 +1210,11 @@ local function buildWebsite()
 		)
 	end
 
-	site.title.v                  = getV("title",             "",                    "string")
-	site.baseUrl.v                = getV("baseUrl",           "",                    "string")
-	site.languageCode.v           = getV("languageCode",      "",                    "string")
-	site.defaultLayout.v          = getV("defaultLayout",     "page",                "string")
+	site.title.v                  = getV("title",             site.title.v,          "string")
+	site.description.v            = getV("description",       site.description.v,    "string")
+	site.baseUrl.v                = getV("baseUrl",           site.baseUrl.v,        "string")
+	site.languageCode.v           = getV("languageCode",      site.languageCode.v,   "string")
+	site.defaultLayout.v          = getV("defaultLayout",     site.defaultLayout.v,  "string")
 
 	site.redirections.v           = getT("redirections",      site.redirections.v,   "string", "string")
 
@@ -1080,8 +1224,8 @@ local function buildWebsite()
 
 	site._fileTypes               = getT("types",             site._fileTypes,       "string", "string")
 	site._fileProcessors          = getT("processors",        site._fileProcessors,  "string", "function")
-	local customDataTextParsers   = getT("dataTextParsers",   {},                    "string", "function") -- @Doc
-	local customDataBinaryParsers = getT("dataBinaryParsers", {},                    "string", "function") -- @Doc
+	local customDataTextParsers   = getT("dataTextParsers",   {},                    "string", "function")
+	local customDataBinaryParsers = getT("dataBinaryParsers", {},                    "string", "function")
 
 	local htaRedirect             = getV("htaccess.redirect", false,                 "boolean")
 	local htaWww                  = getV("htaccess.www",      false,                 "boolean")
@@ -1211,7 +1355,7 @@ local function buildWebsite()
 		-- Template.
 		elseif site._fileTypes[extLower] then
 			-- Generate these later so e.g. urlExists() works better.
-			local pagesArray = (site._fileTypes[extLower] == "othertemplate" and nonPagePages or site._pages)
+			local pagesArray = ((site._fileTypes[extLower] == "markdown" or site._fileTypes[extLower] == "html") and site._pages or nonPagePages)
 			table.insert(pagesArray, newPage(pathRel, false))
 
 		-- Special.

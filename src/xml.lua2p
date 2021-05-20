@@ -28,8 +28,8 @@
 	xml.parseXml, xml.parseHtml
 	xml.removeWhitespaceNodes
 	xml.substitute
-	xml.toHtml
-	xml.toXml, xml.toPrettyXml
+	xml.toHtml, xml.contentsToHtml
+	xml.toXml, xml.toPrettyXml, xml.contentsToXml
 	xml.walk
 
 	Element.addChild
@@ -43,8 +43,8 @@
 	Element.match, Element.substitute
 	Element.removeWhitespaceNodes
 	Element.stackChild, Element.stackElement, Element.stackText, Element.stackUp, Element.stackReset
-	Element.toHtml
-	Element.toXml, Element.toPrettyXml
+	Element.toHtml, Element.contentsToHtml
+	Element.toXml, Element.toPrettyXml, Element.contentsToXml
 
 --============================================================]]
 
@@ -183,7 +183,7 @@ local function decodeEntities(s, pos, sForError, posOffsetForError, pathForError
 				pos = i2 + 1
 
 				local cp = tonumber(cpStr, 16)
-				@@INSERT(codepointToUtf8(cp))
+				@@INSERT(utf8.codepointToString(cp))
 
 			-- Entity, decimal number.
 			elseif s:find("^#", pos) then
@@ -196,7 +196,7 @@ local function decodeEntities(s, pos, sForError, posOffsetForError, pathForError
 				pos = i2 + 1
 
 				local cp = tonumber(cpStr, 10)
-				@@INSERT(codepointToUtf8(cp))
+				@@INSERT(utf8.codepointToString(cp))
 
 			-- Entity, name.
 			else
@@ -1105,6 +1105,22 @@ function xml.toXml(node, preface)
 end
 Element.toXml = xml.toXml -- :Alias
 
+-- xmlString = xml.contentsToXml( node ) -- @Doc
+function xml.contentsToXml(node)
+	local buffer = {}
+
+	if !!(IS_TEXT`node`) then
+		nodeToXml(buffer, node)
+	else
+		for _, childNode in ipairs(node) do
+			nodeToXml(buffer, childNode)
+		end
+	end
+
+	return table.concat(buffer, "")
+end
+Element.contentsToXml = xml.contentsToXml -- :Alias
+
 
 
 local function nodeToXmlPretty(buffer, node, initialIndent,indent,attrIndent, indentTags)
@@ -1270,6 +1286,22 @@ function xml.toHtml(node, preface)
 end
 Element.toHtml = xml.toHtml -- :Alias
 
+-- htmlString = xml.contentsToHtml( node ) -- @Doc
+function xml.contentsToHtml(node)
+	local buffer = {}
+
+	if !!(IS_TEXT`node`) then
+		nodeToHtml(buffer, node)
+	else
+		for _, childNode in ipairs(node) do
+			nodeToHtml(buffer, childNode)
+		end
+	end
+
+	return table.concat(buffer, "")
+end
+Element.contentsToHtml = xml.contentsToHtml -- :Alias
+
 
 
 -- document = xml.parseXml( xmlString [, filePathForError ] )
@@ -1402,19 +1434,29 @@ end
 
 
 local function _walk(doc, depthFirst, cb)
-	if not depthFirst then  cb(doc.tag, doc)  end
-
-	for _, childNode in ipairs(doc) do
-		if xml.isElement(childNode) then
-			_walk(childNode, depthFirst, cb)
+	if not depthFirst then
+		local action = cb(doc.tag, doc)
+		if     not action                 then  -- void
+		elseif action == "stop"           then  return "stop"
+		elseif action == "ignorechildren" then  return
 		end
 	end
 
-	if depthFirst then  cb(doc.tag, doc)  end
+	for _, childNode in ipairs(doc) do
+		if xml.isElement(childNode) then
+			if _walk(childNode, depthFirst, cb) == "stop" then  return "stop"  end
+		end
+	end
+
+	if depthFirst then
+		if cb(doc.tag, doc) == "stop" then  return "stop"  end
+	end
 end
 
 -- xml.walk( document, depthFirst, callback )
--- callback = function( tag, element )
+-- traversalAction = callback( tag, element )
+-- traversalAction = "stop"|"ignorechildren"|nil
+-- If depthFirst is true then returning "ignorechildren" does nothing.
 function xml.walk(doc, depthFirst, cb)
 	!ARGS "doc:table depthFirst:boolean cb:function"
 	_walk(doc, depthFirst, cb)

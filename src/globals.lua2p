@@ -29,7 +29,7 @@ _G.AUTOBUILD_MIN_INTERVAL = 1.00
 
 -- Constants.
 
-_G.FILE_TYPE_SET       = {["markdown"]=true, ["html"]=true, ["othertemplate"]=true}
+_G.FILE_TYPE_SET       = {["markdown"]=true, ["html"]=true, ["xml"]=true, ["othertemplate"]=true}
 _G.OUTPUT_CATEGORY_SET = {["page"]=true, ["template"]=true, ["raw"]=true}
 
 _G.DATA_FILE_EXTENSIONS = {"json","lua","toml","xml"}
@@ -48,6 +48,7 @@ _G.jsonLib     = require"json"
 _G.markdownLib = require"markdown"
 _G.tomlLib     = require"toml"
 _G.urlLib      = require"url"
+_G.utf8        = require"utf8"
 _G.xmlLib      = require"xml"
 
 

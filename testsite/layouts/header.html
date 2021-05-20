@@ -1,24 +1,22 @@
 <!DOCTYPE html>
-<html lang="{{site.languageCode}}">
+<html lang="{{ site.languageCode }}">
 
 <head>
 	<meta charset="utf-8">
 
 	<meta name="viewport" content="width=device-width, initial-scale=1">
-	{{generatorMeta()}}
+	{{ generatorMeta() }}
 
 	<title>
-		{{page.title ~= "" and page.title.." |" or ""}}
-		{{site.title}}
+		{{ page.title ~= "" and page.title.." |" or "" }}
+		{{ site.title }}
 	</title>
 
-	<link rel="canonical" href="{{page.permalink}}">
+	<link rel="canonical" href="{{ page.permalink }}">
 
-	{{if page.rssLink ~= ""}}
-		<link href="{{page.rssLink}}" rel="alternate" type="application/rss+xml" title="{{page.title}}">
-	{{end}}
+	<link rel="alternate" type="application/rss+xml" href="{{ site.baseUrl.."feed.rss" }}" title="{{ site.title }}">
 
-	<link rel="stylesheet" href="{{/css/style.css}}">
+	<link rel="stylesheet" href="{{ /css/style.css }}">
 
 	<style>
 		img { border: 5px dotted red; }
@@ -27,9 +25,9 @@
 	<script>
 		console.log("Hello & have a good day!")
 
-		{{for i = 1, 3}}
-			console.log("Test <{{i}}>")
-		{{end}}
+		{{ for i = 1, 3 }}
+			console.log("Test number {{ i }}!")
+		{{ end }}
 	</script>
 
 </head>

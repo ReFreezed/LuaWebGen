@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+	{{ fori subpage in subpages() }}
+	<url>
+		<loc>{{ url(subpage.permalink) }}</loc>
+		<lastmod>{{ os.date("%Y-%m-%d", toTime(subpage.dateModified)) }}</lastmod>
+		<changefreq>daily</changefreq>
+		<priority>0.5</priority>
+	</url>
+	{{ end }}
+</urlset>

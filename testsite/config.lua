@@ -36,6 +36,7 @@ end
 -- Before regular generation.
 local dogPageTemplate = [[
 {{
+page.date  = "2012-01-14"
 page.title = "A Dog of Mine: "..P.dog.name
 }}
 

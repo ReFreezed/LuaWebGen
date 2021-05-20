@@ -89,7 +89,7 @@ local function parseString(s, path, pos)
 				if not hex then
 					fileError(path, s, pos, "Expected four hexadecimal digits.")
 				end
-				codepointToUtf8(tonumber(hex, 16), parts)
+				utf8.codepointToString(tonumber(hex, 16), parts)
 				pos = pos + 4
 
 			else

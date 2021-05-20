@@ -13,12 +13,11 @@
 	assert
 	attributeWith, attributeWithAny
 	cleanupPath
-	codepointToUtf8
 	countString, countSubString
 	createDirectory, isDirectoryEmpty, removeEmptyDirectories
 	createThumbnail
 	datetimeToTime, getDatetime
-	encodeHtmlEntities
+	encodeHtmlEntities, markdownToHtml, doesValueLookLikeHtml
 	error, errorf, fileError, errorNoPos
 	F, formatBytes, formatTemplate
 	generateFromTemplateString, generateFromTemplateFile, generateRedirection
@@ -32,6 +31,7 @@
 	getProtectionWrapper
 	getTimeBetter, sleep
 	getTimezone, getTimezoneOffsetString, getTimezoneOffset
+	gmatchAndBetween
 	gsubPlainSub
 	htaccessRewriteEscapeTestString, htaccessRewriteEscapeCondPattern, htaccessRewriteEscapeRuleSubstitution
 	indexOf, itemWith, itemWithAll
@@ -41,7 +41,6 @@
 	isFile, isDirectory
 	isStringMatchingAnyPattern
 	loadImage, getImageDimensions
-	markdownToHtml
 	newDataFolderReader, isDataFolderReader, preloadData
 	newScriptFolderReader, isScriptFolderReader, preloadScripts
 	newSite, newPage
@@ -172,7 +171,7 @@ do
 		-- Note: echo() and echoRaw() do the same thing in e.g. CSS files, so we
 		-- can output the same code here no matter what file is being processed.
 		-- It is a thing we can optimize though. @Speed
-		local doBlock = F("do  local v = (%s)  if type__(v) == 'string' and v:find'^%%s*<[!%%a/].*>%%s*$' then  echoRaw__(v)  elseif v ~= nil then  echo__(v)  end end ", luaCode)
+		local doBlock = F("echoSmart__(%s)", luaCode)
 		if not loadstring(doBlock) then  return false  end
 
 		table.insert(out, doBlock)
@@ -685,7 +684,7 @@ do
 
 				createDirectory("temp/meta")
 
-				local file     = assert(io.open(metaPath, "wb"))
+				local file = assert(io.open(metaPath, "wb"))
 				file:write(luaCode)
 				file:close()
 			end
@@ -752,6 +751,11 @@ do
 			result = _parseAndRunTemplate(page, path, template, useCache, onPageInit, true)
 			result = trimNewlines(result).."\n" -- :Beautify
 			!if PRINT_RESULT then  __LUA` print"-- HTML --" print(result) print"-- /HTML --" `  end
+
+		elseif fileType == "xml" then
+			result = _parseAndRunTemplate(page, path, template, useCache, onPageInit, true)
+			result = trimNewlines(result).."\n" -- :Beautify
+			!if PRINT_RESULT then  __LUA` print"-- XML --" print(result) print"-- /XML --" `  end
 
 		else
 			result = _parseAndRunTemplate(page, path, template, useCache, onPageInit, false)
@@ -1364,17 +1368,17 @@ do
 			return
 		end
 
-		local obj = protectionedObjects[t]
-		if obj then
+		if protectionedObjects[t] then
 			local fields = {}
 
-			for k, field in pairs(obj) do
+			for k, field in pairs(protectionedObjects[t]) do
 				if not k:find"^_" then
 					fields[k] = (field.g or NOOP)(field)
 				end
 			end
 
-			return (formatValue(fields, out, isDeep--[[, errLevel]]))
+			formatValue(fields, out, isDeep--[[, errLevel]])
+			return
 		end
 
 		local keys = {}
@@ -1774,7 +1778,7 @@ function _G.generateFromTemplateString(page, template, modTime, onPageInit)
 			local layoutTemplate, layoutPath = getLayoutTemplate(page)
 			result                           = parseAndRunTemplate(page, layoutPath, layoutTemplate, "html", true, nil)
 
-			page.content.v = "" -- We don't need this anymore.
+			-- page.content.v = "" -- We don't need this anymore. (Actually, things like RSS feeds do!)
 		end
 
 	else
@@ -1800,7 +1804,7 @@ function _G.generateFromTemplateFile(page)
 	local modTime  = lfs.attributes(path, "modification")
 
 	if modTime then
-		page.date.v = getDatetime(modTime) -- Default value.
+		page.date.v = getDatetime(modTime) -- Default value. Also affects dateModified and publishDate if those fields aren't updated by the user.
 	end
 
 	generateFromTemplateString(page, template, modTime, nil)
@@ -1916,10 +1920,12 @@ end
 -- html = encodeHtmlEntities( text )
 _G.encodeHtmlEntities = xmlLib.encodeRequiredEntities
 
-
-
 -- html = markdownToHtml( markdown )
 _G.markdownToHtml = markdownLib
+
+function _G.doesValueLookLikeHtml(v)
+	return type(v) == "string" and v:find!(NOSPACE"^ %s* < [!%a/] .* > %s* $") ~= nil
+end
 
 
 
@@ -2197,7 +2203,7 @@ function _G.newSite()
 		_ignoreFolders              = {--[[ filenamePattern1, ... ]]},
 		_ignorePaths                = {--[[ pathPattern1, ... ]]},
 
-		_fileTypes                  = {["md"]="markdown", ["html"]="html", ["css"]="othertemplate"},
+		_fileTypes                  = {["md"]="markdown", ["html"]="html", ["xml"]="xml", ["css"]="othertemplate"},
 		_fileProcessors             = {--[[ [extension1]=function(data, sitePath), ... ]]},
 
 		_htaErrors                  = {--[[ [httpStatusCode1]=document1, ... ]]},
@@ -2234,6 +2240,10 @@ function _G.newSite()
 		--
 
 		title = {
+			v = "",
+			g = function(field)  return field.v  end,
+		},
+		description = { -- @Doc
 			v = "",
 			g = function(field)  return field.v  end,
 		},
@@ -2332,10 +2342,15 @@ do
 				g = function(field)  return field.v  end,
 				s = function(field, layoutName)  field.v = layoutName  end,
 			},
-			title = {
+			title = { -- All pages should update this!
 				v = "",
 				g = function(field)  return field.v  end,
 				s = function(field, title)  field.v = title  end,
+			},
+			description = { -- @Doc
+				v = "",
+				g = function(field)  return field.v  end,
+				s = function(field, description)  field.v = description  end,
 			},
 			content = {
 				v = "",
@@ -2347,14 +2362,15 @@ do
 				g = function(field)  return field.v  end,
 				s = function(field, datetime)  field.v = datetime  end,
 			},
+			dateModified = { -- This field currently isn't used anywhere internally - it just exists for the user's convenience. 2021-05-19
+				v = "",
+				g = function(field)  return field.v ~= "" and field.v or page.date.v  end,
+				s = function(field, datetime)  field.v = datetime  end,
+			},
 			publishDate = {
 				v = "",
 				g = function(field)  return field.v ~= "" and field.v or page.date.v  end,
-				s = function(field, datetime)
-					assertContext("template", "publishDate", 3)
-					!ARGS "datetime:string"
-					field.v = datetime
-				end,
+				s = function(field, datetime)  field.v = datetime  end,
 			},
 			isDraft = {
 				v = false,
@@ -2379,10 +2395,6 @@ do
 			},
 			permalink = {
 				v = site.baseUrl.v .. (site._noTrailingSlash and permalinkRel:gsub("/$", "") or permalinkRel),
-				g = function(field)  return field.v  end,
-			},
-			rssLink = { -- @Incomplete @Doc
-				v = "",
 				g = function(field)  return field.v  end,
 			},
 			redirectionTarget = {
@@ -2815,66 +2827,63 @@ end
 
 
 
-local byteToString = string.char
-local tableInsert  = table.insert
+do
+	-- for isMatch, position, match1, ... in gmatchAndBetween( string, pattern )
+	-- If isMatch is false then match1 is the string between the last match and the next. (This string will never be empty.)
+	function _G.gmatchAndBetween(s, pat)
+		local nextPos = 1
+		local i1, i2  = nil
 
--- string = codepointToUtf8( cp )
--- codepointToUtf8( cp, outputBuffer )
-function _G.codepointToUtf8(cp, buffer)
-	if cp < 0 or cp > 0x10ffff then
-		errorf("Codepoint %d is outside the valid range (0..10FFFF).", cp)
+		return function()
+			if nextPos > #s then  return  end
+
+			local pos = nextPos
+
+			if not i1 then
+				i1, i2 = s:find(pat, pos)
+				i1     = i1 or #s+1
+			end
+
+			if i1 == pos then
+				nextPos = math.max(i2, pos) + 1
+				i1      = nil
+				return pos, true, s:match(pat, pos)
+			else
+				nextPos = i1
+				-- Cache i1 for the next call.
+				return pos, false, s:sub(pos, nextPos-1)
+			end
+		end
 	end
 
-	if cp >= 128 then
-		-- void
-	elseif buffer then
-		tableInsert(buffer, byteToString(cp))
-		return
-	else
-		return byteToString(cp)
+	--[[ TEST
+	!local FOR    = "local i = 0 ; for"
+	!local ASSERT = "i = i+1 ; assert(i < 10)"
+
+	!!(FOR) pos, isMatch, s in gmatchAndBetween("Hello foofoo! How's the foobar?", "foo") do
+		print("1>", pos, isMatch, s)
+		!!(ASSERT)
+	end
+	!!(FOR) pos, isMatch, s in gmatchAndBetween("foo", "foo") do
+		print("2>", pos, isMatch, s)
+		!!(ASSERT)
+	end
+	!!(FOR) pos, isMatch, s in gmatchAndBetween("f", "foo") do
+		print("3>", pos, isMatch, s)
+		!!(ASSERT)
+	end
+	!!(FOR) pos, isMatch, s in gmatchAndBetween("", "foo") do
+		print("4>", pos, isMatch, s)
+		assert(false)
+	end
+	!!(FOR) pos, isMatch, s in gmatchAndBetween("foo", "f?") do
+		print("5>", pos, isMatch, s)
+		!!(ASSERT)
 	end
 
-	local suffix = cp % 64
-	local c4     = 128 + suffix
-	cp           = (cp - suffix) / 64
-
-	if cp >= 32 then
-		-- void
-	elseif buffer then
-		tableInsert(buffer, byteToString(192+cp))
-		tableInsert(buffer, byteToString(c4))
-		return
-	else
-		return byteToString(192+cp, c4) -- @Speed @Memory
-	end
-
-	suffix   = cp % 64
-	local c3 = 128 + suffix
-	cp       = (cp - suffix) / 64
-
-	if cp >= 16 then
-		-- void
-	elseif buffer then
-		tableInsert(buffer, byteToString(224+cp))
-		tableInsert(buffer, byteToString(c3))
-		tableInsert(buffer, byteToString(c4))
-		return
-	else
-		return byteToString(224+cp, c3, c4) -- @Speed @Memory
-	end
-
-	suffix = cp % 64
-	cp     = (cp - suffix) / 64
-
-	if buffer then
-		tableInsert(buffer, byteToString(240+cp))
-		tableInsert(buffer, byteToString(128+suffix))
-		tableInsert(buffer, byteToString(c3))
-		tableInsert(buffer, byteToString(c4))
-		return
-	else
-		return byteToString(240+cp, 128+suffix, c3, c4) -- @Speed @Memory
-	end
+	print("DONE")
+	os.exit(2)
+	--]]
 end
 
 
