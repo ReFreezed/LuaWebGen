@@ -964,7 +964,13 @@ local function setup()
 			local subpages    = {}
 
 			for _, page in ipairs(site._pages) do
-				if (page ~= pageCurrent or allowCurrentPage) and page._path:sub(1, #dir) == dir then
+				if (page ~= pageCurrent or allowCurrentPage) and (
+					dir == ""
+					or (
+						page._path:byte(#dir+1) == !(string.byte"/") and
+						page._path:find(dir, 1, true) == 1
+					)
+				) then
 					if not page._isGenerated then
 						generateFromTemplateFile(page)
 					end
