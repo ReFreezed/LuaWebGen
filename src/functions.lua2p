@@ -2270,7 +2270,7 @@ end
 do
 	local function removeIndexFilename(pathRel)
 		local sitePath = pathToSitePath(pathRel) :gsub("/index%.%w+$", "/")
-		return sitePathToPath(sitePath)
+		return (sitePathToPath(sitePath, 2))
 	end
 
 	function _G.newPage(pathRel, isRedirection)
@@ -2425,9 +2425,11 @@ function _G.pathToSitePath(pathRel)
 	return "/"..pathRel
 end
 
-function _G.sitePathToPath(sitePath)
+-- sitePathToPath( sitePath, errorLevel=1 )
+function _G.sitePathToPath(sitePath, errLevel)
 	if not sitePath:find"^/" then
-		errorf(2, "Path is not a valid site path - they must start with '/': %s", sitePath)
+		errLevel = 1 + (errLevel or 1)
+		errorf(errLevel, "Path is not a valid site path - they must start with '/': %s", sitePath)
 	end
 	return (sitePath:gsub("^/", ""))
 end
@@ -2560,10 +2562,10 @@ function _G.rewriteOutputPath(pathRel)
 			errorf("config.rewriteOutputPath() returned an empty string. (%s)", sitePath)
 		end
 
-		return (sitePathToPath(sitePathNew))
+		return (sitePathToPath(sitePathNew, 2))
 
 	else
-		return (sitePathToPath(F(site._outputPathFormat, sitePath)))
+		return (sitePathToPath(F(site._outputPathFormat, sitePath), 2))
 	end
 end
 

@@ -398,7 +398,7 @@ local function setup()
 		urlize           = urlize,
 
 		chooseExistingFile = function(sitePathWithoutExt, exts)
-			local pathWithoutExt = sitePathToPath(sitePathWithoutExt)
+			local pathWithoutExt = sitePathToPath(sitePathWithoutExt, 2)
 
 			for _, ext in ipairs(exts) do
 				local pathRel = pathWithoutExt.."."..ext
@@ -413,12 +413,12 @@ local function setup()
 		end,
 
 		fileExists = function(sitePath)
-			local pathRel = sitePathToPath(sitePath)
+			local pathRel = sitePathToPath(sitePath, 2)
 			return (isFile(DIR_CONTENT.."/"..pathRel))
 		end,
 
 		fileExistsInOutput = function(sitePath, skipRewriting)
-			local pathRel       = sitePathToPath(sitePath)
+			local pathRel       = sitePathToPath(sitePath, 2)
 			local pathOutputRel = skipRewriting and pathRel or rewriteOutputPath(pathRel)
 			return (isFile(DIR_OUTPUT.."/"..pathOutputRel))
 		end,
@@ -503,7 +503,7 @@ local function setup()
 				thumbH, isLink = 0, thumbH
 			end
 
-			local pathImageRel = sitePathToPath(sitePathImageRel)
+			local pathImageRel = sitePathToPath(sitePathImageRel, 2)
 			local thumbInfo    = createThumbnail(pathImageRel, thumbW, thumbH, 2)
 			local thumbUrl     = toUrl("/"..thumbInfo.path)
 
@@ -582,7 +582,7 @@ local function setup()
 				onlyFilenames, filter = false, onlyFilenames
 			end
 
-			local pathRel = sitePathToPath(sitePath)
+			local pathRel = sitePathToPath(sitePath, 2)
 			local dirPath = pathRel == "" and DIR_CONTENT or DIR_CONTENT.."/"..pathRel
 			local sitePaths = {}
 
@@ -625,7 +625,7 @@ local function setup()
 		end,
 
 		getCompleteOutputPath = function(sitePath)
-			local pathRel       = sitePathToPath(sitePath)
+			local pathRel       = sitePathToPath(sitePath, 2)
 			local pathOutputRel = rewriteOutputPath(pathRel)
 			return DIR_OUTPUT.."/"..pathOutputRel
 		end,
@@ -656,7 +656,7 @@ local function setup()
 
 		getImageDimensions = function(sitePath)
 			local getImageDimensions_internal = getImageDimensions -- :BetterTraceback :BetterNameForRedirectedFunctionInErrorMessage
-			local wOrNil, hOrErr              = getImageDimensions_internal(sitePathToPath(sitePath))
+			local wOrNil, hOrErr              = getImageDimensions_internal(sitePathToPath(sitePath, 2))
 			return wOrNil, hOrErr
 		end,
 
@@ -907,7 +907,7 @@ local function setup()
 			assertContext("config", "generateFromTemplate")
 			!ARGS "sitePathRel,template:string ? paramsOrInit:table,function"
 
-			local pathRel = sitePathToPath(sitePathRel)
+			local pathRel = sitePathToPath(sitePathRel, 2)
 			local page    = newPage(pathRel, false)
 
 			if type(paramsOrInit) == "table" then
@@ -928,14 +928,14 @@ local function setup()
 			assertContext("config", "outputRaw")
 			!ARGS "sitePathRel,contents:string"
 
-			local pathRel = sitePathToPath(sitePathRel)
+			local pathRel = sitePathToPath(sitePathRel, 2)
 			writeOutputFile("raw", pathRel, sitePathRel, contents, nil, "")
 		end,
 
 		preserveRaw = function(sitePathRel)
 			assertContext("config", "preserveRaw")
 
-			local pathRel       = sitePathToPath(sitePathRel)
+			local pathRel       = sitePathToPath(sitePathRel, 2)
 			local pathOutputRel = rewriteOutputPath(pathRel)
 			local path          = DIR_OUTPUT.."/"..pathOutputRel
 
@@ -956,20 +956,25 @@ local function setup()
 			return getContext().page.url.v:sub(1, #urlPrefix) == urlPrefix
 		end,
 
-		subpages = function(allowCurrentPage)
-			assertContext("template", "subpages")
+		subpages = function(pathPrefixOrAllowCurrentPage)
+			local subpages = {}
+			local pageCurrent, pathPrefix, allowCurrentPage
 
-			local pageCurrent = getContext().page
-			local dir         = getDirectory(pageCurrent._path)
-			local subpages    = {}
+			if type(pathPrefixOrAllowCurrentPage) == "string" then
+				pageCurrent      = nil
+				pathPrefix       = sitePathToPath(pathPrefixOrAllowCurrentPage, 2)
+				allowCurrentPage = false -- Doesn't matter.
+			else
+				assertContext("template", "subpages")
+				pageCurrent      = getContext().page
+				pathPrefix       = pageCurrent._path:gsub("[^/]+$", "")
+				allowCurrentPage = pathPrefixOrAllowCurrentPage
+			end
 
 			for _, page in ipairs(site._pages) do
 				if (page ~= pageCurrent or allowCurrentPage) and (
-					dir == ""
-					or (
-						page._path:byte(#dir+1) == !(string.byte"/") and
-						page._path:find(dir, 1, true) == 1
-					)
+					pathPrefix == ""
+					or page._path:find(pathPrefix, 1, true) == 1
 				) then
 					if not page._isGenerated then
 						generateFromTemplateFile(page)
@@ -1204,7 +1209,7 @@ local function buildWebsite()
 	local function getT(kPath, default, kType, vType) -- Table
 		return get(
 			kPath, default, lineAssertTable, kType, vType,
-			"config.%s must be a table of [%s]=%s.",
+			"config.lua: config.%s must be a table of [%s]=%s.",
 			kPath, (kType or "value"), (vType or "value")
 		)
 	end
