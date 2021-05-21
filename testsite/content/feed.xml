@@ -9,13 +9,15 @@
 		<lastBuildDate>{{ os.date"%Y-%m-%d" }}</lastBuildDate>
 
 		{{ fori subpage in clampArray(subpages(), 15) }}
-		<item>
-			<title>{{ echo(subpage.title) }}</title>
-			<description><![CDATA[{{ subpage.description ~= "" and subpage.description or summarize(subpage.content, 400, true) }}]]></description>
-			<pubDate>{{ os.date("!%a, %d %b %Y %H:%M:%S GMT", toTime(subpage.publishDate)) }}</pubDate>
-			<link>{{ url(subpage.permalink) }}</link>
-			<guid>{{ url(subpage.permalink) }}</guid>
-		</item>
+			{{ if not subpage.isIndex }}
+			<item>
+				<title>{{ echo(subpage.title) }}</title>
+				<description><![CDATA[{{ subpage.description ~= "" and subpage.description or summarize(subpage.content, 400, true) }}]]></description>
+				<pubDate>{{ os.date("!%a, %d %b %Y %H:%M:%S GMT", toTime(subpage.publishDate)) }}</pubDate>
+				<link>{{ url(subpage.permalink) }}</link>
+				<guid>{{ url(subpage.permalink) }}</guid>
+			</item>
+			{{ end }}
 		{{ end }}
 	</channel>
 </rss>

@@ -27,6 +27,7 @@
 	templateToString, templateToStringUtf16
 	toWindowsPath
 	traverseDirectory
+	unindent
 	utf16ToUtf8, utf8ToUtf16
 	zipDirectory, zipFiles
 
@@ -445,5 +446,18 @@ function _G.POP_CONTEXT()
 	__LUA"end"
 end
 
+
+
+function _G.unindent(s)
+	local indent = s:match"^\t+"
+	if indent then
+		s = s
+			:gsub("\n"..indent, "\n")
+			:sub(#indent+1)
+			:gsub("\t+$", "")
+	end
+
+	return s
+end
 
 

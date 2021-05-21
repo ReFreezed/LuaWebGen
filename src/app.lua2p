@@ -42,50 +42,8 @@ local function setup()
 		local kind = programArguments[i] or errorNoPos("[Arguments] Missing kind after 'new'.")
 		i          = i + 1
 
-		if kind == "page" then
-			local pathRel = programArguments[i] or errorNoPos("[Arguments] Missing path after 'page'.")
-			pathRel       = pathRel:gsub("^/", "")
-			i             = i + 1
-
-			if programArguments[i] then
-				errorNoPos("[Arguments] Unknown argument '%s'.", programArguments[i])
-			end
-
-			local filename = getFilename(pathRel)
-			local basename = getBasename(filename)
-			local title    = basename :gsub("%-+", " ") :gsub("^%a", string.upper) :gsub(" %a", string.upper)
-
-			local contents = formatTemplate(
-				[=[
-					{{
-					page.title = :titleQuoted:
-					page.date  = ":date:"
-					}}
-
-					:content:
-				]=], {
-					titleQuoted = F("%q", title),
-					content     = "",
-					date        = getDatetime(),
-				}
-			)
-
-			local path = DIR_CONTENT.."/"..pathRel
-			if lfs.attributes(path, "mode") then
-				errorNoPos("File or directory already exists: %s", path)
-			end
-
-			createDirectory(getDirectory(path))
-
-			local file, err = io.open(path, "wb")
-			if not file then  errorNoPos(err)  end
-
-			file:write(contents)
-			file:close()
-
-			printf("Created page: %s", path)
-
-		elseif kind == "site" then
+		----------------
+		if kind == "site" then
 			local pathToSite = programArguments[i] or errorNoPos("[Arguments] Missing path after 'site'.")
 			i = i+1
 
@@ -181,6 +139,140 @@ local function setup()
 
 			printf("Created site: %s", pathToSite)
 
+		----------------
+		elseif kind == "page" then
+			local pathRel = programArguments[i] or errorNoPos("[Arguments] Missing path after 'page'.")
+			pathRel       = pathRel:gsub("^/", "")
+			i             = i + 1
+
+			if programArguments[i] then
+				errorNoPos("[Arguments] Unknown argument '%s'.", programArguments[i])
+			end
+
+			local filename = getFilename(pathRel)
+			local basename = getBasename(filename)
+			local title    = basename :gsub("%-+", " ") :gsub("^%a", string.upper) :gsub(" %a", string.upper)
+
+			local contents = formatTemplate(
+				[=[
+					{{
+					page.title = :titleQuoted:
+					page.date  = ":date:"
+					}}
+
+					:content:
+				]=], {
+					titleQuoted = F("%q", title),
+					content     = "",
+					date        = getDatetime(),
+				}
+			)
+
+			local path = DIR_CONTENT.."/"..pathRel
+			if lfs.attributes(path, "mode") then
+				errorNoPos("File or directory already exists: %s", path)
+			end
+
+			createDirectory(getDirectory(path))
+
+			local file, err = io.open(path, "wb")
+			if not file then  errorNoPos(err)  end
+
+			file:write(contents)
+			file:close()
+
+			printf("Created page: %s", path)
+
+		----------------
+		elseif kind == "feed" then
+			local pathRel = "feed.xml"
+
+			if programArguments[i] then
+				pathRel = programArguments[i]:gsub("^/", "")
+				i       = i + 1
+
+				if programArguments[i] then
+					errorNoPos("[Arguments] Unknown argument '%s'.", programArguments[i])
+				end
+			end
+
+			local contents = !(unindent[=[
+				<?xml version="1.0" encoding="UTF-8"?>
+				<rss version="2.0">
+					<channel>
+						<title>{{ echo(site.title) }}</title>
+						<link>{{ url(site.baseUrl) }}</link>
+						<atom:link href="{{ url(page.permalink) }}" rel="self" type="application/rss+xml"/>
+						<description>{{ echo(site.description) }}</description>
+						<language>{{ site.languageCode }}</language>
+						<lastBuildDate>{{ os.date"%Y-%m-%d" }}</lastBuildDate>
+
+						{{ fori subpage in clampArray(subpages(), 15) }}
+							{{ if not subpage.isIndex }}
+							<item>
+								<title>{{ echo(subpage.title) }}</title>
+								<description><![CDATA[{{ subpage.description ~= "" and subpage.description or summarize(subpage.content, 400, true) }}]]></description>
+								<pubDate>{{ os.date("!%a, %d %b %Y %H:%M:%S GMT", toTime(subpage.publishDate)) }}</pubDate>
+								<link>{{ url(subpage.permalink) }}</link>
+								<guid>{{ url(subpage.permalink) }}</guid>
+							</item>
+							{{ end }}
+						{{ end }}
+					</channel>
+				</rss>
+			]=])
+
+			local path = DIR_CONTENT.."/"..pathRel
+			if lfs.attributes(path, "mode") then
+				errorNoPos("File or directory already exists: %s", path)
+			end
+
+			createDirectory(getDirectory(path))
+
+			local file, err = io.open(path, "wb")
+			if not file then  errorNoPos(err)  end
+
+			file:write(contents)
+			file:close()
+
+			printf("Created page: %s", path)
+
+		----------------
+		elseif kind == "sitemap" then
+			if programArguments[i] then
+				errorNoPos("[Arguments] Unknown argument '%s'.", programArguments[i])
+			end
+
+			local contents = !(unindent[=[
+				<?xml version="1.0" encoding="UTF-8"?>
+				<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+					{{ fori subpage in subpages() }}
+					<url>
+						<loc>{{ url(subpage.permalink) }}</loc>
+						<lastmod>{{ os.date("%Y-%m-%d", toTime(subpage.dateModified)) }}</lastmod>
+						<changefreq>daily</changefreq>
+						<priority>0.5</priority>
+					</url>
+					{{ end }}
+				</urlset>
+			]=])
+
+			local path = DIR_CONTENT.."/sitemap.xml"
+			if lfs.attributes(path, "mode") then
+				errorNoPos("File or directory already exists: %s", path)
+			end
+
+			createDirectory(getDirectory(path))
+
+			local file, err = io.open(path, "wb")
+			if not file then  errorNoPos(err)  end
+
+			file:write(contents)
+			file:close()
+
+			printf("Created sitemap: %s", path)
+
+		----------------
 		else
 			errorNoPos("[Arguments] Unknown kind '%s' after 'new'.", kind)
 		end
@@ -716,7 +808,7 @@ local function setup()
 			return _dataParsers
 		end,
 
-		-- array = function( array, length ) -- @Doc
+		-- array = clampArray( array, length ) -- @Doc
 		clampArray = function(t, len)
 			for i = #t, len+1, -1 do
 				t[i] = nil
@@ -813,8 +905,8 @@ local function setup()
 					charsRemaining    = charsRemaining - len
 
 					if charsRemaining < 0 then
-						!local ELLIPSIS    = "(...)"
-						local  nextCharPos = #node + 1
+						!local ELLIPSIS   = "..."
+						local nextCharPos = #node + 1
 
 						for i = charsRemaining, !(#ELLIPSIS-1) do
 							nextCharPos = utf8.getStartOfCharacter(node, nextCharPos-1)
