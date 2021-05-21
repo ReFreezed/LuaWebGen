@@ -194,6 +194,10 @@ local function setup()
 				if programArguments[i] then
 					errorNoPos("[Arguments] Unknown argument '%s'.", programArguments[i])
 				end
+
+				if not pathRel:find(".", 1, true) then
+					pathRel = pathRel .. ".xml"
+				end
 			end
 
 			local contents = !(unindent[=[
@@ -235,7 +239,7 @@ local function setup()
 			file:write(contents)
 			file:close()
 
-			printf("Created page: %s", path)
+			printf("Created feed: %s", path)
 
 		----------------
 		elseif kind == "sitemap" then
@@ -816,34 +820,71 @@ local function setup()
 			return t
 		end,
 
-		-- html = summarize( html, maxCharacters [, keepAnchorsAndImages=false ] ) -- @Doc
+		-- html = summarize( html, maxCharacters [, keepSomeElements=false ] ) -- @Doc
+		-- keepSomeElements includes <a>, <code>, <img>, <math> and <svg>.
 		summarize = function(html, maxChars, keepSomeElements)
 			html      = "<div>" .. html .. "</div>"
 			local doc = assert(xmlLib.parseHtml(html))
 			local protected
 
+			-- Remove (probably) unwanted elements.
+			local elementsToRemove = {
+				"dialog",
+				"menu", -- (Non-standard.)
+				"nav",
+				"script",
+				"style",
+				"template",
+			}
+			if not keepSomeElements then
+				table.insert(elementsToRemove, "math")
+				table.insert(elementsToRemove, "svg")
+			end
+
+			xmlLib.walk(doc, false, function(tag, el)
+				for i, childNode in ipairsr(el) do
+					if xmlLib.isElement(childNode) and isAny(childNode.tag, unpack(elementsToRemove)) then
+						table.remove(el, i)
+					end
+				end
+			end)
+
 			-- Protect certain things, like links.
+			-- @Incomplete: Always protect things like <br>, <wbr>, <bdi> and ruby tags. (Also <sub>?)
+			-- @Incomplete: Always protect attributes like 'dir'.
+			-- @Incomplete: Protect things like <i> and <strong>.
+			-- @Incomplete: Handle <a><img></a>.
 			if keepSomeElements then
 				protected = {--[[ element1, ... ]]}
 
 				xmlLib.walk(doc, false, function(tag, el)
 					for i, childNode in ipairs(el) do
+						-- @Robustness: Make sure $$PLACEHOLDER#$$ strings don't exist in the original content.
 						if xmlLib.isText(childNode) then
 							-- void
 
 						elseif childNode.tag == "a" and childNode.attr.href and not childNode.attr.href:find"^javascript:" then
-							table.insert(protected, xmlLib.element("a", {href=childNode.attr.href, childNode:getText()}))
-							el[i] = "$$PLACEHOLDER" .. #protected .. "$$" -- @Robustness: Make sure the string doesn't exist in the original content.
+							table.insert(protected, xmlLib.element("a", {href=childNode.attr.href, childNode:getHtmlText()}))
+							el[i] = "$$PLACEHOLDER" .. #protected .. "$$"
+
+						elseif childNode.tag == "code" then
+							table.insert(protected, xmlLib.element("code", childNode:getHtmlText()))
+							el[i] = "$$PLACEHOLDER" .. #protected .. "$$"
 
 						elseif childNode.tag == "img" and childNode.attr.src then
 							table.insert(protected, xmlLib.element("img", {src=childNode.attr.src, alt=(childNode.attr.alt or "")}))
-							el[i] = "$$PLACEHOLDER" .. #protected .. "$$" -- @Robustness: Make sure the string doesn't exist in the original content.
+							el[i] = "$$PLACEHOLDER" .. #protected .. "$$"
+
+						elseif childNode.tag == "math" or childNode.tag == "svg" then
+							table.insert(protected, childNode)
+							el[i] = "$$PLACEHOLDER" .. #protected .. "$$"
 						end
 					end
 				end)
 			end
 
 			-- Make the content into a list of paragraphs or similar.
+			-- @Incomplete: Handle tables better?
 			for i, childNode in ipairsr(doc) do
 				if xmlLib.isText(childNode) then
 					table.remove(doc, i)
@@ -853,12 +894,16 @@ local function setup()
 						doc[i] = xmlLib.newElement(childNode.tag)
 
 						for li in childNode:eachChildElement() do
-							local text = trim(li:getText():gsub("%s+", " "))
+							local text = trim(li:getHtmlText():gsub("%s+", " "))
 							table.insert(doc[i], xmlLib.element("li", text))
 						end
 
+					elseif childNode.tag == "pre" then
+						local text = trim(childNode:getHtmlText():gsub("%s+", " "))
+						doc[i]     = xmlLib.element("pre", text)
+
 					else
-						local text = trim(childNode:getText():gsub("%s+", " "))
+						local text = trim(childNode:getHtmlText():gsub("%s+", " "))
 						doc[i]     = xmlLib.element("p", text)
 					end
 

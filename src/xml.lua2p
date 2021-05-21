@@ -38,7 +38,7 @@
 	Element.getAttributes, Element.setAttribute, Element.updateAttributes
 	Element.getChildByName, Element.findAllElementsByName
 	Element.getFirstElement
-	Element.getText, Element.getTextOfDirectChildren
+	Element.getText, Element.getTextOfDirectChildren, Element.getHtmlText
 	Element.mapElements
 	Element.match, Element.substitute
 	Element.removeWhitespaceNodes
@@ -706,6 +706,32 @@ function Element.getTextOfDirectChildren(el)
 	return table.concat(buffer)
 end
 Element.get_text = Element.getTextOfDirectChildren -- :PenlightCompatibility
+
+do
+	local function _getHtmlText(buffer, el)
+		if HTML_EMPTY_ELEMENTS[el.tag] then
+			if el.tag == "img" then
+				table.insert(buffer, el.attr.alt) -- May be nil.
+			end
+			return
+		end
+
+		for _, childNode in ipairs(el) do
+			if !!(IS_TEXT`childNode`) then
+				table.insert(buffer, childNode)
+			else
+				_getHtmlText(buffer, childNode)
+			end
+		end
+	end
+
+	-- text = Element:getHtmlText( ) -- @Doc
+	function Element.getHtmlText(el)
+		local buffer = {}
+		_getHtmlText(buffer, el)
+		return table.concat(buffer)
+	end
+end
 
 
 
