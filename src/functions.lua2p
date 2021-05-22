@@ -35,6 +35,7 @@
 	gsubPlainSub
 	htaccessRewriteEscapeTestString, htaccessRewriteEscapeCondPattern, htaccessRewriteEscapeRuleSubstitution
 	indexOf, itemWith, itemWithAll
+	insertMultiple
 	ipairsr, iprev
 	isAny
 	isArgs
@@ -2886,6 +2887,15 @@ do
 	print("DONE")
 	os.exit(2)
 	--]]
+end
+
+
+
+-- insertMultiple( array, value1, ... )
+function insertMultiple(t, ...)
+	for i = 1, select("#", ...) do
+		table.insert(t, (select(i, ...)))
+	end
 end
 
 

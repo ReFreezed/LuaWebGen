@@ -42,7 +42,7 @@ local localVar = function()end
 }}
 
 <p style="text-align: center;">
-	Centered text in HTML.
+	Centered text in HTML. The following is not a list!
 	- 1
 	- 2
 </p>

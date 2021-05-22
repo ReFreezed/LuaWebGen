@@ -1684,12 +1684,12 @@ local CHAR_TO_ENTITY = {
 }
 
 -- Encode special characters.
-function xml.encodeRequiredEntities(s)
+function xml.encodeRequiredEntities(s) -- @Doc
 	return (s:gsub("[&<>\"']", CHAR_TO_ENTITY))
 end
 
 -- Encode special characters and some additional characters (like non-breaking space).
-function xml.encodeMoreEntities(s)
+function xml.encodeMoreEntities(s) -- @Doc
 	s = xml.encodeRequiredEntities(s)
 
 	-- Note: We encode HTML entities in XML documents too. It's probably fine, but who knows!

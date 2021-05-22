@@ -820,121 +820,153 @@ local function setup()
 			return t
 		end,
 
+		--
 		-- html = summarize( html, maxCharacters [, keepSomeElements=false ] ) -- @Doc
-		-- keepSomeElements includes <a>, <code>, <img>, <math> and <svg>.
+		--
+		-- Limit the amount of text and restrict allowed tags in an HTML string
+		-- to be used e.g. as the description for an item in an RSS feed.
+		--
+		-- 'html' must be valid HTML code.
+		-- 'keepSomeElements' includes elements like <a>, <em>, <code>, <img> and <svg>.
+		-- Elements like <br> and <bdo>, and any occurrences of the 'dir' attribute, are always preserved.
+		--
 		summarize = function(html, maxChars, keepSomeElements)
-			html      = "<div>" .. html .. "</div>"
-			local doc = assert(xmlLib.parseHtml(html))
-			local protected
+			local doc = assert(xmlLib.parseHtml("<div>"..html.."</div>"))
 
 			-- Remove (probably) unwanted elements.
-			local elementsToRemove = {
+			local elementsToRemove = !(Set{
 				"dialog",
 				"menu", -- (Non-standard.)
 				"nav",
 				"script",
 				"style",
 				"template",
-			}
+			})
 			if not keepSomeElements then
-				table.insert(elementsToRemove, "math")
-				table.insert(elementsToRemove, "svg")
+				elementsToRemove.math = true
+				elementsToRemove.svg  = true
 			end
 
 			xmlLib.walk(doc, false, function(tag, el)
-				for i, childNode in ipairsr(el) do
-					if xmlLib.isElement(childNode) and isAny(childNode.tag, unpack(elementsToRemove)) then
+				for i, child in ipairsr(el) do
+					if xmlLib.isElement(child) and elementsToRemove[child.tag] then
 						table.remove(el, i)
 					end
 				end
 			end)
 
-			-- Protect certain things, like links.
-			-- @Incomplete: Always protect things like <br>, <wbr>, <bdi> and ruby tags. (Also <sub>?)
-			-- @Incomplete: Always protect attributes like 'dir'.
-			-- @Incomplete: Protect things like <i> and <strong>.
-			-- @Incomplete: Handle <a><img></a>.
-			if keepSomeElements then
-				protected = {--[[ element1, ... ]]}
+			-- Filter the HTML.
+			local function processChildren(buffer, textIndices, el)
+				for _, child in ipairs(el) do
+					if xmlLib.isText(child) then
+						insertMultiple(buffer, (encodeHtmlEntities(child):gsub("%s+", " ")))
+						table.insert(textIndices, #buffer)
 
-				xmlLib.walk(doc, false, function(tag, el)
-					for i, childNode in ipairs(el) do
-						-- @Robustness: Make sure $$PLACEHOLDER#$$ strings don't exist in the original content.
-						if xmlLib.isText(childNode) then
-							-- void
+					-- Elements to always keep.
 
-						elseif childNode.tag == "a" and childNode.attr.href and not childNode.attr.href:find"^javascript:" then
-							table.insert(protected, xmlLib.element("a", {href=childNode.attr.href, childNode:getHtmlText()}))
-							el[i] = "$$PLACEHOLDER" .. #protected .. "$$"
+					elseif isAny(child.tag, "br","wbr") then
+						insertMultiple(buffer, "<",child.tag,">")
 
-						elseif childNode.tag == "code" then
-							table.insert(protected, xmlLib.element("code", childNode:getHtmlText()))
-							el[i] = "$$PLACEHOLDER" .. #protected .. "$$"
+					elseif isAny(child.tag, "ruby","rt","rp","bdi","bdo") then
+						insertMultiple(buffer, "<",child.tag)
+						if child.attr.dir then  insertMultiple(buffer, " dir='",encodeHtmlEntities(child.attr.dir),"'")  end
+						insertMultiple(buffer, ">")
+						processChildren(buffer, textIndices, child)
+						insertMultiple(buffer, "</",child.tag,">")
 
-						elseif childNode.tag == "img" and childNode.attr.src then
-							table.insert(protected, xmlLib.element("img", {src=childNode.attr.src, alt=(childNode.attr.alt or "")}))
-							el[i] = "$$PLACEHOLDER" .. #protected .. "$$"
+					-- Elements to sometimes keep.
 
-						elseif childNode.tag == "math" or childNode.tag == "svg" then
-							table.insert(protected, childNode)
-							el[i] = "$$PLACEHOLDER" .. #protected .. "$$"
-						end
-					end
-				end)
-			end
+					elseif keepSomeElements and child.tag == "a" and child.attr.href and not child.attr.href:find"^javascript:" then
+						insertMultiple(buffer, "<a href='",encodeHtmlEntities(child.attr.href),"'")
+						if child.attr.dir then  insertMultiple(buffer, " dir='",encodeHtmlEntities(child.attr.dir),"'")  end
+						insertMultiple(buffer, ">")
+						processChildren(buffer, textIndices, child)
+						insertMultiple(buffer, "</a>")
 
-			-- Make the content into a list of paragraphs or similar.
-			-- @Incomplete: Handle tables better?
-			for i, childNode in ipairsr(doc) do
-				if xmlLib.isText(childNode) then
-					table.remove(doc, i)
+					elseif keepSomeElements and isAny(child.tag, "em","strong","b","i","code","sub","sup") then
+						insertMultiple(buffer, "<",child.tag)
+						if child.attr.dir then  insertMultiple(buffer, " dir='",encodeHtmlEntities(child.attr.dir),"'")  end
+						insertMultiple(buffer, ">")
+						processChildren(buffer, textIndices, child)
+						insertMultiple(buffer, "</",child.tag,">")
 
-				else
-					if childNode.tag == "ul" or childNode.tag == "ol" then
-						doc[i] = xmlLib.newElement(childNode.tag)
+					elseif keepSomeElements and child.tag == "img" and child.attr.src then
+						insertMultiple(buffer, "<img src='",encodeHtmlEntities(child.attr.src),"' alt='",encodeHtmlEntities(child.attr.alt or ""),"'>")
+					elseif not keepSomeElements and child.tag == "img" and (child.attr.alt or "") ~= "" then
+						insertMultiple(buffer, (encodeHtmlEntities(child.attr.alt):gsub("%s+", " ")))
+						table.insert(textIndices, #buffer)
 
-						for li in childNode:eachChildElement() do
-							local text = trim(li:getHtmlText():gsub("%s+", " "))
-							table.insert(doc[i], xmlLib.element("li", text))
-						end
+					elseif keepSomeElements and child.tag == "math" or child.tag == "svg" then
+						insertMultiple(buffer, child:toHtml()) -- (We could call toXml() instead since these elements will be encoded as XML anyway.)
 
-					elseif childNode.tag == "pre" then
-						local text = trim(childNode:getHtmlText():gsub("%s+", " "))
-						doc[i]     = xmlLib.element("pre", text)
+					-- For anything else we just care about the text contents.
 
 					else
-						local text = trim(childNode:getHtmlText():gsub("%s+", " "))
-						doc[i]     = xmlLib.element("p", text)
+						if child.attr.dir then  insertMultiple(buffer, "<span dir='",encodeHtmlEntities(child.attr.dir),"'>")  end
+						processChildren(buffer, textIndices, child)
+						if child.attr.dir then  insertMultiple(buffer, "</span")  end
 					end
-
-					if doc[i+1] then  table.insert(doc, i+1, "\n")  end -- Not needed, but it looks nicer.
 				end
 			end
 
-			-- Remove protections.
-			if keepSomeElements then
-				xmlLib.walk(doc, true, function(tag, el)
-					for i, childNode in ipairsr(el) do
-						if xmlLib.isText(childNode) and childNode:find("$$PLACEHOLDER", 1, true) then
-							local newNodes = {}
+			local function trimText(buffer, textIndices, i1, i2, iDir)
+				for i = i1, i2, iDir do
+					local textNode = buffer[textIndices[i]]
 
-							for pos, isMatch, textOrProtIndex in gmatchAndBetween(childNode, "%$%$PLACEHOLDER(%d+)%$%$") do
-								if isMatch then
-									table.insert(newNodes, protected[tonumber(textOrProtIndex)])
-								else
-									table.insert(newNodes, textOrProtIndex)
-								end
-							end
-
-							table.remove(el, i)
-
-							for _, node in ipairsr(newNodes) do
-								table.insert(el, i, node)
-							end
-						end
+					if not textNode:find"^%s*$" then
+						local pat              = (iDir > 0) and "^%s+" or "%s+$"
+						buffer[textIndices[i]] = textNode:gsub(pat, "")
+						break
 					end
-				end)
+
+					buffer[textIndices[i]] = ""
+				end
 			end
+
+			local buffer      = {"<div>"}
+			local textIndices = {}
+
+			for _, child in ipairs(doc) do
+				-- @Incomplete: Handle tables better?
+
+				if xmlLib.isText(child) then
+					-- void
+
+				else
+					local textStartIndex = #textIndices + 1
+
+					if child.tag == "ul" or child.tag == "ol" then
+						insertMultiple(buffer, "<",child.tag,">")
+
+						for li in child:eachChildElement() do
+							insertMultiple(buffer, "<li>")
+							processChildren(buffer, textIndices, li)
+							insertMultiple(buffer, "</li>")
+						end
+
+						insertMultiple(buffer, "</",child.tag,">\n")
+
+					elseif child.tag == "pre" then
+						insertMultiple(buffer, "<",child.tag,">")
+						processChildren(buffer, textIndices, child)
+						insertMultiple(buffer, "</",child.tag,">\n")
+
+					else
+						insertMultiple(buffer, "<p>")
+						processChildren(buffer, textIndices, child)
+						insertMultiple(buffer, "</p>\n")
+					end
+
+					trimText(buffer, textIndices, textStartIndex, #textIndices,    1)
+					trimText(buffer, textIndices, #textIndices,   textStartIndex, -1)
+				end
+			end
+
+			table.insert(buffer, "</div>")
+
+			local len   = #buffer
+			buffer[len] = buffer[len]:gsub("\n$", "")
+			doc         = assert(xmlLib.parseHtml(table.concat(buffer))) -- @Speed: So much back and forth between HTML strings and parsed documents!
 
 			-- Limit text length.
 			local charsRemaining = maxChars
@@ -966,8 +998,8 @@ local function setup()
 					end
 
 				else
-					for i, childNode in ipairs(node) do
-						limit(childNode, node, i)
+					for i, child in ipairs(node) do
+						limit(child, node, i)
 					end
 
 					if hasText[node] and parentEl then
@@ -977,6 +1009,8 @@ local function setup()
 			end
 
 			limit(doc, nil, nil)
+
+			-- @Polish: Remove empty elements, like <p></p> (but not <br>).
 
 			return (doc:contentsToHtml())
 		end,

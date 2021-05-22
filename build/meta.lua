@@ -23,6 +23,7 @@
 	NOSPACE
 	PUSH_CONTEXT, POP_CONTEXT
 	readFile, writeFile, writeTextFile
+	Set
 	templateToLua
 	templateToString, templateToStringUtf16
 	toWindowsPath
@@ -458,6 +459,16 @@ function _G.unindent(s)
 	end
 
 	return s
+end
+
+
+
+function _G.Set(values)
+	local set = {}
+	for _, v in ipairs(values) do
+		set[v] = true
+	end
+	return set
 end
 
 
