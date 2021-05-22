@@ -1,5 +1,6 @@
 {{
-page.title = 'First Post!'
+page.title = "First Post!"
+page.date  = "1995-01-01 13:59 GMT"
 
 P.foo = "bar"
 }}

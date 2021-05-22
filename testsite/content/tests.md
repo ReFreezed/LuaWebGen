@@ -1,5 +1,6 @@
 {{
 page.title = 'Some "tests"<hr>'
+page.date  = "2021-05-22 09:00 +02"
 
 P.foo = "bar"
 }}

@@ -1759,8 +1759,8 @@ function _G.generateFromTemplateString(page, template, modTime, onPageInit)
 		page._readonly = true
 
 		if
-			(page.isDraft.v and not includeDrafts            ) or -- Is draft?
-			(datetimeToTime(page.publishDate:g()) > os.time())    -- Is in future?
+			(page.isDraft.v and not includeDrafts          ) or -- Is draft?
+			(datetimeToTime(page.publishDate:g()) > nowTime)    -- Is in future?
 		then
 			page._isSkipped                  = true
 			site._outputFileSkippedPageCount = site._outputFileSkippedPageCount + 1
@@ -1986,7 +1986,7 @@ end
 function _G.getDatetime(time)
 	!ARGS "? time:number"
 
-	local date     = dateLib(time or os.time()):tolocal()
+	local date     = dateLib(time or nowTime):tolocal()
 	local datetime = date:fmt"${iso}%z" :gsub("..$", ":%0") :gsub("%+00:00$", "Z")
 
 	return datetime
@@ -2619,8 +2619,7 @@ end
 -- Compute the difference in seconds between local time and UTC. (Normal time.)
 -- http://lua-users.org/wiki/TimeZone
 function _G.getTimezone()
-	local now = os.time()
-	return os.difftime(now, os.time(os.date("!*t", now)))
+	return os.difftime(nowTime, os.time(os.date("!*t", nowTime)))
 end
 
 -- Return a timezone string in ISO 8601:2000 standard form (+hhmm or -hhmm).
@@ -2632,7 +2631,7 @@ end
 -- Return the timezone offset in seconds, as it was on the given time. (DST obeyed.)
 -- timezoneOffset = getTimezoneOffset( [ time=now ] )
 function _G.getTimezoneOffset(time)
-	time = time or os.time()
+	time            = time or nowTime
 	local dateUtc   = os.date("!*t", time)
 	local dateLocal = os.date("*t",  time)
 	dateLocal.isdst = false -- This is the trick.

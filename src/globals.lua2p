@@ -63,6 +63,7 @@ _G.autobuild               = false
 _G.enableGc                = true
 _G.ignoreModificationTimes = false
 _G.includeDrafts           = false
+_G.nowTime                 = os.time()
 _G.outputMetaprograms      = false
 _G.verbosePrint            = false
 

@@ -305,6 +305,12 @@ local function setup()
 			elseif arg == "--autobuild" then
 				_G.autobuild = true
 
+			elseif arg == "--date" then
+				i              = i + 1
+				local datetime = programArguments[i] or errorNoPos("[Arguments] Missing datetime value after '%s'.", argRaw)
+				_G.nowTime     = datetimeToTime(datetime)
+				arg            = arg .. os.date("! '%Y-%m-%d %H:%M:%S UTC'", nowTime)
+
 			elseif arg == "--drafts" then
 				_G.includeDrafts = true
 

@@ -381,6 +381,7 @@ do
 	local function outputArgumentChecks(errLevel, argsStr)
 		local optionalPos = argsStr:find("?", 1, true) or #argsStr
 		local n           = 1
+		local first       = true
 
 		for pos, argNames, types in argsStr:gmatch"()([%w_,]+):([%w_,*]+)" do
 			if types == "*" then
@@ -395,8 +396,11 @@ do
 				local typesText     = multipleTypes and types:gsub(",",      " or ") or types
 
 				for argName in argNames:gmatch"[%w_]+" do
+					if not first then  __LUA"\n"  end
+					first = false
+
 					__LUA(F(
-						"if %s then  errorf(%d, \"Bad argument #%d '%s'. (Expected %s, got %%s)\", type(%s))  end\n",
+						"if %s then  errorf(%d, \"Bad argument #%d '%s'. (Expected %s, got %%s)\", type(%s))  end",
 						ifFormat:format(argName, typesCode),
 						errLevel + 1,
 						n,
