@@ -1663,7 +1663,7 @@ function _G.getProtectionWrapper(obj, objName)
 				errorf(2, "[internal] No getter for %s.%s", objName, k)
 			end
 
-			return field:g()
+			return (field:g())
 		end,
 
 		__newindex = function(wrapper, k, vNew)
@@ -1770,16 +1770,14 @@ function _G.generateFromTemplateString(page, template, modTime, onPageInit)
 			return
 		end
 
+		page.content.v           = pageContent
+		page._contentIsAvailable = true
+
 		if page.layout.v == "" then
 			result = pageContent
-
 		else
-			page.content.v = pageContent
-
 			local layoutTemplate, layoutPath = getLayoutTemplate(page)
 			result                           = parseAndRunTemplate(page, layoutPath, layoutTemplate, "html", true, nil)
-
-			-- page.content.v = "" -- We don't need this anymore. (Actually, things like RSS feeds do!)
 		end
 
 	else
@@ -2204,7 +2202,7 @@ function _G.newSite()
 		_ignoreFolders              = {--[[ filenamePattern1, ... ]]},
 		_ignorePaths                = {--[[ pathPattern1, ... ]]},
 
-		_fileTypes                  = {["md"]="markdown", ["html"]="html", ["xml"]="xml", ["css"]="othertemplate"},
+		_fileTypes                  = {["md"]="markdown", ["markdown"]="markdown", ["html"]="html", ["htm"]="html", ["xml"]="xml", ["css"]="othertemplate"},
 		_fileProcessors             = {--[[ [extension1]=function(data, sitePath), ... ]]},
 
 		_htaErrors                  = {--[[ [httpStatusCode1]=document1, ... ]]},
@@ -2244,7 +2242,7 @@ function _G.newSite()
 			v = "",
 			g = function(field)  return field.v  end,
 		},
-		description = { -- @Doc
+		description = {
 			v = "",
 			g = function(field)  return field.v  end,
 		},
@@ -2315,15 +2313,16 @@ do
 		local page; page = {
 			_readonly = false,
 
-			_category     = category,
-			_isGenerating = false,
-			_isGenerated  = false,
-			_isSkipped    = false,
-			_isLocked     = false, -- @Cleanup: Is this always synced with _readonly? If so, just remove _isLocked.
-			_path         = pathRel,
-			_pathOut      = pathRelOut,
-			_pathForError = F("%s/%s", DIR_CONTENT, pathRel),
-			_extension    = extLower,
+			_category           = category,
+			_isGenerating       = false,
+			_isGenerated        = false,
+			_isSkipped          = false,
+			_isLocked           = false, -- @Cleanup: Is this always synced with _readonly? If so, just remove _isLocked.
+			_contentIsAvailable = false,
+			_path               = pathRel,
+			_pathOut            = pathRelOut,
+			_pathForError       = F("%s/%s", DIR_CONTENT, pathRel),
+			_extension          = extLower,
 
 			isPage = {
 				v = isPage,
@@ -2348,14 +2347,22 @@ do
 				g = function(field)  return field.v  end,
 				s = function(field, title)  field.v = title  end,
 			},
-			description = { -- @Doc
+			description = {
 				v = "",
 				g = function(field)  return field.v  end,
 				s = function(field, description)  field.v = description  end,
 			},
 			content = {
 				v = "",
-				g = function(field)  return field.v  end,
+				g = function(field)
+					if page._contentIsAvailable then
+						return field.v
+					elseif not page.isPage.v then
+						errorf(3, "page.content isn't available for non-page templates. (%s)", page._pathForError)
+					else
+						errorf(3, "page.content isn't available (probably because the page hasn't finished generating). (%s)", page._pathForError)
+					end
+				end,
 			},
 
 			date = {
@@ -2830,8 +2837,8 @@ end
 
 
 do
-	-- for isMatch, position, match1, ... in gmatchAndBetween( string, pattern )
-	-- If isMatch is false then match1 is the string between the last match and the next. (This string will never be empty.)
+	-- for position, isMatch, capture1, ... in gmatchAndBetween( string, pattern )
+	-- If isMatch is false then capture1 is the string between the last match and the next. (This string will never be empty.)
 	function _G.gmatchAndBetween(s, pat)
 		local nextPos = 1
 		local i1, i2  = nil

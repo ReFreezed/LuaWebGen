@@ -5,6 +5,6 @@ lock()
 
 ## Page List
 
-{{fori page in subpages(true)}}
-- {{page.title}}
+{{fori subpage in subpages(true)}}
+- {{subpage.title}}
 {{end}}

@@ -25,8 +25,8 @@ local tableInsert  = table.insert
 
 
 
--- string = codepointToString( cp )
--- codepointToString( cp, outputBuffer )
+-- string = codepointToString( codepoint )
+-- codepointToString( codepoint, outputBuffer )
 function utf8.codepointToString(cp, buffer)
 	if cp < 0 or cp > 0x10ffff then
 		errorf("Codepoint %d is outside the valid range (0..10FFFF).", cp)
@@ -86,7 +86,7 @@ end
 
 
 
--- length|nil = getCharacterLength( string [, position=1 ] )
+-- length = getCharacterLength( string [, position=1 ] )
 -- Returns nil if the string is invalid at the position.
 function utf8.getCharacterLength(s, pos)
 	pos                  = pos or 1
@@ -137,15 +137,15 @@ end
 
 
 
--- length|nil = getLength( string [, startPosition=1 ] )
--- Returns nil if the string is invalid.
+-- length = getLength( string [, startPosition=1 ] )
+-- Returns nil and the first error position if the string is invalid.
 function utf8.getLength(s, pos)
 	pos       = pos or 1
 	local len = 0
 
 	while pos <= #s do
 		local charLen = utf8.getCharacterLength(s, pos)
-		if not charLen then  return nil  end
+		if not charLen then  return nil, pos  end
 
 		len = len + 1
 		pos = pos + charLen
@@ -156,13 +156,14 @@ end
 
 
 
--- position|nil = getStartOfCharacter( string, position )
+-- position = getStartOfCharacter( string, position )
 -- Returns nil if the string is invalid at the position.
 function utf8.getStartOfCharacter(s, pos)
 	for pos = pos, math.max(pos-3, 1), -1 do
 		local b = getByte(s, pos)
 
 		if b <= 127 or (b >= 194 and b <= 244) then
+			-- @Robustness: Verify that the following bytes are valid.
 			return pos
 		end
 	end

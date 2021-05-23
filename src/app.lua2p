@@ -441,7 +441,7 @@ local function setup()
 		-- Lua libraries.
 		json = jsonLib,
 		lfs  = lfs,
-		utf8 = utf8, -- @Doc
+		utf8 = utf8,
 		xml  = xmlLib,
 
 		toml = { -- @Cleanup: Don't use 3rd party TOML library.
@@ -472,11 +472,11 @@ local function setup()
 		generatorMeta    = generatorMeta,
 		getFilename      = getFilename,
 		getKeys          = getKeys,
-		gmatchAndBetween = gmatchAndBetween, -- @Doc
+		gmatchAndBetween = gmatchAndBetween,
 		indexOf          = indexOf,
 		ipairsr          = ipairsr,
 		isAny            = isAny,
-		isValueHtml      = doesValueLookLikeHtml, -- @Doc
+		isValueHtml      = doesValueLookLikeHtml,
 		markdown         = markdownToHtml,
 		max              = math.max,
 		min              = math.min,
@@ -535,22 +535,22 @@ local function setup()
 			return (getBasename_internal(getFilename(genericPath)))
 		end,
 
-		X = function(node, tagName) -- @Doc
+		X = function(node, tagName) -- @Cleanup: Remove this!
 			if type(node) ~= "table" then  error("Invalid XML argument.", 2)  end
 			return (itemWith(node, "tag", tagName))
 		end,
 
-		Xs = function(node, tagName) -- @Doc
+		Xs = function(node, tagName) -- @Cleanup: Remove this!
 			if type(node) ~= "table" then  error("Invalid XML argument.", 2)  end
 			return (itemWithAll(node, "tag", tagName))
 		end,
 
-		forXml = function(node, tagName) -- @Doc
+		forXml = function(node, tagName) -- @Cleanup: Remove this!
 			if type(node) ~= "table" then  error("Invalid XML argument.", 2)  end
 			return ipairs(itemWithAll(node, "tag", tagName))
 		end,
 
-		printXmlTree = function(node) -- @Doc
+		printXmlTree = function(node) -- @Cleanup: Remove this!
 			if type(node) ~= "table" then  error("Invalid XML argument.", 2)  end
 
 			local function printNode(node, indent)
@@ -781,7 +781,7 @@ local function setup()
 			return fileInfos
 		end,
 
-		getGeneratedPages = function() -- @Doc
+		getGeneratedPages = function()
 			-- Just like getOutputtedFiles(), there's no reason to restrict context for this function, I don't think. 2021-05-18
 			local generatedPages = {}
 
@@ -818,7 +818,6 @@ local function setup()
 			return _dataParsers
 		end,
 
-		-- array = clampArray( array, length ) -- @Doc
 		clampArray = function(t, len)
 			for i = #t, len+1, -1 do
 				t[i] = nil
@@ -827,7 +826,7 @@ local function setup()
 		end,
 
 		--
-		-- html = summarize( html, maxCharacters [, keepSomeElements=false ] ) -- @Doc
+		-- html = summarize( html, maxCharacters [, keepSomeElements=false ] )
 		--
 		-- Limit the amount of text and restrict allowed tags in an HTML string
 		-- to be used e.g. as the description for an item in an RSS feed.
@@ -1041,7 +1040,7 @@ local function setup()
 			table.insert(getContext"template".out, tostringForTemplates(s))
 		end,
 
-		echoSmart = function(v) -- @Doc
+		echoSmart = function(v)
 			assertContext("template", "echoSmart")
 			if v == nil then
 				-- void  Echo nothing.
@@ -1543,8 +1542,9 @@ local function buildWebsite()
 		-- Template.
 		elseif site._fileTypes[extLower] then
 			-- Generate these later so e.g. urlExists() works better.
-			local pagesArray = ((site._fileTypes[extLower] == "markdown" or site._fileTypes[extLower] == "html") and site._pages or nonPagePages)
-			table.insert(pagesArray, newPage(pathRel, false))
+			local page       = newPage(pathRel, false)
+			local pagesArray = (page.isPage and site._pages or nonPagePages)
+			table.insert(pagesArray, page)
 
 		-- Special.
 		elseif pathRel == ".htaccess" and handleHtaccess then
@@ -1572,7 +1572,7 @@ local function buildWebsite()
 	end)
 
 	for _, page in ipairs(nonPagePages) do
-		generateFromTemplateFile(page)
+		generateFromTemplateFile(page) -- Note that this template may trigger generation of actual pages (e.g. by calling subpages()).
 	end
 
 	for _, page in ipairs(site._pages) do

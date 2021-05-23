@@ -725,7 +725,7 @@ do
 		end
 	end
 
-	-- text = Element:getHtmlText( ) -- @Doc
+	-- text = Element:getHtmlText( )
 	function Element.getHtmlText(el)
 		local buffer = {}
 		_getHtmlText(buffer, el)
@@ -1131,18 +1131,14 @@ function xml.toXml(node, preface)
 end
 Element.toXml = xml.toXml -- :Alias
 
--- xmlString = xml.contentsToXml( node ) -- @Doc
+-- xmlString = xml.contentsToXml( node )
 function xml.contentsToXml(node)
+	if !!(IS_TEXT`node`) then  return ""  end
+
 	local buffer = {}
-
-	if !!(IS_TEXT`node`) then
-		nodeToXml(buffer, node)
-	else
-		for _, childNode in ipairs(node) do
-			nodeToXml(buffer, childNode)
-		end
+	for _, childNode in ipairs(node) do
+		nodeToXml(buffer, childNode)
 	end
-
 	return table.concat(buffer, "")
 end
 Element.contentsToXml = xml.contentsToXml -- :Alias
@@ -1312,18 +1308,14 @@ function xml.toHtml(node, preface)
 end
 Element.toHtml = xml.toHtml -- :Alias
 
--- htmlString = xml.contentsToHtml( node ) -- @Doc
+-- htmlString = xml.contentsToHtml( node )
 function xml.contentsToHtml(node)
+	if !!(IS_TEXT`node`) then  return ""  end
+
 	local buffer = {}
-
-	if !!(IS_TEXT`node`) then
-		nodeToHtml(buffer, node)
-	else
-		for _, childNode in ipairs(node) do
-			nodeToHtml(buffer, childNode)
-		end
+	for _, childNode in ipairs(node) do
+		nodeToHtml(buffer, childNode)
 	end
-
 	return table.concat(buffer, "")
 end
 Element.contentsToHtml = xml.contentsToHtml -- :Alias
@@ -1684,12 +1676,12 @@ local CHAR_TO_ENTITY = {
 }
 
 -- Encode special characters.
-function xml.encodeRequiredEntities(s) -- @Doc
+function xml.encodeRequiredEntities(s)
 	return (s:gsub("[&<>\"']", CHAR_TO_ENTITY))
 end
 
 -- Encode special characters and some additional characters (like non-breaking space).
-function xml.encodeMoreEntities(s) -- @Doc
+function xml.encodeMoreEntities(s)
 	s = xml.encodeRequiredEntities(s)
 
 	-- Note: We encode HTML entities in XML documents too. It's probably fine, but who knows!
