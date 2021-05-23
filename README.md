@@ -149,7 +149,7 @@ LuaWebGen uses this [folder structure](https://github.com/ReFreezed/LuaWebGen/wi
 my-website/             -- Root of the website project.
     content/            -- All website content, including pages, images, CSS and JavaScript files.
         index.(html|md) -- Homepage/root index page.
-    data/               -- Optional data folder. Can contain Lua, TOML and XML files.
+    data/               -- Optional data folder. Can contain Lua, TOML, JSON and XML files.
     layouts/            -- All HTML layout templates.
         page.html       -- Default page layout template.
     output/             -- Where the built website ends up.

@@ -1,6 +1,24 @@
 Changelog
 LuaWebGen
 
+v1.3 (2021-05-24)
+- Added JSON as a supported data format.
+- Added "xml" as a new template file type (for e.g. RSS feeds and sitemaps).
+- Added commands 'new feed' and 'new sitemap'
+- Added site.description .
+- Added page.description and page.dateModified .
+- Added global 'utf8' module.
+- Added global 'scripts' object (similar to 'data').
+- Added functions: summarize(), getGeneratedPages(), echoSmart(), isValueHtml(), clampArray(), gmatchAndBetween(), json.parse(), toml.parse().
+- Added --date option for specifying the date to build for.
+- subpages() can now take a path prefix as an argument.
+- Trying to access page.content too early or in an invalid situation will now raise an error.
+- Improved some error messages.
+- Fixed subpages() including pages in sibling folders whose name begins with the same name (e.g. '/blog/index.md' included pages under '/blogosphere/').
+- XML module: All functions now work both on the library object and as methods on elements.
+- XML module: Added functions: xml.contentsToXml(), xml.contentsToHtml(), xml.getHtmlText().
+- XML module: xml.walk() now supports traversal actions by returning a value from the callback.
+
 v1.2 (2021-05-18)
 - Added config.dataTextParsers and config.dataBinaryParsers for defining custom data file parsers.
 - Added getDataTextParsers() and getDataBinaryParsers().
