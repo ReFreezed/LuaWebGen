@@ -880,7 +880,7 @@ end
 function _G.writeOutputFile(category, pathRel, url, data, modTime, sourcePath)
 	local pathOutputRel = rewriteOutputPath(pathRel)
 	if site._writtenOutputFiles[pathOutputRel] then
-		errorf("Duplicate output file '%s'.", pathOutputRel)
+		errorf("Output file collision for '%s':\n\tSource 1: %s\n\tSource 2: %s", pathOutputRel, site._writtenOutputFiles[pathOutputRel], sourcePath)
 	end
 	assert(not site._writtenOutputUrls[url])
 
@@ -916,7 +916,7 @@ function _G.writeOutputFile(category, pathRel, url, data, modTime, sourcePath)
 	table.insert(site._writtenOutputEntries, {path=sourcePath, pathOut=pathOutputRel, url=url})
 	table.insert(site._writtenOutputFiles,   pathOutputRel)
 	table.insert(site._writtenOutputUrls,    url)
-	site._writtenOutputFiles[pathOutputRel] = true
+	site._writtenOutputFiles[pathOutputRel] = sourcePath
 	site._writtenOutputUrls[url]            = true
 
 	assert(OUTPUT_CATEGORY_SET[category], category)
@@ -930,7 +930,7 @@ end
 function _G.preserveExistingOutputFile(category, pathRel, url, sourcePath)
 	local pathOutputRel = rewriteOutputPath(pathRel)
 	if site._writtenOutputFiles[pathOutputRel] then
-		errorf("Duplicate output file '%s'.", pathOutputRel)
+		errorf("Output file collision for '%s':\n\tSource 1: %s\n\tSource 2: %s", pathOutputRel, site._writtenOutputFiles[pathOutputRel], sourcePath)
 	end
 	assert(not site._writtenOutputUrls[url])
 
@@ -946,7 +946,7 @@ function _G.preserveExistingOutputFile(category, pathRel, url, sourcePath)
 	table.insert(site._writtenOutputEntries, {path=sourcePath, pathOut=pathOutputRel, url=url})
 	table.insert(site._writtenOutputFiles,   pathOutputRel)
 	table.insert(site._writtenOutputUrls,    url)
-	site._writtenOutputFiles[pathOutputRel] = true
+	site._writtenOutputFiles[pathOutputRel] = sourcePath
 	site._writtenOutputUrls[url]            = true
 
 	assert(OUTPUT_CATEGORY_SET[category], category)
@@ -2225,8 +2225,8 @@ function _G.newSite()
 		_pagesGenerating            = {--[[ [pathRelOut1]=true, ... ]]},
 
 		_writtenOutputEntries       = {--[[ { path=pathRel1, pathOut=pathOutputRel1, url=url1 }, ... ]]},
-		_writtenOutputFiles         = {--[[ [pathOutputRel1]=true, pathOutputRel1, ... ]]},
-		_writtenOutputUrls          = {--[[ [url1]=true,           url1,           ... ]]},
+		_writtenOutputFiles         = {--[[ [pathOutputRel1]=sourcePath1, pathOutputRel1, ... ]]},
+		_writtenOutputUrls          = {--[[ [url1]=true,                  url1,           ... ]]},
 		_writtenRedirects           = {--[[ [url1]=targetUrl1, ... ]]},
 		_unwrittenRedirects         = {--[[ [url1]=targetUrl1, ... ]]}, -- We use this for redirection of special URLs in .htaccess (e.g. URLs with queries).
 		_outputFileCount            = 0,
