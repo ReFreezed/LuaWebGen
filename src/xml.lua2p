@@ -19,32 +19,26 @@
 --=
 --==============================================================
 
-	xml.clone
+	xml.addChild
+	xml.clone, xml.filter
 	xml.compare
+	xml.eachChild, xml.eachChildElement, xml.eachMatchingChildElement
 	xml.encodeRequiredEntities, xml.encodeMoreEntities
+	xml.getAttributes, xml.setAttribute, xml.updateAttributes
+	xml.getChildByName, xml.findAllElementsByName
+	xml.getFirstElement
+	xml.getText, xml.getTextOfDirectChildren, xml.getHtmlText
 	xml.isElement, xml.isText
 	xml.makeElementConstructors
+	xml.mapElements
+	xml.match, xml.substitute
 	xml.newElement, xml.element
 	xml.parseXml, xml.parseHtml
 	xml.removeWhitespaceNodes
-	xml.substitute
+	xml.stackChild, xml.stackElement, xml.stackText, xml.stackUp, xml.stackReset
 	xml.toHtml, xml.contentsToHtml
 	xml.toXml, xml.toPrettyXml, xml.contentsToXml
 	xml.walk
-
-	Element.addChild
-	Element.eachChild, Element.eachChildElement, Element.eachMatchingChildElement
-	Element.filter
-	Element.getAttributes, Element.setAttribute, Element.updateAttributes
-	Element.getChildByName, Element.findAllElementsByName
-	Element.getFirstElement
-	Element.getText, Element.getTextOfDirectChildren, Element.getHtmlText
-	Element.mapElements
-	Element.match, Element.substitute
-	Element.removeWhitespaceNodes
-	Element.stackChild, Element.stackElement, Element.stackText, Element.stackUp, Element.stackReset
-	Element.toHtml, Element.contentsToHtml
-	Element.toXml, Element.toPrettyXml, Element.contentsToXml
 
 --============================================================]]
 
@@ -96,10 +90,8 @@ local HTML_END_TAG_PATTERNS_FOR_TAGS_WITH_UNENCODED_CONTENTS = {
 
 
 
-local xml = {}
-
-local Element   = {}
-Element.__index = Element
+local xml   = {}
+xml.__index = xml
 
 
 
@@ -527,37 +519,35 @@ end
 
 
 --==============================================================
---= Element methods
+--= API
 --==============================================================
 
 
 
--- Element:addChild( childNode )
-function Element.addChild(el, childNode)
+function xml.addChild(el, childNode)
 	table.insert(el, childNode)
 end
-Element.add_direct_child = Element.addChild -- :PenlightCompatibility
+xml.add_direct_child = xml.addChild -- :PenlightCompatibility
 
 
 
--- element = Element:getFirstElement( )
-function Element.getFirstElement(el)
+function xml.getFirstElement(el)
 	for _, childNode in ipairs(el) do
 		if xml.isElement(childNode) then  return childNode  end
 	end
 	return nil
 end
-Element.first_childtag = Element.getFirstElement -- :PenlightCompatibility
+xml.first_childtag = xml.getFirstElement -- :PenlightCompatibility
 
--- element = Element:getChildByName( tag )
-function Element.getChildByName(el, tagName)
+-- childElement = xml.getChildByName( element, tag )
+function xml.getChildByName(el, tagName)
 	for _, childNode in ipairs(el) do
 		if xml.isElement(childNode) and childNode.tag == tagName then
 			return childNode
 		end
 	end
 end
-Element.child_with_name = Element.getChildByName -- :PenlightCompatibility
+xml.child_with_name = xml.getChildByName -- :PenlightCompatibility
 
 do
 	local function _findAllElementsByName(el, tagName, elements, recurse)
@@ -573,29 +563,29 @@ do
 		end
 	end
 
-	-- elements = Element:findAllElementsByName( tag [, doNotRecurse=false ] )
-	function Element.findAllElementsByName(el, tagName, doNotRecurse)
+	-- elements = xml.findAllElementsByName( element, tag [, doNotRecurse=false ] )
+	function xml.findAllElementsByName(el, tagName, doNotRecurse)
 		local elements = {}
 		_findAllElementsByName(el, tagName, elements, (not doNotRecurse))
 		return elements
 	end
-	Element.get_elements_with_name = Element.findAllElementsByName -- :PenlightCompatibility
+	xml.get_elements_with_name = xml.findAllElementsByName -- :PenlightCompatibility
 end
 
 
 
--- for childNode in Element:eachChild( )
-function Element.eachChild(el)
+-- for childNode in xml.eachChild( element )
+function xml.eachChild(el)
 	local i = 0
 	return function()
 		i = i + 1
 		return el[i]
 	end
 end
-Element.children = Element.eachChild -- :PenlightCompatibility
+xml.children = xml.eachChild -- :PenlightCompatibility
 
--- for childElement in Element:eachChildElement( )
-function Element.eachChildElement(el)
+-- for childElement in xml.eachChildElement( element )
+function xml.eachChildElement(el)
 	local i = 0
 
 	return function()
@@ -608,10 +598,10 @@ function Element.eachChildElement(el)
 		end
 	end
 end
-Element.childtags = Element.eachChildElement -- :PenlightCompatibility
+xml.childtags = xml.eachChildElement -- :PenlightCompatibility
 
--- for childElement in Element:eachMatchingChildElement( tag )
-function Element.eachMatchingChildElement(el, tagName)
+-- for childElement in xml.eachMatchingChildElement( element, tag )
+function xml.eachMatchingChildElement(el, tagName)
 	local i = 0
 
 	return function()
@@ -629,8 +619,8 @@ function Element.eachMatchingChildElement(el, tagName)
 end
 
 -- :PenlightCompatibility
--- for childElement in Element:matching_tags( [ tag=any, xmlns=(self.attr.xmlns or any) ] ) -- This function has no new replacement and is @Undocumented.
-function Element.matching_tags(el, tagName, xmlns)
+-- for childElement in xml.matching_tags( element [, tag=any, xmlns=(self.attr.xmlns or any) ] ) -- This function has no new replacement and is @Undocumented.
+function xml.matching_tags(el, tagName, xmlns)
 	xmlns   = xmlns or el.attr.xmlns
 	local i = 0
 
@@ -654,26 +644,24 @@ end
 
 
 
--- attributes = Element:getAttributes( )
-function Element.getAttributes(el)
+function xml.getAttributes(el)
 	return el.attr
 end
-Element.get_attribs = Element.getAttributes -- :PenlightCompatibility
+xml.get_attribs = xml.getAttributes -- :PenlightCompatibility
 
--- Element:setAttribute( attributeName, attributeValue )
--- Element:setAttribute( attributeName, nil ) -- Remove the attribute.
-function Element.setAttribute(el, attrName, attrValue)
+-- xml.setAttribute( element, attributeName, attributeValue )
+-- xml.setAttribute( element, attributeName, nil ) -- Remove the attribute.
+function xml.setAttribute(el, attrName, attrValue)
 	el.attr[attrName] = attrValue
 end
-Element.set_attrib = Element.setAttribute -- :PenlightCompatibility
+xml.set_attrib = xml.setAttribute -- :PenlightCompatibility
 
--- Element:updateAttributes( attributes )
-function Element.updateAttributes(el, attrs)
+function xml.updateAttributes(el, attrs)
 	for attrName, attrValue in pairs(attrs) do
 		el.attr[attrName] = attrValue
 	end
 end
-Element.set_attribs = Element.updateAttributes -- :PenlightCompatibility
+xml.set_attribs = xml.updateAttributes -- :PenlightCompatibility
 
 
 
@@ -688,8 +676,7 @@ do
 		end
 	end
 
-	-- text = Element:getText( )
-	function Element.getText(el)
+	function xml.getText(el)
 		local buffer = {}
 		_getText(buffer, el)
 		return table.concat(buffer)
@@ -697,15 +684,14 @@ do
 end
 
 -- This function is pretty silly - use getText() instead!
--- text = Element:getTextOfDirectChildren( )
-function Element.getTextOfDirectChildren(el)
+function xml.getTextOfDirectChildren(el)
 	local buffer = {}
 	for _, childNode in ipairs(el) do
 		if !!(IS_TEXT`childNode`) then  table.insert(buffer, childNode)  end
 	end
 	return table.concat(buffer)
 end
-Element.get_text = Element.getTextOfDirectChildren -- :PenlightCompatibility
+xml.get_text = xml.getTextOfDirectChildren -- :PenlightCompatibility
 
 do
 	local function _getHtmlText(buffer, el)
@@ -725,8 +711,8 @@ do
 		end
 	end
 
-	-- text = Element:getHtmlText( )
-	function Element.getHtmlText(el)
+	-- text = xml.getHtmlText( element )
+	function xml.getHtmlText(el)
 		local buffer = {}
 		_getHtmlText(buffer, el)
 		return table.concat(buffer)
@@ -892,11 +878,11 @@ do
 		return ok
 	end
 
-	-- matches = Element:match( xmlStringPattern )
-	-- matches = Element:match( elementPattern )
+	-- matches = xml.match( element, xmlStringPattern )
+	-- matches = xml.match( element, elementPattern )
 	-- Returns nil and a message on error.
 	-- (See https://lunarmodules.github.io/Penlight/manual/06-data.md.html#XML - look for sections describing templates)
-	function Element.match(el, patStrOrEl)
+	function xml.match(el, patStrOrEl)
 		local patEl, err = cacheIfXmlString(patStrOrEl)
 		if not patEl then  return nil, err  end
 
@@ -930,15 +916,15 @@ end
 --
 
 -- self = Element:stackChild( childNode )
-function Element.stackChild(el, childNode)
+function xml.stackChild(el, childNode)
 	local targetEl = (el._last and el._last[#el._last] or el)
 	targetEl:addChild(childNode)
 	return el
 end
-Element.add_child = Element.stackChild -- :PenlightCompatibility
+xml.add_child = xml.stackChild -- :PenlightCompatibility
 
 -- self = Element:stackElement( tag [, attributes ] )
-function Element.stackElement(el, tagName, attrs)
+function xml.stackElement(el, tagName, attrs)
 	!ARGS "tagName:string ? attrs:table"
 
 	el._last = el._last or {}
@@ -951,25 +937,25 @@ function Element.stackElement(el, tagName, attrs)
 
 	return el
 end
-Element.addtag = Element.stackElement -- :PenlightCompatibility
+xml.addtag = xml.stackElement -- :PenlightCompatibility
 
 -- self = Element:stackText( text )
-function Element.stackText(el, text)
+function xml.stackText(el, text)
 	local targetEl = (el._last and el._last[#el._last] or el)
 	targetEl:addChild(text)
 	return el
 end
-Element.text = Element.stackText -- :PenlightCompatibility
+xml.text = xml.stackText -- :PenlightCompatibility
 
 -- self = Element:stackUp( )
-function Element.stackUp(el)
+function xml.stackUp(el)
 	if el._last then  table.remove(el._last)  end
 	return el
 end
-Element.up = Element.stackUp -- :PenlightCompatibility
+xml.up = xml.stackUp -- :PenlightCompatibility
 
 -- self = Element:stackReset( )
-function Element.stackReset(el)
+function xml.stackReset(el)
 	if el._last then
 		for i = #el._last, 1, -1 do
 			el._last[i] = nil
@@ -977,13 +963,13 @@ function Element.stackReset(el)
 	end
 	return el
 end
-Element.reset = Element.stackReset -- :PenlightCompatibility
+xml.reset = xml.stackReset -- :PenlightCompatibility
 
 
 
--- self            = Element:mapElements( callback )
+-- element         = xml.mapElements( element, callback )
 -- replacementNode = callback( childElement ) -- Returning nil removes the element.
-function Element.mapElements(el, cb)
+function xml.mapElements(el, cb)
 	local i = 1
 
 	while el[i] do
@@ -1002,7 +988,7 @@ function Element.mapElements(el, cb)
 
 	return el
 end
-Element.maptags = Element.mapElements -- :PenlightCompatibility
+xml.maptags = xml.mapElements -- :PenlightCompatibility
 
 
 
@@ -1015,10 +1001,10 @@ do
 		end
 	end
 
-	-- newElement = Element:substitute( data )
-	-- newElement = Element.substitute( xmlString, data )
+	-- newElement = xml.substitute( element,   data )
+	-- newElement = xml.substitute( xmlString, data )
 	-- Returns nil and a message on error.
-	function Element.substitute(templateStrOrEl, data)
+	function xml.substitute(templateStrOrEl, data)
 		if not (type(data) == "table" and next(data)) then
 			return nil, "data must be a non-empty table"
 		end
@@ -1049,15 +1035,8 @@ do
 
 		return list
 	end
-	xml.substitute = Element.substitute -- :Alias
-	Element.subst  = Element.substitute -- :PenlightCompatibility
+	xml.subst = xml.substitute -- :PenlightCompatibility
 end
-
-
-
---==============================================================
---= Library functions
---==============================================================
 
 
 
@@ -1129,7 +1108,6 @@ function xml.toXml(node, preface)
 	nodeToXml(buffer, node)
 	return table.concat(buffer, "")
 end
-Element.toXml = xml.toXml -- :Alias
 
 -- xmlString = xml.contentsToXml( node )
 function xml.contentsToXml(node)
@@ -1141,7 +1119,6 @@ function xml.contentsToXml(node)
 	end
 	return table.concat(buffer, "")
 end
-Element.contentsToXml = xml.contentsToXml -- :Alias
 
 
 
@@ -1234,9 +1211,8 @@ function xml.toPrettyXml(node, initialIndent,indent,attrIndent, preface)
 
 	return table.concat(buffer)
 end
-Element.toPrettyXml = xml.toPrettyXml -- :Alias
-xml.tostring        = xml.toPrettyXml -- :PenlightCompatibility
-Element.__tostring  = xml.toPrettyXml -- :PenlightCompatibility
+xml.tostring   = xml.toPrettyXml -- :PenlightCompatibility
+xml.__tostring = xml.toPrettyXml -- :PenlightCompatibility
 
 
 
@@ -1306,7 +1282,6 @@ function xml.toHtml(node, preface)
 	nodeToHtml(buffer, node)
 	return table.concat(buffer, "")
 end
-Element.toHtml = xml.toHtml -- :Alias
 
 -- htmlString = xml.contentsToHtml( node )
 function xml.contentsToHtml(node)
@@ -1318,7 +1293,6 @@ function xml.contentsToHtml(node)
 	end
 	return table.concat(buffer, "")
 end
-Element.contentsToHtml = xml.contentsToHtml -- :Alias
 
 
 
@@ -1484,7 +1458,7 @@ end
 
 -- bool = xml.isElement( value )
 function xml.isElement(v)
-	return getmetatable(v) == Element
+	return getmetatable(v) == xml
 end
 xml.is_tag = xml.isElement -- :PenlightCompatibility
 
@@ -1507,7 +1481,7 @@ function xml.newElement(tagName, attrs)
 
 		-- [1] = childNode1, ...
 	}
-	return setmetatable(el, Element)
+	return setmetatable(el, xml)
 end
 xml.new = xml.newElement -- :PenlightCompatibility
 
@@ -1583,7 +1557,7 @@ do
 	function xml.clone(node, textSubstCallback)
 		return (_clone(node, textSubstCallback, nil))
 	end
-	Element.filter = xml.clone -- :Alias
+	xml.filter = xml.clone -- :Alias
 end
 
 
@@ -1663,7 +1637,6 @@ function xml.removeWhitespaceNodes(doc)
 		end
 	end
 end
-Element.removeWhitespaceNodes = xml.removeWhitespaceNodes -- :Alias
 
 
 
