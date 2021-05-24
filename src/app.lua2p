@@ -766,11 +766,12 @@ local function setup()
 			-- There's no reason to restrict context for this function, I don't think. 2021-04-27
 			local fileInfos = {}
 
-			for _, entry in ipairs(site._writtenOutputEntries) do
+			for i, entry in ipairs(site._writtenOutputEntries) do
 				table.insert(fileInfos, {
 					sourcePath = entry.path ~= "" and pathToSitePath(entry.path) or "",
 					path       = pathToSitePath(entry.pathOut),
 					url        = entry.url,
+					serial     = i, -- @Doc?
 				})
 			end
 

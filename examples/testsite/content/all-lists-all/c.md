@@ -1,5 +1,6 @@
 {{
-page.title = "B"
+page.title = "C"
+page.date  = "2021-01-01"
 lock()
 }}
 

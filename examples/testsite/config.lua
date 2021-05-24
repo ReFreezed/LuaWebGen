@@ -62,11 +62,21 @@ end
 
 -- After all generation.
 config.validate = function()
+	local fileInfos = getOutputtedFiles()
+
 	print("Written files:")
 	printf("  %-30s %-40s %s", "SOURCE", "PATH", "URL")
-	for _, fileInfo in ipairs(getOutputtedFiles()) do
+	for _, fileInfo in ipairs(fileInfos) do
 		printf("  %-30s %-40s %s", fileInfo.sourcePath, fileInfo.path, fileInfo.url)
 	end
+
+	local fileInfoNonTemplate = find(fileInfos, "sourcePath", "/images/head.png")
+	local fileInfoNonPage     = find(fileInfos, "sourcePath", "/css/style.css")
+	local fileInfoPage        = find(fileInfos, "sourcePath", "/blog/index.md")
+	local fileInfoSitemap     = find(fileInfos, "sourcePath", "/sitemap.xml")
+	assert(fileInfoNonTemplate.serial < fileInfoNonPage.serial)
+	assert(fileInfoNonPage.serial     < fileInfoPage.serial)
+	assert(fileInfoPage.serial        < fileInfoSitemap.serial)
 end
 
 
