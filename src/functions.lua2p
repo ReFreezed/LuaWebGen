@@ -21,6 +21,7 @@
 	error, errorf, fileError, errorNoPos
 	F, formatBytes, formatTemplate
 	generateFromTemplateString, generateFromTemplateFile, generateRedirection
+	generateNonPages
 	generatorMeta
 	getCwd
 	getDirectory, getFilename, getExtension, getBasename
@@ -735,35 +736,41 @@ do
 	-- stringResult = parseAndRunTemplate( page, path, template, fileType=fromPage, useCache, onPageInit=nil )
 	-- onPageInit   = function( wrappedPage )
 	function _G.parseAndRunTemplate(page, path, template, fileType, useCache, onPageInit)
-		if template == "" and not onPageInit then  return ""  end
-
-		fileType = (fileType or site._fileTypes[page._extension])
-
-		!local PRINT_RESULT = DEV and 1==0
+		-- timestampPrintVerbose("--> Template(start): %s", path)
 		local result
 
-		if fileType == "markdown" then
-			result = _parseAndRunTemplate(page, path, template, useCache, onPageInit, true)
-			result = markdownToHtml(result)
-			result = trimNewlines(result).."\n" -- :Beautify
-			!if PRINT_RESULT then  __LUA` print"-- HTML --" print(result) print"-- /HTML --" `  end
-
-		elseif fileType == "html" then
-			result = _parseAndRunTemplate(page, path, template, useCache, onPageInit, true)
-			result = trimNewlines(result).."\n" -- :Beautify
-			!if PRINT_RESULT then  __LUA` print"-- HTML --" print(result) print"-- /HTML --" `  end
-
-		elseif fileType == "xml" then
-			result = _parseAndRunTemplate(page, path, template, useCache, onPageInit, true)
-			result = trimNewlines(result).."\n" -- :Beautify
-			!if PRINT_RESULT then  __LUA` print"-- XML --" print(result) print"-- /XML --" `  end
+		if template == "" and not onPageInit then
+			result = ""
 
 		else
-			result = _parseAndRunTemplate(page, path, template, useCache, onPageInit, false)
-			result = trimNewlines(result).."\n" -- :Beautify
-			!if PRINT_RESULT then  __LUA` print"-- result --" print(result) print"-- /result --" `  end
+			fileType = (fileType or site._fileTypes[page._extension])
+
+			!local PRINT_RESULT = DEV and 1==0
+
+			if fileType == "markdown" then
+				result = _parseAndRunTemplate(page, path, template, useCache, onPageInit, true)
+				result = markdownToHtml(result)
+				result = trimNewlines(result).."\n" -- :Beautify
+				!if PRINT_RESULT then  __LUA` print"-- HTML --" print(result) print"-- /HTML --" `  end
+
+			elseif fileType == "html" then
+				result = _parseAndRunTemplate(page, path, template, useCache, onPageInit, true)
+				result = trimNewlines(result).."\n" -- :Beautify
+				!if PRINT_RESULT then  __LUA` print"-- HTML --" print(result) print"-- /HTML --" `  end
+
+			elseif fileType == "xml" then
+				result = _parseAndRunTemplate(page, path, template, useCache, onPageInit, true)
+				result = trimNewlines(result).."\n" -- :Beautify
+				!if PRINT_RESULT then  __LUA` print"-- XML --" print(result) print"-- /XML --" `  end
+
+			else
+				result = _parseAndRunTemplate(page, path, template, useCache, onPageInit, false)
+				result = trimNewlines(result).."\n" -- :Beautify
+				!if PRINT_RESULT then  __LUA` print"-- result --" print(result) print"-- /result --" `  end
+			end
 		end
 
+		-- timestampPrintVerbose("--> Template(finish): %s", path)
 		return result
 	end
 
@@ -1750,6 +1757,7 @@ function _G.generateFromTemplateString(page, template, modTime, onPageInit)
 	local ext      = getExtension(filename)
 	local extLower = ext:lower()
 
+	timestampPrintVerbose("--> Processing(start): %s", page._path)
 	local result
 
 	if page.isPage.v then
@@ -1762,6 +1770,8 @@ function _G.generateFromTemplateString(page, template, modTime, onPageInit)
 			(page.isDraft.v and not includeDrafts          ) or -- Is draft?
 			(datetimeToTime(page.publishDate:g()) > nowTime)    -- Is in future?
 		then
+			timestampPrintVerbose("--> Processing(abort): %s", page._path)
+
 			page._isSkipped                  = true
 			site._outputFileSkippedPageCount = site._outputFileSkippedPageCount + 1
 
@@ -1787,6 +1797,8 @@ function _G.generateFromTemplateString(page, template, modTime, onPageInit)
 		result = parseAndRunTemplate(page, page._pathForError, template, nil, false, onPageInit)
 	end
 
+	timestampPrintVerbose("--> Processing(finish): %s", page._path)
+
 	writeOutputFile(page._category, page._pathOut, page.url.v, result, modTime, page._path)
 	page._isGenerated = true
 
@@ -1794,6 +1806,8 @@ function _G.generateFromTemplateString(page, template, modTime, onPageInit)
 	site._pagesGenerating[page._pathOut] = nil
 end
 
+-- generateFromTemplateFile( page )
+-- Does nothing for skipped pages, or pages that are currently generating but are safely locked.
 function _G.generateFromTemplateFile(page)
 	if page._isSkipped then  return  end
 	if page._isGenerating and page._isLocked then  return  end -- Allowed recursion.
@@ -1888,6 +1902,16 @@ function _G.generateRedirection(url, targetUrl, sourcePath)
 	end
 
 	site._writtenRedirects[url] = targetUrl
+end
+
+
+
+function _G.generateNonPages()
+	for _, page in ipairs(site._nonPagePages) do
+		if not page._isGenerated then
+			generateFromTemplateFile(page) -- Note that this template may trigger generation of actual pages at some point before it finishes (e.g. by calling subpages()).
+		end
+	end
 end
 
 
@@ -2221,7 +2245,8 @@ function _G.newSite()
 
 		_scripts                    = newScriptFolderReader(DIR_SCRIPTS),
 
-		_pages                      = {--[[ page1, ... ]]},
+		_pages                      = {--[[ page1, ... ]]}, -- Page with isPage==true.
+		_nonPagePages               = {--[[ page1, ... ]]}, -- Page with isPage==false.
 		_pagesGenerating            = {--[[ [pathRelOut1]=true, ... ]]},
 
 		_writtenOutputEntries       = {--[[ { path=pathRel1, pathOut=pathOutputRel1, url=url1 }, ... ]]},

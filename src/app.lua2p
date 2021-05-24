@@ -1075,7 +1075,9 @@ local function setup()
 				errorf(2, "Could not read file '%s': %s", path, err)
 			end
 
+			-- timestampPrintVerbose("--> Processing(start): %s", path)
 			local html = parseAndRunTemplate(getContext().page, path, template, "html", true, nil)
+			-- timestampPrintVerbose("--> Processing(finish): %s", path)
 			return html
 		end,
 
@@ -1146,6 +1148,8 @@ local function setup()
 				pathPrefix       = pageCurrent._path:gsub("[^/]+$", "")
 				allowCurrentPage = pathPrefixOrAllowCurrentPage
 			end
+
+			generateNonPages() -- Make sure as many non-pages as possible finish generating before any actual page begins.
 
 			for _, page in ipairs(site._pages) do
 				if (page ~= pageCurrent or allowCurrentPage) and (
@@ -1522,15 +1526,15 @@ local function buildWebsite()
 	if onBefore then
 		!PUSH_CONTEXT "config"
 			local before = onBefore -- :BetterTraceback
+			timestampPrintVerbose("--> config.before(start)")
 			before()
+			timestampPrintVerbose("--> config.before(finish)")
 		!POP_CONTEXT()
 	end
 
 	--
 	-- Generate output
 	--
-	local nonPagePages = {}
-
 	traverseFiles(DIR_CONTENT, site._ignoreFolders, function(path, pathRel, filename, extLower)
 		-- Ignored.
 		if
@@ -1543,7 +1547,7 @@ local function buildWebsite()
 		elseif site._fileTypes[extLower] then
 			-- Generate these later so e.g. urlExists() works better.
 			local page       = newPage(pathRel, false)
-			local pagesArray = (page.isPage and site._pages or nonPagePages)
+			local pagesArray = (page.isPage.v and site._pages or site._nonPagePages)
 			table.insert(pagesArray, page)
 
 		-- Special.
@@ -1571,20 +1575,24 @@ local function buildWebsite()
 		end
 	end)
 
-	for _, page in ipairs(nonPagePages) do
-		generateFromTemplateFile(page) -- Note that this template may trigger generation of actual pages (e.g. by calling subpages()).
-	end
+	timestampPrintVerbose("--> RegularGeneration(start)")
+
+	generateNonPages()
 
 	for _, page in ipairs(site._pages) do
-		if not (page._isGenerated or page._isSkipped) then
+		if not page._isGenerated then
 			generateFromTemplateFile(page)
 		end
 	end
 
+	timestampPrintVerbose("--> RegularGeneration(finish)")
+
 	if onAfter then
 		!PUSH_CONTEXT "config"
 			local after = onAfter -- :BetterTraceback
+			timestampPrintVerbose("--> config.after(start)")
 			after()
+			timestampPrintVerbose("--> config.after(finish)")
 		!POP_CONTEXT()
 	end
 
@@ -1843,7 +1851,9 @@ local function buildWebsite()
 	if onValidate then
 		!PUSH_CONTEXT "validation"
 			local validate = onValidate -- :BetterTraceback
+			timestampPrintVerbose("--> config.validate(start)")
 			validate()
+			timestampPrintVerbose("--> config.validate(finish)")
 		!POP_CONTEXT()
 	end
 
