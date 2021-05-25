@@ -36,8 +36,8 @@ end
 -- Before regular generation.
 local dogPageTemplate = [[
 {{
-page.date  = "2012-01-14"
 page.title = "A Dog of Mine: "..P.dog.name
+page.date  = "2012-01-14"
 }}
 
 The dog named {{P.dog.name}} is {{P.dog.age}} years old.

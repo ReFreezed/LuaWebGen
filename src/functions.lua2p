@@ -10,7 +10,6 @@
 --=
 --==============================================================
 
-	assert
 	attributeWith, attributeWithAny
 	cleanupPath
 	countString, countSubString
@@ -32,8 +31,7 @@
 	getProtectionWrapper
 	getTimeBetter, sleep
 	getTimezone, getTimezoneOffsetString, getTimezoneOffset
-	gmatchAndBetween
-	gsubPlainSub
+	gsubPlainSub, gmatchAndBetween
 	htaccessRewriteEscapeTestString, htaccessRewriteEscapeCondPattern, htaccessRewriteEscapeRuleSubstitution
 	indexOf, itemWith, itemWithAll
 	insertMultiple
@@ -43,6 +41,8 @@
 	isFile, isDirectory
 	isStringMatchingAnyPattern
 	loadImage, getImageDimensions
+	loadLuaFile
+	maybeFullPath
 	newDataFolderReader, isDataFolderReader, preloadData
 	newScriptFolderReader, isScriptFolderReader, preloadScripts
 	newSite, newPage
@@ -99,10 +99,8 @@ function _G.traverseDirectory(dirPath, ignoreFolders, cb, _pathRelStart)
 				local abort = traverseDirectory(path, ignoreFolders, cb, _pathRelStart)
 				if abort then  return true  end
 			end
-
 		end
 	end
-
 end
 
 function _G.traverseFiles(dirPath, ignoreFolders, cb, _pathRelStart)
@@ -124,10 +122,8 @@ function _G.traverseFiles(dirPath, ignoreFolders, cb, _pathRelStart)
 				local abort = traverseFiles(path, ignoreFolders, cb, _pathRelStart)
 				if abort then  return true  end
 			end
-
 		end
 	end
-
 end
 
 
@@ -682,7 +678,7 @@ do
 
 			if outputMetaprograms then
 				local metaPath = "temp/meta/" .. path:gsub("/", "__") .. ".lua"
-				timestampPrintVerbose("Writing: %s", metaPath)
+				timestampPrintVerbose("Writing: %s", maybeFullPath(metaPath))
 
 				createDirectory("temp/meta")
 
@@ -700,7 +696,7 @@ do
 			!end
 		end
 
-		local main_chunk, err = loadstring(luaCode, "@"..path)
+		local main_chunk, err = loadstring(luaCode, "@"..maybeFullPath(path))
 		if not main_chunk then  errorNoPos(err)  end
 
 		setfenv(main_chunk, scriptEnvironment)
@@ -736,7 +732,7 @@ do
 	-- stringResult = parseAndRunTemplate( page, path, template, fileType=fromPage, useCache, onPageInit=nil )
 	-- onPageInit   = function( wrappedPage )
 	function _G.parseAndRunTemplate(page, path, template, fileType, useCache, onPageInit)
-		-- timestampPrintVerbose("--> Template(start): %s", path)
+		-- timestampPrintVerbose("--> Template(start): %s", maybeFullPath(path))
 		local result
 
 		if template == "" and not onPageInit then
@@ -770,7 +766,7 @@ do
 			end
 		end
 
-		-- timestampPrintVerbose("--> Template(finish): %s", path)
+		-- timestampPrintVerbose("--> Template(finish): %s", maybeFullPath(path))
 		return result
 	end
 
@@ -810,9 +806,9 @@ do
 		local ln = contents and getLineNumber(contents, pos) or pos
 
 		if type(s) ~= "string" then
-			s = F("%s:%d: %s", path, ln, tostring(s))
+			s = F("%s:%d: %s", maybeFullPath(path), ln, tostring(s))
 		else
-			s = F("%s:%d: "..s, path, ln, ...)
+			s = F("%s:%d: "..s, maybeFullPath(path), ln, ...)
 		end
 
 		if contents then
@@ -905,7 +901,7 @@ function _G.writeOutputFile(category, pathRel, url, data, modTime, sourcePath)
 	end
 
 	local path = DIR_OUTPUT.."/"..pathOutputRel
-	timestampPrintVerbose("Writing: %s", path)
+	timestampPrintVerbose("Writing: %s", maybeFullPath(path))
 
 	createDirectory(getDirectory(path))
 
@@ -916,7 +912,7 @@ function _G.writeOutputFile(category, pathRel, url, data, modTime, sourcePath)
 	if modTime then
 		local ok, err = lfs.touch(path, modTime)
 		if not ok then
-			timestampPrintError("Could not update modification time for '%s'. (%s)", path, err)
+			timestampPrintError("Could not update modification time for '%s'. (%s)", maybeFullPath(path), err)
 		end
 	end
 
@@ -942,11 +938,11 @@ function _G.preserveExistingOutputFile(category, pathRel, url, sourcePath)
 	assert(not site._writtenOutputUrls[url])
 
 	local path = DIR_OUTPUT.."/"..pathOutputRel
-	timestampPrintVerbose("Preserving: %s", path)
+	timestampPrintVerbose("Preserving: %s", maybeFullPath(path))
 
 	local dataLen, err = lfs.attributes(path, "size")
 	if not dataLen then
-		timestampPrintError("Could not retrieve size of file '%s'. (%s)", path, err)
+		timestampPrintError("Could not retrieve size of file '%s'. (%s)", maybeFullPath(path), err)
 		dataLen = 0
 	end
 
@@ -979,7 +975,7 @@ function _G.createDirectory(path)
 	for folder in path:gmatch"[^/]+" do
 		pathConstructed = (pathConstructed == "" and folder or pathConstructed.."/"..folder)
 		if not (isDirectory(pathConstructed) or lfs.mkdir(pathConstructed)) then
-			errorf("Could not create directory '%s'.", pathConstructed)
+			errorf("Could not create directory '%s'.", maybeFullPath(pathConstructed))
 		end
 	end
 end
@@ -998,7 +994,7 @@ function _G.removeEmptyDirectories(dirPath)
 		if filename ~= "." and filename ~= ".." and isDirectory(path) then
 			removeEmptyDirectories(path)
 			if isDirectoryEmpty(path) then
-				timestampPrintVerbose("Removing empty folder: %s", path)
+				timestampPrintVerbose("Removing empty folder: %s", maybeFullPath(path))
 				assert(lfs.rmdir(path))
 			end
 		end
@@ -1442,28 +1438,28 @@ _G.dataParserIsBinary = {}
 
 -- dataParserIsBinary.html = false
 -- function dataParsers.html(dataStr, path) -- Why would anyone use this? Just, why?
--- 	local doc, err = xmlLib.parseHtml(dataStr, path)
+-- 	local doc, err = xmlLib.parseHtml(dataStr, maybeFullPath(path))
 -- 	if not doc then  errorNoPos(err)  end
 -- 	return doc
 -- end
 
 dataParserIsBinary.json = false
 function dataParsers.json(dataStr, path)
-	local v, err = jsonLib.parse(dataStr, path)
+	local v, err = jsonLib.parse(dataStr, maybeFullPath(path))
 	if not v then  errorNoPos(err)  end
 	return v
 end
 
 dataParserIsBinary.lua = false
 function dataParsers.lua(dataStr, path)
-	local chunk, err = loadstring(dataStr, "@"..path)
+	local chunk, err = loadstring(dataStr, "@"..maybeFullPath(path))
 	if not chunk then  errorf(3, "Error loading Lua data file: %s", err)  end
 
 	setfenv(chunk, scriptEnvironment)
 
 	local dataObj = chunk()
 	if dataObj == nil then
-		errorf(3, "Lua data file returned nothing. (%s)", path)
+		errorf(3, "Lua data file returned nothing. (%s)", maybeFullPath(path))
 	end
 
 	return dataObj
@@ -1471,14 +1467,14 @@ end
 
 dataParserIsBinary.toml = false
 function dataParsers.toml(dataStr, path)
-	local ok, tOrErr = pcall(tomlLib.parse, dataStr, {pathForErrors=path})
+	local ok, tOrErr = pcall(tomlLib.parse, dataStr, {pathForErrors=maybeFullPath(path)})
 	if not ok then  errorNoPos(tOrErr)  end
 	return tOrErr
 end
 
 dataParserIsBinary.xml = false
 function dataParsers.xml(dataStr, path)
-	local doc, err = xmlLib.parseXml(dataStr, path)
+	local doc, err = xmlLib.parseXml(dataStr, maybeFullPath(path))
 	if not doc then  errorNoPos(err)  end
 	return doc
 end
@@ -1524,7 +1520,7 @@ function _G.newDataFolderReader(dir, checkDirExistance)
 						!POP_CONTEXT()
 
 						if dataObj == nil then
-							errorf(2, "Data parser for '%s' files returned nothing. (%s)", ext, path)
+							errorf(2, "Data parser for '%s' files returned nothing. (%s)", ext, maybeFullPath(path))
 						end
 
 						break
@@ -1601,15 +1597,12 @@ function _G.newScriptFolderReader(dir)
 			elseif isFile(F("%s/%s.lua", dir, k)) then
 				local path = F("%s/%s.lua", dir, k)
 
-				local main_chunk, err = loadfile(path)
-				if not main_chunk then
-					error(err, 2)
-				end
+				local main_chunk, err = loadLuaFile(path, scriptEnvironment)
+				if not main_chunk then  error(err, 2)  end
 
-				setfenv(main_chunk, scriptEnvironment)
 				scriptObj = main_chunk()
 				if type(scriptObj) ~= "function" then
-					errorNoPos("%s did not return a function.", path)
+					errorNoPos("%s did not return a function.", maybeFullPath(path))
 				end
 
 			elseif isDirectory(F("%s/%s", dir, k)) then
@@ -1743,10 +1736,10 @@ function _G.generateFromTemplateString(page, template, modTime, onPageInit)
 	assert(type(template) == "string")
 
 	if page._isGenerated then
-		errorf(2, "Page has already generated. (%s)", page._path)
+		errorf(2, "Page has already generated. (%s)", maybeFullPath(page._path))
 	end
 	if page._isGenerating or site._pagesGenerating[page._pathOut] then
-		errorf(2, "Recursive page generation detected. (You may want to call lock() in '%s')", page._path)
+		errorf(2, "Recursive page generation detected. (You may want to call lock() in '%s')", maybeFullPath(page._path))
 	end
 
 	page._isGenerating                   = true
@@ -1757,7 +1750,7 @@ function _G.generateFromTemplateString(page, template, modTime, onPageInit)
 	local ext      = getExtension(filename)
 	local extLower = ext:lower()
 
-	timestampPrintVerbose("--> Processing(start): %s", page._path)
+	timestampPrintVerbose("--> Processing(start): %s", maybeFullPath(page._path))
 	local result
 
 	if page.isPage.v then
@@ -1770,7 +1763,7 @@ function _G.generateFromTemplateString(page, template, modTime, onPageInit)
 			(page.isDraft.v and not includeDrafts          ) or -- Is draft?
 			(datetimeToTime(page.publishDate:g()) > nowTime)    -- Is in future?
 		then
-			timestampPrintVerbose("--> Processing(abort): %s", page._path)
+			timestampPrintVerbose("--> Processing(abort): %s", maybeFullPath(page._path))
 
 			page._isSkipped                  = true
 			site._outputFileSkippedPageCount = site._outputFileSkippedPageCount + 1
@@ -1797,7 +1790,7 @@ function _G.generateFromTemplateString(page, template, modTime, onPageInit)
 		result = parseAndRunTemplate(page, page._pathForError, template, nil, false, onPageInit)
 	end
 
-	timestampPrintVerbose("--> Processing(finish): %s", page._path)
+	timestampPrintVerbose("--> Processing(finish): %s", maybeFullPath(page._path))
 
 	writeOutputFile(page._category, page._pathOut, page.url.v, result, modTime, page._path)
 	page._isGenerated = true
@@ -1967,7 +1960,7 @@ function _G.getLayoutTemplate(page)
 
 	local template, err = getFileContentsText(path)
 	if not template then
-		errorf("%s: Could not load layout '%s'. (%s)", page._path, page.layout.v, err)
+		errorf("%s: Could not load layout '%s'. (%s)", maybeFullPath(page._path), page.layout.v, err)
 	end
 
 	site._layoutTemplates[path] = template
@@ -2293,7 +2286,7 @@ end
 
 do
 	local function removeIndexFilename(pathRel)
-		local sitePath = pathToSitePath(pathRel) :gsub("/index%.%w+$", "/")
+		local sitePath = pathToSitePath(pathRel) :gsub("/index%.[^./]+$", "/")
 		return (sitePathToPath(sitePath, 2))
 	end
 
@@ -2346,7 +2339,7 @@ do
 			_contentIsAvailable = false,
 			_path               = pathRel,
 			_pathOut            = pathRelOut,
-			_pathForError       = F("%s/%s", DIR_CONTENT, pathRel),
+			_pathForError       = maybeFullPath(F("%s/%s", DIR_CONTENT, pathRel)),
 			_extension          = extLower,
 
 			isPage = {
@@ -2621,6 +2614,65 @@ function _G.gsubPlainSub(s, pat, repl)
 	return s:gsub(pat, (repl:gsub("%%", "%%%%")))
 end
 
+do
+	-- for position, isMatch, capture1, ... in gmatchAndBetween( string, pattern )
+	-- If isMatch is false then capture1 is the string between the last match and the next. (This string will never be empty.)
+	function _G.gmatchAndBetween(s, pat)
+		local nextPos = 1
+		local i1, i2  = nil
+
+		return function()
+			if nextPos > #s then  return  end
+
+			local pos = nextPos
+
+			if not i1 then
+				i1, i2 = s:find(pat, pos)
+				i1     = i1 or #s+1
+			end
+
+			if i1 == pos then
+				nextPos = math.max(i2, pos) + 1
+				i1      = nil
+				return pos, true, s:match(pat, pos)
+			else
+				nextPos = i1
+				-- Cache i1 for the next call.
+				return pos, false, s:sub(pos, nextPos-1)
+			end
+		end
+	end
+
+	--[[ TEST
+	!local FOR    = "local i = 0 ; for"
+	!local ASSERT = "i = i+1 ; assert(i < 10)"
+
+	!!(FOR) pos, isMatch, s in gmatchAndBetween("Hello foofoo! How's the foobar?", "foo") do
+		print("1>", pos, isMatch, s)
+		!!(ASSERT)
+	end
+	!!(FOR) pos, isMatch, s in gmatchAndBetween("foo", "foo") do
+		print("2>", pos, isMatch, s)
+		!!(ASSERT)
+	end
+	!!(FOR) pos, isMatch, s in gmatchAndBetween("f", "foo") do
+		print("3>", pos, isMatch, s)
+		!!(ASSERT)
+	end
+	!!(FOR) pos, isMatch, s in gmatchAndBetween("", "foo") do
+		print("4>", pos, isMatch, s)
+		assert(false)
+	end
+	!!(FOR) pos, isMatch, s in gmatchAndBetween("foo", "f?") do
+		print("5>", pos, isMatch, s)
+		!!(ASSERT)
+	end
+
+	print("DONE")
+	os.exit(2)
+	--]]
+end
+
 
 
 -- string = htaccessRewriteEscapeTestString( string )
@@ -2770,7 +2822,7 @@ do
 		local pathImage = DIR_CONTENT.."/"..pathImageRel
 
 		if not isFile(pathImage) then
-			return nil, F("File does not exist: %s", pathImage)
+			return nil, F("File does not exist: %s", maybeFullPath(pathImage))
 		end
 
 		local imageLoader = imageLoaders[extLower]
@@ -2780,7 +2832,7 @@ do
 
 		local image = imageLoader(pathImage)
 		if not image then
-			return nil, F("Could not load image '%s'. Maybe the image is corrupted?", pathImage)
+			return nil, F("Could not load image '%s'. Maybe the image is corrupted?", maybeFullPath(pathImage))
 		end
 
 		return image
@@ -2788,6 +2840,7 @@ do
 end
 
 function _G.getImageDimensions(pathImageRel)
+	-- @Speed: Cache result.
 	local image, err = loadImage(pathImageRel)
 	if not image then  return nil, err  end
 
@@ -2861,72 +2914,39 @@ end
 
 
 
-do
-	-- for position, isMatch, capture1, ... in gmatchAndBetween( string, pattern )
-	-- If isMatch is false then capture1 is the string between the last match and the next. (This string will never be empty.)
-	function _G.gmatchAndBetween(s, pat)
-		local nextPos = 1
-		local i1, i2  = nil
-
-		return function()
-			if nextPos > #s then  return  end
-
-			local pos = nextPos
-
-			if not i1 then
-				i1, i2 = s:find(pat, pos)
-				i1     = i1 or #s+1
-			end
-
-			if i1 == pos then
-				nextPos = math.max(i2, pos) + 1
-				i1      = nil
-				return pos, true, s:match(pat, pos)
-			else
-				nextPos = i1
-				-- Cache i1 for the next call.
-				return pos, false, s:sub(pos, nextPos-1)
-			end
-		end
-	end
-
-	--[[ TEST
-	!local FOR    = "local i = 0 ; for"
-	!local ASSERT = "i = i+1 ; assert(i < 10)"
-
-	!!(FOR) pos, isMatch, s in gmatchAndBetween("Hello foofoo! How's the foobar?", "foo") do
-		print("1>", pos, isMatch, s)
-		!!(ASSERT)
-	end
-	!!(FOR) pos, isMatch, s in gmatchAndBetween("foo", "foo") do
-		print("2>", pos, isMatch, s)
-		!!(ASSERT)
-	end
-	!!(FOR) pos, isMatch, s in gmatchAndBetween("f", "foo") do
-		print("3>", pos, isMatch, s)
-		!!(ASSERT)
-	end
-	!!(FOR) pos, isMatch, s in gmatchAndBetween("", "foo") do
-		print("4>", pos, isMatch, s)
-		assert(false)
-	end
-	!!(FOR) pos, isMatch, s in gmatchAndBetween("foo", "f?") do
-		print("5>", pos, isMatch, s)
-		!!(ASSERT)
-	end
-
-	print("DONE")
-	os.exit(2)
-	--]]
-end
-
-
-
 -- insertMultiple( array, value1, ... )
 function insertMultiple(t, ...)
 	for i = 1, select("#", ...) do
 		table.insert(t, (select(i, ...)))
 	end
+end
+
+
+
+function _G.maybeFullPath(path)
+	return
+		useFullPaths and not (
+			path:find"^[/\\]"    or
+			path:find"^%a:[/\\]" or
+			path:find"^<" -- Placeholder path for when no real path is available.
+		)
+		and getCwd().."/"..path
+		or  path
+end
+
+
+
+-- chunk = loadLuaFile( path [, environment ] )
+-- Returns nil and a message on error.
+function _G.loadLuaFile(path, env)
+	local contents, err = getFileContentsBinary(path)
+	if not contents then  return nil, err  end
+
+	local chunk, err = loadstring(contents, "@"..maybeFullPath(path)) -- We use loadstring() instead of loadfile() because we want to use maybeFullPath() for the chunk name.
+	if not chunk then  return nil, err  end
+
+	if env then  setfenv(chunk, env)  end
+	return chunk
 end
 
 

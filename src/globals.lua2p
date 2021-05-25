@@ -65,6 +65,7 @@ _G.ignoreModificationTimes = false
 _G.includeDrafts           = false
 _G.nowTime                 = os.time()
 _G.outputMetaprograms      = false
+_G.useFullPaths            = false
 _G.verbosePrint            = false
 
 _G.scriptEnvironment        = nil

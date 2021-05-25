@@ -14,7 +14,7 @@ printf!("==== LuaWebGen v"..getReleaseVersion().." ====")
 
 
 
--- done = setup( )
+-- readyToExit = setup( )
 local function setup()
 
 	-- Parse arguments.
@@ -317,12 +317,15 @@ local function setup()
 			elseif arg == "--verbose" then
 				_G.verbosePrint = true
 
-			elseif arg == "--meta" then
+			elseif arg == "--meta" then -- @Doc?
 				_G.outputMetaprograms = true
 
-			elseif arg == "--nogc" then
+			elseif arg == "--nogc" then -- @Doc?
 				_G.enableGc = false
 				collectgarbage("stop")
+
+			elseif arg == "--fullpaths" then -- @Doc?
+				_G.useFullPaths = true
 
 			elseif arg:find"^%-" then
 				errorNoPos("[Arguments] Unknown option '%s'.", argRaw)
@@ -372,7 +375,7 @@ local function setup()
 			_G.logPath = basePath .. "_" .. i .. ".log"
 		end
 
-		_G.logFile = io.open(logPath, "w")
+		_G.logFile = io.open(logPath, "w") -- We don't sweat it if this fails.
 	end
 
 
@@ -1073,12 +1076,12 @@ local function setup()
 			local path = F("%s/%s.html", DIR_LAYOUTS, htmlFileBasename)
 			local template, err = getFileContentsText(path)
 			if not template then
-				errorf(2, "Could not read file '%s': %s", path, err)
+				errorf(2, "Could not read file '%s': %s", maybeFullPath(path), err)
 			end
 
-			-- timestampPrintVerbose("--> Processing(start): %s", path)
+			-- timestampPrintVerbose("--> Processing(start): %s", maybeFullPath(path))
 			local html = parseAndRunTemplate(getContext().page, path, template, "html", true, nil)
-			-- timestampPrintVerbose("--> Processing(finish): %s", path)
+			-- timestampPrintVerbose("--> Processing(finish): %s", maybeFullPath(path))
 			return html
 		end,
 
@@ -1119,7 +1122,7 @@ local function setup()
 			local path          = DIR_OUTPUT.."/"..pathOutputRel
 
 			if not isFile(path) then
-				errorf(2, "File does not exist. (%s)", path)
+				errorf(2, "File does not exist. (%s)", maybeFullPath(path))
 			end
 
 			preserveExistingOutputFile("raw", pathRel, sitePathRel, "")
@@ -1348,16 +1351,14 @@ local function buildWebsite()
 	end
 
 	if not isFile"config.lua" then
-		errorNoPos("Missing config.lua in site folder.")
+		errorNoPos("Missing %s in site folder.", maybeFullPath"config.lua")
 	end
 
-	local chunk, err = loadfile"config.lua"
-	if not chunk then  errorNoPos(err)  end
+	local main_chunk, err = loadLuaFile("config.lua", scriptEnvironment)
+	if not main_chunk then  errorNoPos(err)  end
 
-	setfenv(chunk, scriptEnvironment)
-
-	local config = chunk()
-	lineAssertTable(config, nil, nil, "config.lua: The file must return a table.")
+	local config = main_chunk()
+	lineAssertTable(config, nil, nil, "%s: The file must return a table.", maybeFullPath"config.lua")
 
 	local function get(kPath, default, assertFunc, ...)
 		local v     = config
@@ -1383,22 +1384,22 @@ local function buildWebsite()
 	local function getV(kPath, default, vType) -- Value.
 		return get(
 			kPath, default, lineAssertType, vType,
-			"config.lua: config.%s must be a %s.",
-			kPath, vType
+			"%s: config.%s must be a %s.",
+			maybeFullPath"config.lua", kPath, vType
 		)
 	end
 	local function getT(kPath, default, kType, vType) -- Table
 		return get(
 			kPath, default, lineAssertTable, kType, vType,
-			"config.lua: config.%s must be a table of [%s]=%s.",
-			kPath, (kType or "value"), (vType or "value")
+			"%s: config.%s must be a table of [%s]=%s.",
+			maybeFullPath"config.lua", kPath, (kType or "value"), (vType or "value")
 		)
 	end
 	local function getA(kPath, default, vType) -- Array.
 		return get(
 			kPath, default, lineAssertTable, "number", vType,
-			"config.lua: config.%s must be an array of %s.",
-			kPath, vType
+			"%s: config.%s must be an array of %s.",
+			maybeFullPath"config.lua", kPath, vType
 		)
 	end
 
@@ -1448,22 +1449,22 @@ local function buildWebsite()
 	end
 
 	if not isAny(type(site._outputPathFormat), "string","function") then
-		errorNoPos("config.lua: config.rewriteOutputPath must be a string or a function.")
+		errorNoPos("%s: config.rewriteOutputPath must be a string or a function.", maybeFullPath"config.lua")
 	end
 
 	-- Validate config.types
 	for ext, fileType in pairs(site._fileTypes) do
 		if ext ~= ext:lower() then
-			errorNoPos("config.lua: File extensions must be lower case: config.types[\"%s\"]", ext)
+			errorNoPos("%s: File extensions must be lower case: config.types[\"%s\"]", maybeFullPath"config.lua", ext)
 		elseif not FILE_TYPE_SET[fileType] then
-			errorNoPos("config.lua: Invalid generator file type '%s'.", fileType)
+			errorNoPos("%s: Invalid generator file type '%s'.", maybeFullPath"config.lua", fileType)
 		end
 	end
 
 	-- Validate config.processors
 	for ext in pairs(site._fileProcessors) do
 		if ext ~= ext:lower() then
-			errorNoPos("config.lua: File extensions must be lower case: config.processors[\"%s\"]", ext)
+			errorNoPos("%s: File extensions must be lower case: config.processors[\"%s\"]", maybeFullPath"config.lua", ext)
 		end
 	end
 
@@ -1471,23 +1472,23 @@ local function buildWebsite()
 	local parsedUrl = require"url".parse(site.baseUrl.v)
 
 	if site.baseUrl.v == "" then
-		errorNoPos("config.lua: config.baseUrl is missing or empty.", site.baseUrl.v)
+		errorNoPos("%s: config.baseUrl is missing or empty.", maybeFullPath"config.lua", site.baseUrl.v)
 
 	elseif not parsedUrl.host then
-		errorNoPos("config.lua: Missing host in config.baseUrl (%s)", site.baseUrl.v)
+		errorNoPos("%s: Missing host in config.baseUrl (%s)", maybeFullPath"config.lua", site.baseUrl.v)
 
 	elseif not parsedUrl.scheme then
-		errorNoPos("config.lua: Missing scheme in config.baseUrl (%s)", site.baseUrl.v)
+		errorNoPos("%s: Missing scheme in config.baseUrl (%s)", maybeFullPath"config.lua", site.baseUrl.v)
 	elseif not isAny(parsedUrl.scheme, "http","https") then
-		errorNoPos("config.lua: Invalid scheme in config.baseUrl (Expected http or https, got '%s')", parsedUrl.scheme)
+		errorNoPos("%s: Invalid scheme in config.baseUrl (Expected http or https, got '%s')", maybeFullPath"config.lua", parsedUrl.scheme)
 
 	elseif not (parsedUrl.path or ""):find"/$" then
-		errorNoPos("config.lua: config.baseUrl must end with '/'. (%s)", site.baseUrl.v)
+		errorNoPos("%s: config.baseUrl must end with '/'. (%s)", maybeFullPath"config.lua", site.baseUrl.v)
 
 	elseif parsedUrl.query then
-		errorNoPos("config.lua: config.baseUrl Cannot contain a query. (%s)", site.baseUrl.v)
+		errorNoPos("%s: config.baseUrl Cannot contain a query. (%s)", maybeFullPath"config.lua", site.baseUrl.v)
 	elseif parsedUrl.fragment then
-		errorNoPos("config.lua: config.baseUrl Cannot contain a fragment. (%s)", site.baseUrl.v)
+		errorNoPos("%s: config.baseUrl Cannot contain a fragment. (%s)", maybeFullPath"config.lua", site.baseUrl.v)
 	end
 
 	-- Final config handling.
@@ -1498,7 +1499,7 @@ local function buildWebsite()
 		dataParserIsBinary[ext] = false
 
 		if customDataBinaryParsers[ext] then
-			errorNoPos("config.lua: Both config.dataTextParsers.%s and config.dataBinaryParsers.%s are defined.", ext, ext)
+			errorNoPos("%s: Both config.dataTextParsers.%s and config.dataBinaryParsers.%s are defined.", maybeFullPath"config.lua", ext, ext)
 		end
 	end
 
@@ -1509,7 +1510,7 @@ local function buildWebsite()
 		dataParserIsBinary[ext] = true
 
 		if customDataTextParsers[ext] then
-			errorNoPos("config.lua: Both config.dataTextParsers.%s and config.dataBinaryParsers.%s are defined.", ext, ext)
+			errorNoPos("%s: Both config.dataTextParsers.%s and config.dataBinaryParsers.%s are defined.", maybeFullPath"config.lua", ext, ext)
 		end
 	end
 
@@ -1863,7 +1864,7 @@ local function buildWebsite()
 	--
 	traverseFiles(DIR_OUTPUT, nil, function(path, pathOutputRel, filename, extLower)
 		if not site._writtenOutputFiles[pathOutputRel] then
-			timestampPrintVerbose("Removing: %s", path)
+			timestampPrintVerbose("Removing: %s", maybeFullPath(path))
 			assert(os.remove(path))
 		end
 	end)
@@ -1915,7 +1916,7 @@ if autobuild then
 
 			if lastDirTree and lastDirTree[path] and dirTree[path] > lastDirTree[path] then
 				if not silent then
-					printf("Detected file change: %s", path)
+					printf("Detected file change: %s", maybeFullPath(path))
 				end
 				somethingChanged = true
 			end
@@ -1935,7 +1936,7 @@ if autobuild then
 				if lastDirTree and not lastDirTree[path] then
 					somethingChanged = true
 					if not silent then
-						printf("Detected addition: %s", path)
+						printf("Detected addition: %s", maybeFullPath(path))
 					end
 				end
 			end)
@@ -1954,7 +1955,7 @@ if autobuild then
 			for path in pairs(lastDirTree) do
 				if not dirTree[path] then
 					somethingChanged = true
-					printf("Detected removal: %s", path)
+					printf("Detected removal: %s", maybeFullPath(path))
 					break
 				end
 			end
@@ -1993,8 +1994,10 @@ if not enableGc then
 	printf("Memory usage: %s", formatBytes(collectgarbage"count"*1024))
 end
 
-printfNoLog("Check log for details: %s", logPath)
-logFile:close()
-_G.logFile = nil
+printfNoLog("Check log for details: %s", maybeFullPath(logPath))
+if logFile then
+	logFile:close()
+	_G.logFile = nil
+end
 
 return appOk

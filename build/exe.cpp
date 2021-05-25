@@ -2,6 +2,8 @@
 *
 *  Lua launcher
 *
+*  @Cleanup: Decrease the amount of mallocs!
+*
 *---------------------------------------------------------------
 *
 *  LuaWebGen
@@ -169,7 +171,7 @@ char *getErrorText(u32 errCode) {
 
 
 
-char *getPathToExecutable() {
+char *getNormalizedPathToExecutable() {
 	static const size_t INITIAL_BUFFER_SIZE = MAX_PATH; // Note: MAX_PATH includes null, people say.
 	static const size_t MAX_ITERATIONS      = 7;
 
@@ -188,8 +190,14 @@ char *getPathToExecutable() {
 		if (!charCount)  return nullptr;
 
 		if (charCount < bufferSizeInChars) {
-			auto path = utf16To8(pathWide); // May fail.
+			auto path = utf16To8(pathWide);
 			free(pathWide);
+			if (!path)  return nullptr;
+
+			for (int i = 0, len = strlen(path); i < len; ++i) {
+				if (path[i] == '\\')  path[i] = '/';
+			}
+
 			return path;
 		}
 
@@ -206,23 +214,23 @@ int APIENTRY WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, char *pCmdLin
 	// Construct command
 	//
 	#ifdef DEV
-	static const char *LUA_EXE_PATH    = "..\\bin\\lua.exe";
-	static const char *LUA_SCRIPT_PATH = "..\\webgen.lua";
+	static const char *LUA_EXE_WIN_PATH = "..\\bin\\lua.exe";
+	static const char *LUA_SCRIPT_PATH  = "../webgen.lua";
 	#else
-	static const char *LUA_EXE_PATH    = "bin\\lua.exe";
-	static const char *LUA_SCRIPT_PATH = "webgen.lua";
+	static const char *LUA_EXE_WIN_PATH = "bin\\lua.exe";
+	static const char *LUA_SCRIPT_PATH  = "webgen.lua";
 	#endif
 
 	wchar_t *cmdWide = nullptr;
 
 	{
-		auto exeDir = getPathToExecutable();
+		auto exeDir = getNormalizedPathToExecutable();
 		if (!exeDir)  errorf("Error before starting Lua: Could not get path to executable.");
 		defer { free(exeDir); };
 
 		auto exeDirLen = strlen(exeDir);
 
-		while (exeDirLen && exeDir[exeDirLen] != '\\')  exeDirLen--;
+		while (exeDirLen && exeDir[exeDirLen] != '/')  exeDirLen--;
 		exeDir[exeDirLen+1] = 0;
 		// Note: exeDir includes the trailing slash.
 
@@ -240,7 +248,7 @@ int APIENTRY WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, char *pCmdLin
 			argsStr++;
 		}
 
-		auto cmd = CONCAT_STRINGS("\"", LUA_EXE_PATH, "\" \"", exeDir, LUA_SCRIPT_PATH, "\"", argsStr);
+		auto cmd = CONCAT_STRINGS("\"", LUA_EXE_WIN_PATH, "\" \"", exeDir, LUA_SCRIPT_PATH, "\"", argsStr);
 		if (!cmd)  errorf("Error before starting Lua: Command construction error.");
 		defer { free(cmd); };
 
@@ -289,7 +297,7 @@ int APIENTRY WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, char *pCmdLin
 		/*lpStartupInfo       */ &startupInfo,
 		/*lpProcessInformation*/ &processInfo
 	)) {
-		errorf("Could not start Lua (%s): %s", LUA_EXE_PATH, getErrorText(GetLastError()));
+		errorf("Could not start Lua (%s): %s", LUA_EXE_WIN_PATH, getErrorText(GetLastError()));
 	}
 	defer {
 		CloseHandle(processInfo.hThread);
