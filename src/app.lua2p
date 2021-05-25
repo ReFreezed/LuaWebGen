@@ -102,18 +102,16 @@ local function setup()
 			if not isFile(path) then
 				local title = getFilename(pathToSite)
 
-				local contents = formatTemplate(
-					[=[
-						<!DOCTYPE html>
-						<html lang="{{ site.languageCode }}">
+				local contents = !(unindent[=[
+					<!DOCTYPE html>
+					<html lang="{{ site.languageCode }}">
 						<head>
 							<meta charset="utf-8">
-
 							<meta name="viewport" content="width=device-width, initial-scale=1">
 							{{ generatorMeta() }}
 
 							<title>
-								{{ echo(page.title ~= "" and page.title.." -" or "") }}
+								{{ echo(page.title ~= "" and page.title.." - " or "") *}}
 								{{ echo(site.title) }}
 							</title>
 
@@ -123,12 +121,8 @@ local function setup()
 						<body>
 							{{ page.content }}
 						</body>
-
-						</html>
-					]=], {
-						-- ...
-					}
-				)
+					</html>
+				]=])
 
 				local file, err = io.open(path, "wb")
 				if not file then  errorNoPos(err)  end
@@ -1357,8 +1351,10 @@ local function buildWebsite()
 	local main_chunk, err = loadLuaFile("config.lua", scriptEnvironment)
 	if not main_chunk then  errorNoPos(err)  end
 
+	timestampPrintVerbose("--> config(start)")
 	local config = main_chunk()
 	lineAssertTable(config, nil, nil, "%s: The file must return a table.", maybeFullPath"config.lua")
+	timestampPrintVerbose("--> config(finish)")
 
 	local function get(kPath, default, assertFunc, ...)
 		local v     = config
