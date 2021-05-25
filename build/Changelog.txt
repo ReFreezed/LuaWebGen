@@ -1,6 +1,11 @@
 Changelog
 LuaWebGen
 
+v1.3.1 (2021-05-25)
+- Fixed non-page templates not getting processed before pages.
+- Added minimal example site.
+- Printing more verbose info.
+
 v1.3 (2021-05-24)
 - Added JSON as a supported data format.
 - Added "xml" as a new template file type (for e.g. RSS feeds and sitemaps).
