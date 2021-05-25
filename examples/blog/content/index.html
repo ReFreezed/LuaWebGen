@@ -1,0 +1,15 @@
+{{
+page.title = "My Blog"
+}}
+
+{{
+-- List all blog posts.
+for _, subpage in ipairs(subpages("/posts/")) do
+	if not subpage.isIndex then
+		echoRaw(include("_blogPost", {
+			page        = subpage,
+			showSummary = true,
+		}))
+	end
+end
+}}

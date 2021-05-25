@@ -662,7 +662,7 @@ do
 		return #template+1, #template, "", false -- These return values should never actually be used if everything is working correctly.
 	end
 
-	local function _parseAndRunTemplate(page, path, template, useCache, onPageInit, enableHtmlEncoding)
+	local function _parseAndRunTemplate(page, path, template, useCache, onPageInit, enableHtmlEncoding, args)
 		local luaCode = (
 			template == "" and ""
 			or useCache    and templateMetaprogramCache[path]
@@ -718,7 +718,11 @@ do
 				onPageInit(ctx._scriptEnvironmentGlobals.page)
 			end
 
-			main_chunk()
+			if args then
+				main_chunk(unpack(args, 1, args.n))
+			else
+				main_chunk()
+			end
 
 			templateResult = (table.concat(ctx.out)
 				:gsub("[ \t]+\n", "\n"  ) -- :Beautify spaces at the end of lines.
@@ -729,9 +733,9 @@ do
 		return templateResult
 	end
 
-	-- stringResult = parseAndRunTemplate( page, path, template, fileType=fromPage, useCache, onPageInit=nil )
+	-- stringResult = parseAndRunTemplate( page, path, template, fileType=fromPage, useCache, onPageInit=nil, packedArguments=nil )
 	-- onPageInit   = function( wrappedPage )
-	function _G.parseAndRunTemplate(page, path, template, fileType, useCache, onPageInit)
+	function _G.parseAndRunTemplate(page, path, template, fileType, useCache, onPageInit, args)
 		-- timestampPrintVerbose("--> Template(start): %s", maybeFullPath(path))
 		local result
 
@@ -744,23 +748,23 @@ do
 			!local PRINT_RESULT = DEV and 1==0
 
 			if fileType == "markdown" then
-				result = _parseAndRunTemplate(page, path, template, useCache, onPageInit, true)
+				result = _parseAndRunTemplate(page, path, template, useCache, onPageInit, true, args)
 				result = markdownToHtml(result)
 				result = trimNewlines(result).."\n" -- :Beautify
 				!if PRINT_RESULT then  __LUA` print"-- HTML --" print(result) print"-- /HTML --" `  end
 
 			elseif fileType == "html" then
-				result = _parseAndRunTemplate(page, path, template, useCache, onPageInit, true)
+				result = _parseAndRunTemplate(page, path, template, useCache, onPageInit, true, args)
 				result = trimNewlines(result).."\n" -- :Beautify
 				!if PRINT_RESULT then  __LUA` print"-- HTML --" print(result) print"-- /HTML --" `  end
 
 			elseif fileType == "xml" then
-				result = _parseAndRunTemplate(page, path, template, useCache, onPageInit, true)
+				result = _parseAndRunTemplate(page, path, template, useCache, onPageInit, true, args)
 				result = trimNewlines(result).."\n" -- :Beautify
 				!if PRINT_RESULT then  __LUA` print"-- XML --" print(result) print"-- /XML --" `  end
 
 			else
-				result = _parseAndRunTemplate(page, path, template, useCache, onPageInit, false)
+				result = _parseAndRunTemplate(page, path, template, useCache, onPageInit, false, args)
 				result = trimNewlines(result).."\n" -- :Beautify
 				!if PRINT_RESULT then  __LUA` print"-- result --" print(result) print"-- /result --" `  end
 			end
@@ -1754,7 +1758,7 @@ function _G.generateFromTemplateString(page, template, modTime, onPageInit)
 	local result
 
 	if page.isPage.v then
-		local pageContent = parseAndRunTemplate(page, page._pathForError, template, nil, false, onPageInit)
+		local pageContent = parseAndRunTemplate(page, page._pathForError, template, nil, false, onPageInit, nil)
 
 		page._isLocked = true
 		page._readonly = true
@@ -1780,14 +1784,14 @@ function _G.generateFromTemplateString(page, template, modTime, onPageInit)
 			result = pageContent
 		else
 			local layoutTemplate, layoutPath = getLayoutTemplate(page)
-			result                           = parseAndRunTemplate(page, layoutPath, layoutTemplate, "html", true, nil)
+			result                           = parseAndRunTemplate(page, layoutPath, layoutTemplate, "html", true, nil, nil)
 		end
 
 	else
 		page._isLocked = true
 		page._readonly = true
 
-		result = parseAndRunTemplate(page, page._pathForError, template, nil, false, onPageInit)
+		result = parseAndRunTemplate(page, page._pathForError, template, nil, false, onPageInit, nil)
 	end
 
 	timestampPrintVerbose("--> Processing(finish): %s", maybeFullPath(page._path))

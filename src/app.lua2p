@@ -1061,7 +1061,7 @@ local function setup()
 			scriptEnvironmentGlobals.echoRaw(s:format(...))
 		end,
 
-		include = function(htmlFileBasename)
+		include = function(htmlFileBasename, ...)
 			assertContext("template", "include")
 			if htmlFileBasename:find"^/" then
 				errorf(2, "Filename is not valid: %s", htmlFileBasename)
@@ -1073,8 +1073,10 @@ local function setup()
 				errorf(2, "Could not read file '%s': %s", maybeFullPath(path), err)
 			end
 
+			local args = (select("#", ...) > 0) and pack(...) or nil
+
 			-- timestampPrintVerbose("--> Processing(start): %s", maybeFullPath(path))
-			local html = parseAndRunTemplate(getContext().page, path, template, "html", true, nil)
+			local html = parseAndRunTemplate(getContext().page, path, template, "html", true, nil, args)
 			-- timestampPrintVerbose("--> Processing(finish): %s", maybeFullPath(path))
 			return html
 		end,
@@ -1129,7 +1131,7 @@ local function setup()
 
 		isCurrentUrlBelow = function(urlPrefix)
 			assertContext("template", "isCurrentUrlBelow")
-			return getContext().page.url.v:sub(1, #urlPrefix) == urlPrefix
+			return getContext().page.url.v:find(urlPrefix, 1, true) == 1
 		end,
 
 		subpages = function(pathPrefixOrAllowCurrentPage)

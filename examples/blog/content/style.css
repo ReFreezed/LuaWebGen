@@ -1,0 +1,61 @@
+/***************************************************************
+*
+*  Style sheet for {{site.title}}
+*
+***************************************************************/
+{{
+local navWidth    = 200
+local mediaNarrow = "(max-width: 680px)"
+}}
+
+
+
+* { box-sizing: border-box; }
+
+body { margin: 0; background: #eee; color: #444; font: 17px Arial, sans-serif; }
+
+
+
+/* Main parts */
+{{
+local headerAndFooterBaseStyle = "background-color: #6a6; color: #eee; padding: 1em; text-align: center; text-shadow: 0px 1px 1px rgb(0,0,0,.5);"
+}}
+
+header { {{headerAndFooterBaseStyle}} }
+header a { font-size: 2em; color: inherit !important; text-decoration: none !important; }
+
+.middleOuter { margin: 1em 0 5em; }
+.middleInner { max-width: 900px; margin: 0 auto; }
+main { padding-right: {{navWidth+20}}px; }
+nav { float: right; width: {{navWidth}}px; border-left: 1px solid #bbb; padding-left: 15px; }
+
+footer { {{headerAndFooterBaseStyle}} clear: both; }
+
+@media {{mediaNarrow}} {
+	main { padding-right: 0; }
+	nav { float: none; padding-left: 0; border-left: 0; }
+}
+
+
+
+/* Smaller parts */
+
+a { color: #04f; text-decoration: none; }
+a:hover { text-decoration: underline; }
+a:visited { color: #13a; }
+
+h1 { font-size: 1.6em; }
+h2 { font-size: 1.4em; }
+h3 { font-size: 1.2em; }
+
+nav h3 { margin-top: 0; }
+nav ol { list-style: none; padding: 0; }
+nav ol li { margin: .4em 0; }
+nav ol li .date { font-size: .8em; }
+
+article .date { font-size: .8em; float: right; }
+article .body img:only-child { display: block; margin: 0 auto; }
+article .body img { max-width: 100%; }
+article .body.summary img { max-height: 150px; }
+
+

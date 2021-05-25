@@ -1,0 +1,30 @@
+{{
+-- Grab the extra argument to the include() call.
+local blogPost = ... or error("Missing blog post info.")
+}}
+
+<article>
+	<div class="date">
+		{{ os.date("%Y-%m-%d", toTime(blogPost.page.publishDate)) }}
+	</div>
+
+	{{ if blogPost.showSummary }}
+		<h2>
+			<a href="{{ blogPost.page.url }}">{{ blogPost.page.title }}</a>
+		</h2>
+		<div class="body summary">
+			{{ summarize(blogPost.page.content, 300, true) }}
+		</div>
+		<p>
+			<a href="{{ blogPost.page.url }}">Continue reading</a>
+		</p>
+
+	{{ else }}
+		<h1>
+			{{ blogPost.page.title }}
+		</h1>
+		<div class="body">
+			{{ blogPost.page.content }}
+		</div>
+	{{ end }}
+</article>
