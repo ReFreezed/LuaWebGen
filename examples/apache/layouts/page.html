@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html lang="{{ site.languageCode }}">
+	<head>
+		<meta charset="utf-8">
+		<meta name="viewport" content="width=device-width, initial-scale=1">
+		{{ generatorMeta() }}
+
+		<title>
+			{{ echo(page.title ~= "" and page.title.." - " or "") *}}
+			{{ echo(site.title) }}
+		</title>
+
+		<link rel="canonical" href="{{ url(page.permalink) }}">
+	</head>
+
+	<body>
+		{{ page.content }}
+	</body>
+</html>
