@@ -1061,7 +1061,7 @@ local function setup()
 			scriptEnvironmentGlobals.echoRaw(s:format(...))
 		end,
 
-		include = function(htmlFileBasename, ...)
+		include = function(htmlFileBasename, ...) -- @Doc: Extra arguments.
 			assertContext("template", "include")
 			if htmlFileBasename:find"^/" then
 				errorf(2, "Filename is not valid: %s", htmlFileBasename)

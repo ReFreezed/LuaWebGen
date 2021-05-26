@@ -14,7 +14,7 @@
 Webpages are generated using HTML and Markdown *templates* with embedded Lua code.
 CSS files can also include code.
 
-[**Download latest release**](https://github.com/ReFreezed/LuaWebGen/releases/latest)
+[**>> Download latest release <<**](https://github.com/ReFreezed/LuaWebGen/releases/latest)
 
 - [Why?](#why)
 - [Example](#example)
