@@ -1,0 +1,26 @@
+body {
+	color: #000;
+	background-color: #fff;
+	text-align: center;
+	font: 17px "Times New Roman", serif;
+}
+main {
+	max-width: 500px;
+	margin: 2em auto 10em;
+}
+h1 {
+	font-size: 1.6em;
+	margin: 2em 1em 1em;
+}
+img {
+	max-width: 100%;
+	height: auto;
+}
+.art {
+	margin: 20px auto;
+	padding: 10px;
+	border-radius: 10px;
+	background-color: #ddd;
+	font-style: italic;
+	font-weight: bold;
+}

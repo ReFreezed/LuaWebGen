@@ -1,0 +1,58 @@
+{{
+page.date   = "2020-09-12"
+page.layout = ""
+*}}
+
+<!DOCTYPE html>
+
+<html lang="{{ site.languageCode }}">
+	<head>
+		<meta charset="utf-8">
+		<meta name="viewport" content="width=device-width, initial-scale=1">
+		{{ generatorMeta() }}
+
+		<title>
+			{{ echo(site.title) }}
+		</title>
+
+		<link rel="canonical" href="{{ page.permalink }}">
+		<link rel="stylesheet" href="/style.css">
+	</head>
+
+	<body>
+		<main>
+			<section>
+				<h1>About Me</h1>
+
+				<p>
+					I have always liked lines.<br>
+					Lines are true art in my eyes.<br>
+					Long lines, short lines, few lines, many lines...<br>
+					it makes no difference - I like all lines equally!
+				</p>
+			</section>
+
+			<section>
+				<h1>My {{ #data.art.art }} Art Pieces</h1>
+
+				{{ fori piece in data.art.art }}
+				<div class="art">
+					{{
+					local w, h = assert(getImageDimensions(piece.file))
+					}}
+					<img src="{{ piece.file }}" width="{{w}}" height="{{h}}">
+					<div>{{ '"' .. piece.name .. '"' }}</div>
+				</div>
+				{{ end }}
+			</section>
+
+			<section>
+				<h1>Contact Me</h1>
+
+				<p>Write me a letter to this address:</p>
+				<address>500 Avenue Street, North Pole, Saturn</address>
+				<p>I love letters! (Not as much as lines, though.)</p>
+			</section>
+		</main>
+	</body>
+</html>
