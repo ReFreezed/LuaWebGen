@@ -1375,7 +1375,7 @@ local function buildWebsite()
 
 		assertFunc(v, ...)
 
-		tLast[kLast] = nil -- Helps us find extra/unknown fields.
+		tLast[kLast] = nil -- Helps us find extra/unknown fields later.
 		return v
 	end
 
@@ -1440,10 +1440,10 @@ local function buildWebsite()
 	site._redirectionLayout       = getV("redirectionLayout", site._redirectionLayout, "string")
 
 	for k in pairs(config) do
-		timestampPrintWarning("Unknown config field '%s'.", k)
+		timestampPrintWarning("%s: Unknown config field '%s'.", maybeFullPath"config.lua", k)
 	end
 	for k in pairs(htaccess or {}) do
-		timestampPrintWarning("Unknown config.htaccess field '%s'.", k)
+		timestampPrintWarning("%s: Unknown config.htaccess field '%s'.", maybeFullPath"config.lua", k)
 	end
 
 	if not isAny(type(site._outputPathFormat), "string","function") then
@@ -1491,7 +1491,7 @@ local function buildWebsite()
 
 	-- Final config handling.
 	for ext, customDataParser in pairs(customDataTextParsers) do
-		-- ext = ext:lower() -- Actually a bad idea! (Until we have a version of isFile() that is case insensitive, that is.)
+		-- ext = ext:lower() -- Actually a bad idea! (Until we have a version of isFile() that is case insensitive, that is. Also, we should probably raise an error if it's not lowercase.)
 
 		dataParsers[ext]        = customDataParser
 		dataParserIsBinary[ext] = false
@@ -1502,7 +1502,7 @@ local function buildWebsite()
 	end
 
 	for ext, customDataParser in pairs(customDataBinaryParsers) do
-		-- ext = ext:lower() -- Actually a bad idea! (Until we have a version of isFile() that is case insensitive, that is.)
+		-- ext = ext:lower() -- Actually a bad idea! (Until we have a version of isFile() that is case insensitive, that is. Also, we should probably raise an error if it's not lowercase.)
 
 		dataParsers[ext]        = customDataParser
 		dataParserIsBinary[ext] = true

@@ -1075,7 +1075,12 @@ end
 -- timestampLog( formatString, ... )
 function _G.timestampLog(s, ...)
 	if select("#", ...) > 0 then  s = F(s, ...)  end
-	log("[%s] %s", os.date"%H:%M:%S", s)
+
+	if s == "" then
+		log("")
+	else
+		log("[%s] %s", os.date"%H:%M:%S", s)
+	end
 end
 
 -- timestampPrint( message )
@@ -1085,7 +1090,11 @@ end
 function _G.timestampPrint(s, ...)
 	if select("#", ...) > 0 then  s = F(s, ...)  end
 
-	printf("[%s] %s", os.date"%H:%M:%S", s)
+	if s == "" then
+		print()
+	else
+		printf("[%s] %s", os.date"%H:%M:%S", s)
+	end
 end
 function _G.timestampPrintOnce(s, ...)
 	if select("#", ...) > 0 then  s = F(s, ...)  end
@@ -1128,7 +1137,7 @@ function _G.timestampPrintWarning(s, ...)
 	_G.warningCount = warningCount + 1
 	s               = F("[%s] WARNING(%d): %s", os.date"%H:%M:%S", warningCount, s)
 
-	io.stderr:write(s, "\n")
+	io.stderr:write(s, "\n\n")
 	log(s)
 end
 function _G.timestampPrintWarningOnce(s, ...)
@@ -1140,7 +1149,7 @@ function _G.timestampPrintWarningOnce(s, ...)
 	_G.warningCount = warningCount + 1
 	s               = F("[%s] WARNING(%d): %s", os.date"%H:%M:%S", warningCount, s)
 
-	io.stderr:write(s, "\n")
+	io.stderr:write(s, "\n\n")
 	log(s)
 end
 
@@ -1777,6 +1786,11 @@ function _G.generateFromTemplateString(page, template, modTime, onPageInit)
 			return
 		end
 
+		if not (page.isIndex.v or page.isSpecial.v) and not page._dateHasBeenUpdated then
+			-- @UX: Should there be an option to disable this? Maybe an option for suppressing all warnings?
+			timestampPrintWarning("%s did not update page.date.", maybeFullPath(page._path))
+		end
+
 		page.content.v           = pageContent
 		page._contentIsAvailable = true
 
@@ -2341,6 +2355,7 @@ do
 			_isSkipped          = false,
 			_isLocked           = false, -- @Cleanup: Is this always synced with _readonly? If so, just remove _isLocked.
 			_contentIsAvailable = false,
+			_dateHasBeenUpdated = false,
 			_path               = pathRel,
 			_pathOut            = pathRelOut,
 			_pathForError       = maybeFullPath(F("%s/%s", DIR_CONTENT, pathRel)),
@@ -2390,7 +2405,7 @@ do
 			date = {
 				v = getDatetime(0),
 				g = function(field)  return field.v  end,
-				s = function(field, datetime)  field.v = datetime  end,
+				s = function(field, datetime)  field.v = datetime ; page._dateHasBeenUpdated = true  end,
 			},
 			dateModified = { -- This field currently isn't used anywhere internally - it just exists for the user's convenience. 2021-05-19
 				v = "",
