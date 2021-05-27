@@ -44,6 +44,7 @@ _G.NOOP = function()end
 _G.lfs = require"lfs"
 
 _G.dateLib     = require"date"
+_G.imageLib    = require"image"
 _G.jsonLib     = require"json"
 _G.markdownLib = require"markdown"
 _G.tomlLib     = require"toml"

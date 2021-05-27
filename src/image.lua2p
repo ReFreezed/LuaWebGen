@@ -1,0 +1,127 @@
+--[[============================================================
+--=
+--=  Image file parsing module
+--=
+--=-------------------------------------------------------------
+--=
+--=  LuaWebGen - static website generator in Lua!
+--=  - Written by Marcus 'ReFreezed' Thunström
+--=  - MIT License (See LICENSE.txt)
+--=
+--==============================================================
+
+	jpegGetDimensions
+	pngGetDimensions
+
+--============================================================]]
+
+local imageLib = {}
+
+
+
+local function read1Byte(file)
+	return assert(file:read(1)):byte()
+end
+
+local function read2Bytes(file)
+	return assert(file:read(1)):byte(),
+	       assert(file:read(1)):byte()
+end
+
+local function read4Bytes(file)
+	return assert(file:read(1)):byte(),
+	       assert(file:read(1)):byte(),
+	       assert(file:read(1)):byte(),
+	       assert(file:read(1)):byte()
+end
+
+
+
+-- width, height = jpegGetDimensions( path )
+-- Returns nil on error.
+-- May not work on absolutely all JPEG files.
+-- Ported from https://stackoverflow.com/questions/4092624/parse-image-size-from-jpeg/4093050#4093050
+function imageLib.jpegGetDimensions(path)
+	local file = io.open(path, "rb")
+	if not file then  return nil  end
+
+	local ok, w, h = pcall(function()
+		local fileLength = assert(file:seek("end"))
+		assert(file:seek("set", 0))
+
+		local b1, b2, b3, b4 = read4Bytes(file)
+		assert(b1 == 0xff and b2 == 0xd8 and b3 == 0xff and b4 == 0xe0)
+
+		local blockStart = assert(file:seek("cur"))
+
+		b1, b2 = read2Bytes(file)
+		local blockLength = b1*256 + b2
+
+		b1, b2, b3, b4 = read4Bytes(file)
+		!local B       = string.byte
+		assert(b1 == !(B"J") and b2 == !(B"F") and b3 == !(B"I") and b4 == !(B"F") and read1Byte(file) == 0)
+
+		blockStart = blockStart + blockLength
+
+		while blockStart < fileLength do
+			assert(file:seek("set", blockStart))
+
+			b1, b2, b3, b4 = read4Bytes(file)
+			blockLength    = b3*256 + b4
+
+			if blockLength >= 7 and b1 == 0xff and b2 == 0xc0 then
+				read1Byte(file)
+				b1, b2, b3, b4 = read4Bytes(file)
+
+				local h = b1*256 + b2
+				local w = b3*256 + b4
+
+				return w, h
+			end
+
+			blockStart = blockStart + blockLength+2
+		end
+
+		error("")
+	end)
+
+	file:close()
+	if not ok then  return nil  end
+
+	return w, h
+end
+
+
+
+-- width, height = pngGetDimensions( path )
+-- Returns nil on error.
+function imageLib.pngGetDimensions(path)
+	local file = io.open(path, "rb")
+	if not file then  return nil  end
+
+	local ok, w, h = pcall(function()
+		local startContents = assert(file:read(24)) -- We only need the first 24 bytes.
+		assert(#startContents == 24)
+
+		-- Correct signature?
+		assert(startContents:find("\137\80\78\71\13\10\26\10", 1, true) == 1)
+
+		-- Correct first chunk?
+		assert(startContents:find("^IHDR", 13))
+
+		-- All good!
+		local wb1,wb2,wb3,wb4, hb1,hb2,hb3,hb4 = startContents:byte(17, 24) -- Two big-endian 4-byte uints.
+		return wb1*!(256^3) + wb2*!(256^2) + wb3*!(256^1) + wb4*!(256^0),
+		       hb1*!(256^3) + hb2*!(256^2) + hb3*!(256^1) + hb4*!(256^0)
+	end)
+	assert(ok, w)
+
+	file:close()
+	if not ok then  return nil  end
+
+	return w, h
+end
+
+
+
+return imageLib

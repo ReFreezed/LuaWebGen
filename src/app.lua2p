@@ -755,7 +755,11 @@ local function setup()
 
 		getImageDimensions = function(sitePath)
 			local getImageDimensions_internal = getImageDimensions -- :BetterTraceback :BetterNameForRedirectedFunctionInErrorMessage
-			local wOrNil, hOrErr              = getImageDimensions_internal(sitePathToPath(sitePath, 2))
+			local wOrNil, hOrErr              = getImageDimensions_internal(sitePathToPath(sitePath, 2), false)
+			return wOrNil, hOrErr
+		end,
+		XXX_getImageDimensionsFast = function(sitePath)
+			local wOrNil, hOrErr = getImageDimensions(sitePathToPath(sitePath, 2), true)
 			return wOrNil, hOrErr
 		end,
 

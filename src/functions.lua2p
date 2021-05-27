@@ -2858,8 +2858,27 @@ do
 	end
 end
 
-function _G.getImageDimensions(pathImageRel)
-	-- @Speed: Cache result.
+-- Returns nil and a message on error.
+function _G.getImageDimensions(pathImageRel, mustBeFast)
+	-- @Speed: Cache the result.
+
+	-- Try the faster method using our own file decoder.
+	local extLower = getExtension(pathImageRel):lower()
+
+	if extLower == "jpg" or extLower == "jpeg" then
+		local w, h = imageLib.jpegGetDimensions(DIR_CONTENT.."/"..pathImageRel)
+		if w then  return w, h  end
+
+	elseif extLower == "png" then
+		local w, h = imageLib.pngGetDimensions(DIR_CONTENT.."/"..pathImageRel)
+		if w then  return w, h  end
+	end
+
+	if mustBeFast then
+		return nil, F("Could not determine the dimensions of '%'.", maybeFullPath(DIR_CONTENT.."/"..pathImageRel))
+	end
+
+	-- Try the much slower method using GD.
 	local image, err = loadImage(pathImageRel)
 	if not image then  return nil, err  end
 

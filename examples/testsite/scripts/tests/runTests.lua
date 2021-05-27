@@ -63,7 +63,7 @@ return function()
 	-- print(doc:tostring())
 	--]==]
 
-	-- [==[ HTML parsing.
+	--[==[ HTML parsing.
 	local htmlStr = (
 		-- readTextFile"../local/test-youtube-watch-page.html" or
 		-- readTextFile"../local/test-deviantart-front-page.html" or
@@ -102,8 +102,22 @@ return function()
 	print(doc:toHtml())
 	--]==]
 
+	-- [[ Get image dimensions.
+	local path = "/images/sakura-trees.jpg"
+	local w, h = assert(XXX_getImageDimensionsFast(path, true))
+	assert(w == 510 and h == 340, "Bad size for "..path)
+
+	local path = "/images/head.png"
+	local w, h = assert(XXX_getImageDimensionsFast(path, true))
+	assert(w == 50 and h == 50, "Bad size for "..path)
+
+	-- local time = require"socket.core".gettime()
+	-- for i = 1, 50 do  XXX_getImageDimensionsFast(path, true)  end
+	-- print(require"socket.core".gettime()-time)
+	--]]
+
 	print()
 	print("TESTS COMPLETED!!!")
 	print()
-	os.exit(1)
+	os.exit(2)
 end
