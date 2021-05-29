@@ -2649,7 +2649,11 @@ function _G.rewriteOutputPath(pathRel)
 	end
 
 	if type(site._outputPathFormat) == "function" then
-		local sitePathNew = site._outputPathFormat(sitePath)
+		local sitePathNew
+		!PUSH_CONTEXT "none"
+			local rewriteOutputPath_callback = site._outputPathFormat -- :BetterTraceback
+			sitePathNew                      = rewriteOutputPath_callback(sitePath)
+		!POP_CONTEXT()
 
 		if type(sitePathNew) ~= "string" then
 			errorf("config.rewriteOutputPath() did not return a string. (%s)", sitePath)
