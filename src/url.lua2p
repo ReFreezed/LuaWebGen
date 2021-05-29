@@ -12,17 +12,18 @@
 
 --============================================================]]
 
+!local PATTERN_RESERVED_CHAR = "[^-_.~A-Za-z0-9]" -- Or in other words, one byte that isn't an unreserved character.
+
 local M = {}
 
--- Protect a path segment, to prevent it from interfering with the url parsing.
-local ALLOWED_SEGMENTS = {
-	["-"]=true, ["_"]=true, ["."]=true, ["!"]=true, ["~"]=true, ["*"]=true, ["'"]=true, ["("]=true,
-	[")"]=true, [":"]=true, ["@"]=true, ["&"]=true, ["="]=true, ["+"]=true, ["$"]=true, [","]=true,
-	-- Plus alphanumeric chars.
-}
+-- Protect a path segment, to prevent it from interfering with the URL parsing.
+local ALLOWED_IN_SEGMENT = !({
+	"!", "*", "'", "(", ")", ":", "@", "&", "=", "+", "$", ",",
+	-- Plus unreserved characters...
+})
 local function protectSegment(s)
-	return s:gsub("[^A-Za-z0-9_]", function(c)
-		if not ALLOWED_SEGMENTS[c] then
+	return s:gsub(!(PATTERN_RESERVED_CHAR), function(c)
+		if not ALLOWED_IN_SEGMENT[c] then
 			return string.format("%%%02x", c:byte())
 		end
 	end)
@@ -57,20 +58,20 @@ end
 
 -- Encode a string into its escaped hexadecimal representation.
 function M.escape(binStr)
-	return binStr:gsub("([^A-Za-z0-9_])", function(c)
+	return (binStr:gsub(!(PATTERN_RESERVED_CHAR), function(c)
 		return F("%%%02x", c:byte())
-	end)
+	end))
 end
 
 -- Decode a string from its escaped hexadecimal representation.
-function M.unescape(binStr)
-	return (binStr:gsub("%%(%x%x)", function(hex)
+function M.unescape(url)
+	return (url:gsub("%%(%x%x)", function(hex)
 		return string.char(tonumber(hex, 16))
 	end))
 end
 
 --
--- Parse a url into a table with all its parts according to RFC 2396.
+-- Parse a URL into a table with all its parts according to RFC 2396.
 --
 -- The following grammar describes the names given to the URL parts:
 -- <url>       ::= <scheme> :// <authority> / <path> ; <params> ? <query> # <fragment>

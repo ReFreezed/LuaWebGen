@@ -466,7 +466,7 @@ local function setup()
 		findAll          = itemWithAll,
 		floor            = math.floor,
 		formatTemplate   = formatTemplate,
-		generatorMeta    = generatorMeta,
+		generatorMeta    = getGeneratorHtmlMetaTag,
 		getFilename      = getFilename,
 		getKeys          = getKeys,
 		gmatchAndBetween = gmatchAndBetween,
@@ -478,7 +478,8 @@ local function setup()
 		max              = math.max,
 		min              = math.min,
 		newStringBuilder = newStringBuilder, newBuffer = newStringBuilder, -- newBuffer() is @Deprecated, I guess? 2021-05-15
-		prettyUrl        = toPrettyUrl,
+		percent          = percentEncode,
+		prettyUrl        = urlToPrettyText,
 		printf           = printf,
 		printfOnce       = printfOnce,
 		printObject      = printObject,
@@ -491,9 +492,10 @@ local function setup()
 		toTime           = datetimeToTime,
 		trim             = trim,
 		trimNewlines     = trimNewlines,
-		url              = toUrl,
-		urlAbs           = toUrlAbsolute,
+		url              = fixRelativeUrlAndEncode,
+		urlAbs           = toAbsoluteAndEncodedUrl,
 		urlExists        = urlExists,
+		urlRaw           = partialEncodeUrl,
 		urlize           = urlize,
 
 		chooseExistingFile = function(sitePathWithoutExt, exts)
@@ -604,10 +606,10 @@ local function setup()
 
 			local pathImageRel = sitePathToPath(sitePathImageRel, 2)
 			local thumbInfo    = createThumbnail(pathImageRel, thumbW, thumbH, 2)
-			local thumbUrl     = toUrl("/"..thumbInfo.path)
+			local thumbUrl     = fixRelativeUrlAndEncode("/"..thumbInfo.path)
 
 			local b = newStringBuilder()
-			if isLink then  b('<a href="%s" target="_blank">', toUrl("/"..pathImageRel))  end
+			if isLink then  b('<a href="%s" target="_blank">', fixRelativeUrlAndEncode("/"..pathImageRel))  end
 			b('<img src="%s" width="%d" height="%d" alt="">', encodeHtmlEntities(thumbUrl), thumbInfo.width, thumbInfo.height)
 			if isLink then  b('</a>')  end
 
@@ -647,8 +649,8 @@ local function setup()
 		a = function(url, label)
 			return F(
 				'<a href="%s">%s</a>',
-				encodeHtmlEntities(toUrl(url)),
-				encodeHtmlEntities(label or toPrettyUrl(url))
+				encodeHtmlEntities(fixRelativeUrlAndEncode(url)),
+				encodeHtmlEntities(label or urlToPrettyText(url))
 			)
 		end,
 
@@ -660,14 +662,14 @@ local function setup()
 			if title then
 				return F(
 					'<img src="%s" alt="%s" title="%s">',
-					encodeHtmlEntities(toUrl(url)),
+					encodeHtmlEntities(fixRelativeUrlAndEncode(url)),
 					encodeHtmlEntities(alt or ""),
 					encodeHtmlEntities(title == true and alt or title)
 				)
 			else
 				return F(
 					'<img src="%s" alt="%s">',
-					encodeHtmlEntities(toUrl(url)),
+					encodeHtmlEntities(fixRelativeUrlAndEncode(url)),
 					encodeHtmlEntities(alt or "")
 				)
 			end
@@ -1269,8 +1271,7 @@ local function setup()
 	scriptEnvironmentGlobals.fori__        = ipairs
 	scriptEnvironmentGlobals.foriReverse__ = ipairsr
 	scriptEnvironmentGlobals.lock__        = scriptEnvironmentGlobals.lock
-	scriptEnvironmentGlobals.type__        = type
-	scriptEnvironmentGlobals.url__         = toUrl
+	scriptEnvironmentGlobals.url__         = fixRelativeUrlAndEncode
 
 
 

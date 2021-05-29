@@ -21,10 +21,10 @@
 	F, formatBytes, formatTemplate
 	generateFromTemplateString, generateFromTemplateFile, generateRedirection
 	generateNonPages
-	generatorMeta
 	getCwd
 	getDirectory, getFilename, getExtension, getBasename
 	getFileContentsBinary, getFileContentsText
+	getGeneratorHtmlMetaTag
 	getKeys
 	getLayoutTemplate
 	getLineNumber
@@ -51,6 +51,7 @@
 	pairsSorted
 	parseAndRunTemplate
 	pathToSitePath, sitePathToPath
+	percentEncode, partialEncodeUrl, fixRelativeUrlAndEncode, toAbsoluteAndEncodedUrl, urlize, urlToPrettyText
 	printNoLog, printfNoLog, log, print, printOnce, printf, printfOnce, timestampPrint, timestampPrintOnce, timestampPrintVerbose, timestampPrintError, timestampPrintWarning, timestampPrintWarningOnce, printObject, logErrorTraceback
 	pushContext, assertContext, getContext, isContext
 	removeItem
@@ -62,7 +63,6 @@
 	splitString
 	toNormalPath, toWindowsPath
 	tostringForTemplates
-	toUrl, toUrlAbsolute, urlize, toPrettyUrl
 	traverseDirectory, traverseFiles
 	trim, trimNewlines
 	unindent
@@ -1305,52 +1305,102 @@ end
 
 
 do
-	local URI_PERCENT_CODES_TO_NOT_ENCODE = {
-		["%2d"]="-",["%2e"]=".",["%7e"]="~",--["???"]="_",
-		["%21"]="!",["%23"]="#",["%24"]="$",["%26"]="&",["%27"]="'",["%28"]="(",["%29"]=")",["%2a"]="*",["%2b"]="+",
-		["%2c"]=",",["%2f"]="/",["%3a"]=":",["%3b"]=";",["%3d"]="=",["%3f"]="?",["%40"]="@",["%5b"]="[",["%5d"]="]",
+	_G.percentEncode = urlLib.escape
+
+	local URI_PERCENT_CODES_TO_NOT_ENCODE = { -- AKA reserved characters (except non-ASCII characters).
+		-- Note: These characters are explicitly unreserved and are thus never encoded
+		-- in the first place: A-Z a-z 0-9 - _ . ~
+
+		-- Note: This is similar to encodeURI() in JavaScript, except we also don't
+		-- encode '[' and ']' (because of RFC 3986 which added those characters as
+		-- reserved for IPv6 support).
+
+		["%21"]="!",["%23"]="#",["%24"]="$",["%26"]="&",["%27"]="'",["%28"]="(",["%29"]=")",["%2a"]="*",
+		["%2b"]="+",["%2c"]=",",["%2f"]="/",["%3a"]=":",["%3b"]=";",["%3d"]="=",["%3f"]="?",["%40"]="@",
+
+		-- IPv6.
+		["%5b"]="[",["%5d"]="]",
+
+		-- Prevent double-encoding, because lots of URLs in text form everywhere
+		-- already have %xx sequences. (We assume URLs don't have literal percent
+		-- signs, which might be a problem in rare cases. However, we never return an
+		-- incorrectly encoded URL. :EnsureValidPercentEncoding)
+		["%25"]="%",
+
+		-- Info:
+		--   JavaScript's encodeURI()          does not encode: A-Z a-z 0-9 - _ . ! ~ * ' ( ) ; , / ? : @ & = + $ #
+		--   JavaScript's encodeURIComponent() does not encode: A-Z a-z 0-9 - _ . ! ~ * ' ( )
 	}
 
-	function _G.toUrl(url)
-		if type(url) ~= "string" then
-			errorf(2, "Bad type of 'url' argument. (Got %s)", type(url))
-		end
+	-- This mostly just encodes non-ASCII characters (but also e.g. spaces).
+	function _G.partialEncodeUrl(url)
+		--
+		-- :EnsureValidPercentEncoding
+		-- Make sure all existing percent signs denote encoded characters before we do
+		-- anything else. It's possible that this breaks some URLs in extremely rare
+		-- cases (if the given URL is a bit ambiguous), but we have to assume properly
+		-- percent-encoded characters already exist in many URLs.
+		--
+		url = url:gsub("%%([^%%]?[^%%]?)", function(hopefullyHex)
+			if not hopefullyHex:find"^%x%x$" then
+				return "%25"..hopefullyHex
+			end
+		end)
 
-		url = urlLib.escape(url)
-		url = url:gsub("%%%x%x", URI_PERCENT_CODES_TO_NOT_ENCODE)
-
-		return url
+		return (urlLib.escape(url):gsub("%%%x%x", URI_PERCENT_CODES_TO_NOT_ENCODE))
 	end
 
-	-- print(toUrl("http://www.example.com/some-path/File~With (Stuff_åäö).jpg?key=value&foo=bar#hash")) -- TEST
-end
+	function _G.fixRelativeUrlAndEncode(url)
+		!ARGS "url:string"
+		url = url:gsub("^/%f[^/]", (site.baseUrl.v:gsub("^%w+://[^/]+", ""))) -- @Speed
+		return (partialEncodeUrl(url))
+	end
 
-function _G.toUrlAbsolute(url)
-	url = url:gsub("^/%f[^/]", site.baseUrl.v)
-	return (toUrl(url))
+	function _G.toAbsoluteAndEncodedUrl(url)
+		!ARGS "url:string"
+		url = url:gsub("^/%f[^/]", site.baseUrl.v)
+		return (partialEncodeUrl(url))
+	end
+
+	--[[ TEST  @Cleanup: Include this in testsite (and add more URL encoding tests).
+	_G.site      = {baseUrl={v="http://example.com/sub-folder/"}}
+	local urlAbs = "http://example.com/some-path/File~With (Stuff_åäö).jpg?key=value&foo=bar#hash"
+	local urlRel = "/images/cat.jpg"
+	local result = percentEncode(urlAbs)                 ; print("PercentEncode", result) ; assert(result == "http%3a%2f%2fexample.com%2fsome-path%2fFile~With%20%28Stuff_%c3%a5%c3%a4%c3%b6%29.jpg%3fkey%3dvalue%26foo%3dbar%23hash")
+	local result = partialEncodeUrl(urlAbs)              ; print("PartialEncode", result) ; assert(result == "http://example.com/some-path/File~With%20(Stuff_%c3%a5%c3%a4%c3%b6).jpg?key=value&foo=bar#hash")
+	local result = partialEncodeUrl("cool%20any%%20run") ; print("BadUrl       ", result) ; assert(result == "cool%20any%25%20run")
+	local result = fixRelativeUrlAndEncode(urlRel)       ; print("RelativeUrl  ", result) ; assert(result == "/sub-folder/images/cat.jpg")
+	local result = toAbsoluteAndEncodedUrl(urlRel)       ; print("AbsoluteUrl  ", result) ; assert(result == "http://example.com/sub-folder/images/cat.jpg")
+	os.exit(2)
+	--]]
 end
 
 function _G.urlize(text)
-	text = text
+	!ARGS "text:string"
+	text = (
+		text
+		:gsub("[%p%s]+", "-")
+		:gsub("^%-+",    "")
+		:gsub("%-+$",    "")
 		:lower()
-		:gsub("[%p ]+", "-")
-		:gsub("^%-+", "")
-		:gsub("%-+$", "")
-
+	)
 	return text == "" and "-" or text
 end
 
-function _G.toPrettyUrl(url)
-	return (url
+function _G.urlToPrettyText(url)
+	!ARGS "url:string"
+	return (
+		urlLib.unescape(url)
 		:gsub("^https?://", "")
-		:gsub("^www%.", "")
-		:gsub("/+$", "")
+		:gsub("^www%.",     "")
+		:gsub("/+$",        "")
+		:gsub(" ",          "+") -- Because we unescaped all characters.
 	)
 end
 
 
 
-function _G.generatorMeta(hideVersion)
+function _G.getGeneratorHtmlMetaTag(hideVersion)
 	return
 		hideVersion
 		and '<meta name="generator" content="LuaWebGen">'
@@ -1895,7 +1945,7 @@ function _G.generateRedirection(url, targetUrl, sourcePath)
 						<meta charset="utf-8">
 						<meta name="robots" content="noindex, follow">
 						<meta http-equiv="refresh" content="3; url=:urlAbsPercent:">
-						<title>:url:</title>
+						<title>:urlPretty:</title>
 					</head>
 					<body>
 						<p>Page has moved. If you are not redirected automatically,
@@ -1903,8 +1953,8 @@ function _G.generateRedirection(url, targetUrl, sourcePath)
 					</body>
 				</html>
 			]=], {
-				url           = encodeHtmlEntities(              targetUrl ),
-				urlAbsPercent = encodeHtmlEntities(toUrlAbsolute(targetUrl)),
+				urlPretty     = encodeHtmlEntities(urlToPrettyText        (targetUrl)),
+				urlAbsPercent = encodeHtmlEntities(toAbsoluteAndEncodedUrl(targetUrl)),
 			}
 		)
 
@@ -2846,7 +2896,7 @@ do
 
 		local imageLoader = imageLoaders[extLower]
 		if not imageLoader then
-			return nil, F("Unknown image file format '%'.", extLower)
+			return nil, F("Unknown image file format '%s'.", extLower)
 		end
 
 		local image = imageLoader(pathImage)
@@ -2875,7 +2925,7 @@ function _G.getImageDimensions(pathImageRel, mustBeFast)
 	end
 
 	if mustBeFast then
-		return nil, F("Could not determine the dimensions of '%'.", maybeFullPath(DIR_CONTENT.."/"..pathImageRel))
+		return nil, F("Could not determine the dimensions of '%s'.", maybeFullPath(DIR_CONTENT.."/"..pathImageRel))
 	end
 
 	-- Try the much slower method using GD.
