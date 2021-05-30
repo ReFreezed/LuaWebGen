@@ -88,7 +88,7 @@ do...end
 ## HTML
 
 <p style="text-align: center;">
-	Centered text!
+	Centered text in HTML. The following is not a list!
 	- 1
 	- 2
 </p>

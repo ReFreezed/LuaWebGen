@@ -140,9 +140,9 @@ Text: {{ "foo <img>" }}
 
 Html: {{ "<img>" }}
 
-echo: {{ echo('<img src="/images/head.png">') }}
+echo: {{ echo('<img src="'..url"/images/head.png"..'">') }}
 
-echoRaw: {{ echoRaw('<img src="/images/head.png">') }}
+echoRaw: {{ echoRaw('<img src="'..url"/images/head.png"..'">') }}
 
 
 

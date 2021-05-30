@@ -61,6 +61,7 @@ _G.logPath = ""
 _G.toLog   = {--[[ message1, ... ]]} -- Before the log file has opened.
 
 _G.autobuild               = false
+_G.baseUrlOverride         = ""
 _G.enableGc                = true
 _G.ignoreModificationTimes = false
 _G.includeDrafts           = false

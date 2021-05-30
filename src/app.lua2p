@@ -321,6 +321,11 @@ local function setup()
 			elseif arg == "--fullpaths" then -- @Doc?
 				_G.useFullPaths = true
 
+			elseif arg == "--baseurloverride" then -- @Doc?
+				i                  = i + 1
+				_G.baseUrlOverride = programArguments[i] or errorNoPos("[Arguments] Missing URL after '%s'.", argRaw)
+				arg                = arg .. '"' .. baseUrlOverride .. '"'
+
 			elseif arg:find"^%-" then
 				errorNoPos("[Arguments] Unknown option '%s'.", argRaw)
 			else
@@ -1472,6 +1477,10 @@ local function buildWebsite()
 	end
 
 	-- Validate config.baseUrl
+	if baseUrlOverride ~= "" then
+		site.baseUrl.v = baseUrlOverride
+	end
+
 	local parsedUrl = require"url".parse(site.baseUrl.v)
 
 	if site.baseUrl.v == "" then

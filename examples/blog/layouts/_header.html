@@ -11,12 +11,12 @@
 		</title>
 
 		<link rel="canonical" href="{{ url(page.permalink) }}">
-		<link rel="stylesheet" href="{{/style.css}}">
+		<link rel="stylesheet" href="{{ /style.css }}">
 	</head>
 
 	<body>
 		<header>
-			<a href="/">{{ echo(site.title) }}</a>
+			<a href="{{ / }}">{{ echo(site.title) }}</a>
 		</header>
 
 		<div class="middleOuter"><div class="middleInner">
@@ -27,7 +27,7 @@
 					{{ fori subpage in subpages("/posts/") }}
 						{{ if not subpage.isIndex }}
 						<li>
-							<a href="{{ subpage.url }}">
+							<a href="{{ url(subpage.url) }}">
 								{{ subpage.title }}<br>
 								<span class="date">{{ os.date("%Y-%m-%d", toTime(subpage.publishDate)) }}</span>
 							</a>

@@ -4,7 +4,7 @@ page.date   = "2019-10-29T17:32:00+02:00"
 page.layout = "blogPost"
 }}
 
-![](/images/sakura-trees.jpg)
+![]({{ /images/sakura-trees.jpg }})
 
 Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor
 incididunt ut labore et dolore magna aliqua. Faucibus ornare suspendisse sed

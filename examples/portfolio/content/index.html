@@ -15,8 +15,8 @@ page.layout = ""
 			{{ echo(site.title) }}
 		</title>
 
-		<link rel="canonical" href="{{ page.permalink }}">
-		<link rel="stylesheet" href="/style.css">
+		<link rel="canonical" href="{{ url(page.permalink) }}">
+		<link rel="stylesheet" href="{{ /style.css }}">
 	</head>
 
 	<body>
@@ -40,7 +40,7 @@ page.layout = ""
 					{{
 					local w, h = assert(getImageDimensions(piece.file))
 					}}
-					<img src="{{ piece.file }}" width="{{w}}" height="{{h}}">
+					<img src="{{ url(piece.file) }}" width="{{w}}" height="{{h}}">
 					<div>{{ '"' .. piece.name .. '"' }}</div>
 				</div>
 				{{ end }}

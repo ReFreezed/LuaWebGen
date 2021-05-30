@@ -44,7 +44,7 @@ dapibus. Massa sapien faucibus et molestie ac feugiat. Consectetur lorem donec
 massa sapien faucibus et molestie. Amet tellus cras adipiscing enim eu turpis
 egestas pretium aenean.
 
-![](/images/sakura-trees.jpg)
+![]({{ /images/sakura-trees.jpg }})
 
 Quis vel eros donec ac odio tempor orci dapibus. A cras semper auctor neque
 vitae tempus quam pellentesque. Amet nulla facilisi morbi tempus. Mollis nunc
