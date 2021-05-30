@@ -1761,11 +1761,11 @@ local function buildWebsite()
 				targetUrl = fixRelativeUrl(targetUrl)
 
 				b('\tRewriteCond %%{REQUEST_URI} "=%s"\n', url)
-				b('\tRewriteRule .* "%s" [NE,R=301,L]\n', escapeRuleSub(targetUrl))
+				b('\tRewriteRule .* "%s" [NE,R=301,L]\n', escapeRuleSub(targetUrl, true))
 			end
 
 			for url, targetUrl in pairsSorted(site._unwrittenRedirects) do
-				-- @Copypaste from above.
+				-- Some @Copypaste from above.
 
 				-- Make absolute target URLs relative if possible.
 				if targetUrl:sub(1, #site.baseUrl.v) == site.baseUrl.v then
@@ -1778,16 +1778,16 @@ local function buildWebsite()
 				slug      = fixRelativeUrl(slug)
 				targetUrl = fixRelativeUrl(targetUrl)
 
+				if query and not targetUrl:find("?", 1, true) then
+					targetUrl = targetUrl .. "?" -- This will make sure the query from the source URL doesn't carry over to the target URL.
+				end
+
 				b('\tRewriteCond %%{REQUEST_URI} "=%s"\n', slug)
 				if query then
 					b('\tRewriteCond %%{QUERY_STRING} "=%s"\n', query)
 				end
 
-				b(
-					'\tRewriteRule .* "%s%s" [NE,R=301,L]\n',
-					escapeRuleSub(targetUrl),
-					(not query or targetUrl:find("?", 1, true)) and "" or "?"
-				)
+				b('\tRewriteRule .* "%s" [NE,R=301,L]\n', escapeRuleSub(targetUrl, true))
 			end
 
 			b("\n")
@@ -1809,7 +1809,7 @@ local function buildWebsite()
 				urlPrefix = fixRelativeUrl(urlPrefix)
 				b(
 					'\tRewriteCond %%{REQUEST_URI} "^%s"%s\n',
-					escapeCondPat(urlPrefix),
+					escapeCondPat(urlPrefix, false),
 					htaDenyAccess[i+1] and " [OR]" or ""
 				)
 			end
@@ -1826,13 +1826,13 @@ local function buildWebsite()
 			b('\t# Point to "%s" directory.\n', htaPrettyUrlDir)
 			b("\tRewriteCond %{REQUEST_FILENAME} !-f\n")
 			b('\tRewriteCond "%%{DOCUMENT_ROOT}%s%s/%%{REQUEST_URI}" -f\n', fixRelativeUrl"/", escapeTestStr(htaPrettyUrlDir))
-			b('\tRewriteRule .* "%s%s/$0" [L]\n', fixRelativeUrl"/", escapeRuleSub(htaPrettyUrlDir))
+			b('\tRewriteRule .* "%s%s/$0" [L]\n', fixRelativeUrl"/", escapeRuleSub(htaPrettyUrlDir, false))
 			b("\n")
 
 			b("\tRewriteCond %{REQUEST_FILENAME} !-f\n")
 			b("\tRewriteCond %{REQUEST_URI} !^/$\n")
 			b('\tRewriteCond "%%{DOCUMENT_ROOT}%s%s/%%{REQUEST_URI}/" -d\n', fixRelativeUrl"/", escapeTestStr(htaPrettyUrlDir))
-			b('\tRewriteRule .* "%s%s/$0/" [L]\n', fixRelativeUrl"/", escapeRuleSub(htaPrettyUrlDir))
+			b('\tRewriteRule .* "%s%s/$0/" [L]\n', fixRelativeUrl"/", escapeRuleSub(htaPrettyUrlDir, false))
 			b("\n")
 		end
 

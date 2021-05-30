@@ -2752,23 +2752,20 @@ end
 
 
 
--- string = htaccessRewriteEscapeTestString( string )
 function _G.htaccessRewriteEscapeTestString(s)
 	s = s:gsub('[$%%\\"]', "\\%0")
 
 	return s
 end
 
--- string = htaccessRewriteEscapeCondPattern( string [, isWhole=false ] )
-function _G.htaccessRewriteEscapeCondPattern(s, isWhole)
+function _G.htaccessRewriteEscapeCondPattern(s, isStart)
 	s = s:gsub('[$%%\\".+*?^()[%]]', "\\%0")
 
-	if isWhole then  s = s:gsub("^[!=<>]", "\\%0")  end
+	if isStart then  s = s:gsub("^[-!=<>]", "\\%0")  end
 
 	return s
 end
 
--- string = htaccessRewriteEscapeRuleSubstitution( string [, isWhole=false ] )
 function _G.htaccessRewriteEscapeRuleSubstitution(s, isWhole)
 	if isWhole and s == "-" then  return "\\-"  end
 
