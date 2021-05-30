@@ -1761,7 +1761,7 @@ local function buildWebsite()
 				targetUrl = fixRelativeUrl(targetUrl)
 
 				b('\tRewriteCond %%{REQUEST_URI} "=%s"\n', url)
-				b('\tRewriteRule .* "%s" [R=301,L]\n', escapeRuleSub(targetUrl))
+				b('\tRewriteRule .* "%s" [NE,R=301,L]\n', escapeRuleSub(targetUrl))
 			end
 
 			for url, targetUrl in pairsSorted(site._unwrittenRedirects) do
@@ -1784,7 +1784,7 @@ local function buildWebsite()
 				end
 
 				b(
-					'\tRewriteRule .* "%s%s" [R=301,L]\n',
+					'\tRewriteRule .* "%s%s" [NE,R=301,L]\n',
 					escapeRuleSub(targetUrl),
 					(not query or targetUrl:find("?", 1, true)) and "" or "?"
 				)
