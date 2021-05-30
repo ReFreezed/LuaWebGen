@@ -80,7 +80,7 @@ local function setup()
 							baseUrl       = "http://:host:/",
 							languageCode  = "en",
 
-							ignoreFiles   = {"%.tmp$"},
+							ignoreFiles   = {"%.lnk$","%.tmp$","^Thumbs%.db$"},
 							ignoreFolders = {"^%."},
 						}
 					]=], {
@@ -1651,7 +1651,7 @@ local function buildWebsite()
 
 	-- Validate targets.
 	for url, targetUrl in pairsSorted(allRedirections) do
-		if targetUrl:find"^/" and not site._writtenOutputUrls[targetUrl] then
+		if targetUrl:find"^/" and not site._writtenOutputUrls[targetUrl:gsub("[?#].*", "")] then
 			errorNoPos("Missing target page for redirection: %s -> %s", url, targetUrl)
 		end
 	end
@@ -1700,17 +1700,18 @@ local function buildWebsite()
 		if next(site._htaErrors) then
 			local b = newStringBuilder()
 
-			for errCode, target in pairsSorted(site._htaErrors) do
+			for errCode, targetDoc in pairsSorted(site._htaErrors) do
 				-- The target may be a URL or HTML code.
-				--
-				-- @Incomplete: Does Apache rewrite URLs to error documents? I don't think v2.2 did, but maybe
-				-- that has changed. If so, we should test for multiple file locations. :ApacheErrorDocumentFile
-				--
-				if target:find"^/%S*$" and not isFile(DIR_OUTPUT..target) then
-					errorNoPos("Missing target page for error %d document (in output folder): %s%s", errCode, DIR_OUTPUT, target)
+				if targetDoc:find"^/%S*$" then
+					-- @Incomplete: Does Apache rewrite URLs to error documents? I don't think v2.2 did, but maybe
+					-- that has changed. If so, we should test for multiple file locations. :ApacheErrorDocumentFile
+					if not isFile(DIR_OUTPUT..targetDoc:gsub("[?#].*", "")) then
+						errorNoPos("%s: Missing target page for error %d document (in output folder): %s%s", maybeFullPath"config.lua", errCode, DIR_OUTPUT, targetDoc)
+					end
+					targetDoc = fixRelativeUrl(targetDoc)
 				end
 
-				b("ErrorDocument %d %s\n", errCode, target)
+				b("ErrorDocument %d %s\n", errCode, targetDoc)
 			end
 
 			contents = F("%s\n%s", contents, b())
@@ -1751,15 +1752,22 @@ local function buildWebsite()
 			b("\t# Redirect moved resources.\n")
 
 			for url, targetUrl in pairsSorted(site._writtenRedirects) do
+				-- Make absolute target URLs relative if possible.
 				if targetUrl:sub(1, #site.baseUrl.v) == site.baseUrl.v then
 					targetUrl = targetUrl:sub(#site.baseUrl.v) -- Note: We keep the initial '/'.
 				end
+
+				url       = fixRelativeUrl(url)
+				targetUrl = fixRelativeUrl(targetUrl)
 
 				b('\tRewriteCond %%{REQUEST_URI} "=%s"\n', url)
 				b('\tRewriteRule .* "%s" [R=301,L]\n', escapeRuleSub(targetUrl))
 			end
 
 			for url, targetUrl in pairsSorted(site._unwrittenRedirects) do
+				-- @Copypaste from above.
+
+				-- Make absolute target URLs relative if possible.
 				if targetUrl:sub(1, #site.baseUrl.v) == site.baseUrl.v then
 					targetUrl = targetUrl:sub(#site.baseUrl.v) -- Note: We keep the initial '/'.
 				end
@@ -1767,8 +1775,10 @@ local function buildWebsite()
 				local slug, query = url:match"^(.-)%?(.*)$"
 				if not slug then  slug = url  end
 
-				b('\tRewriteCond %%{REQUEST_URI} "=%s"\n', slug)
+				slug      = fixRelativeUrl(slug)
+				targetUrl = fixRelativeUrl(targetUrl)
 
+				b('\tRewriteCond %%{REQUEST_URI} "=%s"\n', slug)
 				if query then
 					b('\tRewriteCond %%{QUERY_STRING} "=%s"\n', query)
 				end
@@ -1796,6 +1806,7 @@ local function buildWebsite()
 			b("\tRewriteCond %{ENV:REDIRECT_STATUS} ^$\n")
 
 			for i, urlPrefix in ipairs(htaDenyAccess) do
+				urlPrefix = fixRelativeUrl(urlPrefix)
 				b(
 					'\tRewriteCond %%{REQUEST_URI} "^%s"%s\n',
 					escapeCondPat(urlPrefix),
@@ -1808,16 +1819,20 @@ local function buildWebsite()
 		end
 
 		if htaPrettyUrlDir ~= "" then
+			if not isDirectory(DIR_OUTPUT.."/"..htaPrettyUrlDir) then
+				errorNoPos("%s: config.htaccess.XXX_prettyUrlDirectory points to a missing directory (in output folder): %s/%s", maybeFullPath"config.lua", DIR_OUTPUT, htaPrettyUrlDir)
+			end
+
 			b('\t# Point to "%s" directory.\n', htaPrettyUrlDir)
 			b("\tRewriteCond %{REQUEST_FILENAME} !-f\n")
-			b('\tRewriteCond "%%{DOCUMENT_ROOT}/%s/%%{REQUEST_URI}" -f\n', escapeTestStr(htaPrettyUrlDir))
-			b('\tRewriteRule .* "/%s/$0" [L]\n', escapeRuleSub(htaPrettyUrlDir))
+			b('\tRewriteCond "%%{DOCUMENT_ROOT}%s%s/%%{REQUEST_URI}" -f\n', fixRelativeUrl"/", escapeTestStr(htaPrettyUrlDir))
+			b('\tRewriteRule .* "%s%s/$0" [L]\n', fixRelativeUrl"/", escapeRuleSub(htaPrettyUrlDir))
 			b("\n")
 
 			b("\tRewriteCond %{REQUEST_FILENAME} !-f\n")
 			b("\tRewriteCond %{REQUEST_URI} !^/$\n")
-			b('\tRewriteCond "%%{DOCUMENT_ROOT}/%s/%%{REQUEST_URI}/" -d\n', escapeTestStr(htaPrettyUrlDir))
-			b('\tRewriteRule .* "/%s/$0/" [L]\n', escapeRuleSub(htaPrettyUrlDir))
+			b('\tRewriteCond "%%{DOCUMENT_ROOT}%s%s/%%{REQUEST_URI}/" -d\n', fixRelativeUrl"/", escapeTestStr(htaPrettyUrlDir))
+			b('\tRewriteRule .* "%s%s/$0/" [L]\n', fixRelativeUrl"/", escapeRuleSub(htaPrettyUrlDir))
 			b("\n")
 		end
 
@@ -1830,8 +1845,9 @@ local function buildWebsite()
 
 			local directives = b()
 
-			local count1 ; contents, count1 = gsubPlainSub(contents, "#[ \t]*:webgen%.rewriting:[ \t]*\n", directives)
-			local count2 ; contents, count2 = gsubPlainSub(contents, "#[ \t]*:webgen%.rewriting:[ \t]*$",  directives)
+			local count1, count2
+			contents, count1 = gsubPlainSub(contents, "#[ \t]*:webgen%.rewriting:[ \t]*\n", directives)
+			contents, count2 = gsubPlainSub(contents, "#[ \t]*:webgen%.rewriting:[ \t]*$",  directives)
 			if count1+count2 == 0 then
 				contents = F("%s\n%s", contents, directives)
 			end

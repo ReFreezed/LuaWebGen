@@ -51,7 +51,7 @@
 	pairsSorted
 	parseAndRunTemplate
 	pathToSitePath, sitePathToPath
-	percentEncode, partialEncodeUrl, fixRelativeUrlAndEncode, toAbsoluteAndEncodedUrl, urlize, urlToPrettyText
+	percentEncode, partialEncodeUrl, fixRelativeUrl, fixRelativeUrlAndEncode, toAbsoluteAndEncodedUrl, urlize, urlToPrettyText
 	printNoLog, printfNoLog, log, print, printOnce, printf, printfOnce, timestampPrint, timestampPrintOnce, timestampPrintVerbose, timestampPrintError, timestampPrintWarning, timestampPrintWarningOnce, printObject, logErrorTraceback
 	pushContext, assertContext, getContext, isContext
 	removeItem
@@ -1350,10 +1350,14 @@ do
 		return (urlLib.escape(url):gsub("%%%x%x", URI_PERCENT_CODES_TO_NOT_ENCODE))
 	end
 
+	function _G.fixRelativeUrl(url)
+		url = url:gsub("^/%f[^/]", (site.baseUrl.v:gsub("^%w+://[^/]+", ""))) -- @Speed
+		return url
+	end
+
 	function _G.fixRelativeUrlAndEncode(url)
 		!ARGS "url:string"
-		url = url:gsub("^/%f[^/]", (site.baseUrl.v:gsub("^%w+://[^/]+", ""))) -- @Speed
-		return (partialEncodeUrl(url))
+		return (partialEncodeUrl(fixRelativeUrl(url)))
 	end
 
 	function _G.toAbsoluteAndEncodedUrl(url)

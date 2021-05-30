@@ -9,5 +9,5 @@
 	"/view.php?page=flowers", -- Old link.
 	"/bad-link/",             -- 404 error.
 } *}}
-- [{{ prettyUrl(it) }}]({{ it }})
+- [{{ prettyUrl(it) }}]({{ url(it) }})
 {{ end }}

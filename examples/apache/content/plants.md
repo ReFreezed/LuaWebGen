@@ -16,4 +16,4 @@ Imagine some nice plants here.
 ,,,\|/|,,,,,
 </pre>
 
-[Go back to the front page](/)
+[Go back to the front page]({{ / }})
