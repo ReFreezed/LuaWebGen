@@ -18,3 +18,5 @@ included by both the "blogPost" layout and the default "page" layout.
 
 The "_header" layout does a similar thing as the homepage - it loops through
 all posts and creates a small menu with links to each one.
+
+Result preview: http://luawebgen.refreezed.com/examples/blog/
