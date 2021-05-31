@@ -23,10 +23,10 @@ An image < <img src="{{ /images/head.png }}"> > inside markdown.
 
 An image < {{ '<img src="'..url'/images/head.png'..'">' }} > inside markdown.
 
-{{-- Line comment. {{"nope"}}
+{{-- Line comment. {{"ignored"}}
 }}
-{{--[[ Block comment. {{"nope"}} ]]}}
-{{--[=[ --[[ Messy block comment. {{"nope"}} ]] ]=]}}
+{{--[[ Block comment. {{"ignored"}} ]]}}
+{{--[=[ --[[ Messy block comment. {{"ignored"}} ]] ]=]}}
 
 {{
 -- globalVar = 123 -- Error: Cannot assign globals!
@@ -112,6 +112,32 @@ URL: {{ http://example.com/foo }}
 Markdown parsing, problematic link: [Snake!](https://en.wikipedia.org/wiki/Snake_(video_game_genre))
 
 Markdown parsing, solution: [Snake!](<https://en.wikipedia.org/wiki/Snake_(video_game_genre)>)
+
+{{
+-- Heredoc strings.
+local s1 = ===
+}}
+abc
+{{ 1+8 }}
+xyz
+{{
+===
+local s2 = ===
+*}}
+abc
+{{ 1+8 }}
+xyz
+{{*
+===
+
+echoRaw("<div>\n<pre>")
+echo(s1)
+echoRaw("</pre>\n</div>")
+
+echoRaw("<div>\n<pre>")
+echo(s2)
+echoRaw("</pre>\n</div>")
+}}
 
 
 

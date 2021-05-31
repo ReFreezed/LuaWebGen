@@ -182,7 +182,9 @@ do
 		["["] = "]",
 	}
 
-	-- position, isUrlBlock = findEndOfBlockContents( path, template, position, blockI1 )
+	-- position, blockType, heredocSpans = findEndOfBlockContents( path, template, position, blockI1 )
+	-- blockType                         = "lua"|"url"
+	-- heredocSpans                      = { {from=position, to=position}, ... }
 	local function findEndOfBlockContents(path, template, pos, blockI1)
 		!local PRINT_PROGRESS = DEV and 1==0
 		!if PRINT_PROGRESS then  __LUA`printf("%s(%d):%d: >>>>>>>>", path, pos, getLineNumber(template, pos))`  end
@@ -197,7 +199,7 @@ do
 			if not i1 then
 				fileError(path, template, blockI1, "Incomplete URL block.")
 			end
-			return i1-1, true
+			return i1-1, "url", nil
 		end
 
 		-- Lua code block:
@@ -207,6 +209,8 @@ do
 		local bracketBalance        = 0
 		local bracketStartPositions = {}
 		local bracketEndCharacters  = {}
+
+		local heredocSpans = nil
 
 		while true do
 			--
@@ -221,6 +225,7 @@ do
 			local posStringLong   = template:find("%[=*%[", pos, false)
 			local posBracketStart = template:find("[({%[]", pos, false)
 			local posBracketEnd   = template:find("[)}%]]", pos, false)
+			local posHeredocStart = template:find("===",    pos, true)
 
 			local posNext = math.min(
 				(posBlockEnd     or 1/0),
@@ -228,13 +233,14 @@ do
 				(posStringShort  or 1/0),
 				(posStringLong   or 1/0),
 				(posBracketStart or 1/0),
-				(posBracketEnd   or 1/0)
+				(posBracketEnd   or 1/0),
+				(posHeredocStart or 1/0)
 			)
 
 			if posNext == posBlockEnd then
 				!if PRINT_PROGRESS then  __LUA`printf("%s(%d):%d: <<<<<<<<", path, posNext, getLineNumber(template, posNext))`  end
 				pos = posBlockEnd - 1
-				return pos, false
+				return pos, "lua", heredocSpans
 
 			elseif posNext == posComment then
 				!if PRINT_PROGRESS then  __LUA`printf("%s(%d):%d: Comment", path, posNext, getLineNumber(template, posNext))`  end
@@ -343,6 +349,29 @@ do
 
 				pos = pos + 1
 
+			elseif posNext == posHeredocStart then
+				!if PRINT_PROGRESS then  __LUA`printf("%s(%d):%d: Heredoc start", path, posNext, getLineNumber(template, posNext))`  end
+				pos = posHeredocStart
+
+				local _, i2, heredocLevel = template:find("(===+)", pos)
+				pos                       = i2 + 1
+
+				local _, i2 = template:find("^%s*%*?}}", pos)
+				if not i2 then
+					local _, i2 = template:find("^%s*", pos)
+					fileError(path, template, i2+1, "Expected '}}' after '%s'.", heredocLevel)
+				end
+				pos = i2 + 1
+
+				local _, i2 = template:find("{{%*?%s*"..heredocLevel, pos)
+				if not i2 then
+					fileError(path, template, posHeredocStart, "Missing end of heredoc string (level %d).", #heredocLevel)
+				end
+				pos = i2 + 1
+
+				heredocSpans = heredocSpans or {}
+				table.insert(heredocSpans, {from=posHeredocStart-blockContentsI1+1, to=pos-blockContentsI1})
+
 			else
 				if bracketBalance > 0 then
 					fileError(
@@ -357,6 +386,14 @@ do
 		end
 
 		assert(false)
+	end
+
+	local STATEMENT_DIVIDER
+	do
+		local major, minor = _VERSION:match"^Lua (%d+)%.(%d+)$"
+		major              = tonumber(major)
+		minor              = tonumber(minor)
+		STATEMENT_DIVIDER  = major and ((major == 5 and minor >= 2) or major > 5) and ";;" or "do end "
 	end
 
 	-- endBlockI1, endBlockI2, endBlockContents = templateToLua( luaOutputBuffer, path, template, position, templateifiedControlStructureLevel, templateifiedControlStructurePosition )
@@ -386,17 +423,17 @@ do
 
 			pos = blockContentsI1
 
-			table.insert(out, "do end ") -- Statement divider.
+			table.insert(out, STATEMENT_DIVIDER)
 
-			local blockContentsI2, isUrlBlock = findEndOfBlockContents(path, template, pos, blockI1)
-			local blockContents               = template:sub(blockContentsI1, blockContentsI2)
-			pos                               = blockContentsI2 + 1
+			local blockContentsI2, blockType, heredocSpans = findEndOfBlockContents(path, template, pos, blockI1)
+			local blockContents                            = template:sub(blockContentsI1, blockContentsI2)
+			pos                                            = blockContentsI2 + 1
 
 			!if DEV and 1==0 then
 				print("BLOCK: "..trim(blockContents))
 			!end
 
-			doTrim, pos = template:match(!(NOSPACE"^(%*?) }} ()"), pos)
+			doTrim, pos = template:match(!(NOSPACE"^ (%*?) }} ()"), pos)
 			doTrim      = (doTrim == "*")
 
 			!local TRIM_POS_AFTER_BLOCK = `
@@ -408,10 +445,61 @@ do
 			end
 			`
 
+			-- Make heredoc strings into normal Lua strings.
+			if heredocSpans then
+				local buffer      = {}
+				local contentsPos = 1
+
+				for _, span in ipairs(heredocSpans) do
+					if span.from > contentsPos then
+						table.insert(buffer, blockContents:sub(contentsPos, span.from-1))
+						contentsPos = span.from
+					end
+
+					--
+					-- Heredoc sequence: === *}} ... {{* ===
+					--
+
+					-- Find start.
+					local _, i2, heredocLevel = blockContents:find("^(=+)", contentsPos)
+					contentsPos               = i2 + 1
+
+					local _, i2, heredocTrim, heredocContentI1 = blockContents:find(!(NOSPACE"^ %s* (%*?) }} () %s*"), contentsPos)
+					heredocTrim                                = (heredocTrim == "*")
+
+					if heredocTrim then  heredocContentI1 = i2+1  end
+					contentsPos = heredocContentI1
+
+					-- Find end.
+					!local pat                        = NOSPACE "%s* () {{ (%*?) %s* $"
+					local i1, _, curlyI1, heredocTrim = blockContents:sub(1, span.to-#heredocLevel):find(!(pat), contentsPos) -- @Speed: Don't use sub(), somehow. (Maybe we can't rely on find() here.)
+					heredocTrim                       = (heredocTrim == "*")
+					local heredocContentI2            = (heredocTrim and i1 or curlyI1) - 1
+
+					-- Make replacement.
+					local s = blockContents:sub(heredocContentI1, heredocContentI2)
+					s       = s:gsub("['\\\n]", "\\%0")
+
+					table.insert(buffer, ("\n"):rep(countSubString(blockContents, span.from, heredocContentI1-1, "\n", true)))
+					table.insert(buffer, "'")
+					table.insert(buffer, s)
+					table.insert(buffer, "'")
+					table.insert(buffer, ("\n"):rep(countSubString(blockContents, heredocContentI2+1, span.to, "\n", true)))
+
+					contentsPos = span.to + 1
+				end
+
+				if contentsPos <= #blockContents then
+					table.insert(buffer, blockContents:sub(contentsPos))
+				end
+
+				blockContents = table.concat(buffer)
+			end
+
 			----------------------------------------------------------------
 
 			-- URL block.
-			if isUrlBlock then
+			if blockType == "url" then
 				table.insert(out, F("echo__(url__%q)", trim(blockContents)))
 				-- @Incomplete: Fix line numbers if blockContents has newlines (which is probably rare).
 				!!(TRIM_POS_AFTER_BLOCK)
@@ -641,7 +729,7 @@ do
 
 			----------------------------------------------------------------
 
-			table.insert(out, "do end ") -- Statement divider.
+			table.insert(out, STATEMENT_DIVIDER)
 
 			if autoLock then
 				table.insert(out, "lock__()")
@@ -663,6 +751,12 @@ do
 	end
 
 	local function _parseAndRunTemplate(page, path, template, useCache, onPageInit, enableHtmlEncoding, args)
+		!if DEV then
+			if path:find(":", 1, true) or path:find"^/" then
+				errorf("Internal error: Invalid path '%s'.", path)
+			end
+		!end
+
 		local luaCode = (
 			template == "" and ""
 			or useCache    and templateMetaprogramCache[path]
@@ -677,7 +771,7 @@ do
 			if useCache then  templateMetaprogramCache[path] = luaCode  end
 
 			if outputMetaprograms then
-				local metaPath = "temp/meta/" .. path:gsub("/", "__") .. ".lua"
+				local metaPath = "temp/meta/" .. path:gsub("[:/]+", "__") .. ".lua"
 				timestampPrintVerbose("Writing: %s", maybeFullPath(metaPath))
 
 				createDirectory("temp/meta")
@@ -896,7 +990,8 @@ function _G.writeOutputFile(category, pathRel, url, data, modTime, sourcePath)
 
 	if site._fileProcessors[extLower] then
 		!PUSH_CONTEXT "none"
-			data = site._fileProcessors[extLower](data)
+			local sourceSitePathRel = (sourcePath ~= "") and pathToSitePath(sourcePath) or ""
+			data                    = site._fileProcessors[extLower](data, sourceSitePathRel) -- @Doc sourceSitePathRel?
 		!POP_CONTEXT()
 
 		if type(data) ~= "string" then
@@ -1802,26 +1897,28 @@ function _G.generateFromTemplateString(page, template, modTime, onPageInit)
 	assert(type(page)     == "table")
 	assert(type(template) == "string")
 
+	local pathRel    = page._path
+	local pathRelOut = page._pathOut
+
 	if page._isGenerated then
-		errorf(2, "Page has already generated. (%s)", maybeFullPath(page._path))
+		errorf(2, "Page has already generated. (%s)", maybeFullPath(pathRel))
 	end
-	if page._isGenerating or site._pagesGenerating[page._pathOut] then
-		errorf(2, "Recursive page generation detected. (You may want to call lock() in '%s')", maybeFullPath(page._path))
+	if page._isGenerating or site._pagesGenerating[pathRelOut] then
+		errorf(2, "Recursive page generation detected. (You may want to call lock() in '%s')", maybeFullPath(pathRel))
 	end
 
-	page._isGenerating                   = true
-	site._pagesGenerating[page._pathOut] = true
+	page._isGenerating                = true
+	site._pagesGenerating[pathRelOut] = true
 
-	local pathRel  = page._path
 	local filename = getFilename(pathRel)
 	local ext      = getExtension(filename)
 	local extLower = ext:lower()
 
-	timestampPrintVerbose("--> Processing(start): %s", maybeFullPath(page._path))
+	timestampPrintVerbose("--> Processing(start): %s", maybeFullPath(pathRel))
 	local result
 
 	if page.isPage.v then
-		local pageContent = parseAndRunTemplate(page, page._pathForError, template, nil, false, onPageInit, nil)
+		local pageContent = parseAndRunTemplate(page, page._contentRealPath, template, nil, false, onPageInit, nil)
 
 		page._isLocked = true
 		page._readonly = true
@@ -1830,19 +1927,19 @@ function _G.generateFromTemplateString(page, template, modTime, onPageInit)
 			(page.isDraft.v and not includeDrafts          ) or -- Is draft?
 			(datetimeToTime(page.publishDate:g()) > nowTime)    -- Is in future?
 		then
-			timestampPrintVerbose("--> Processing(abort): %s", maybeFullPath(page._path))
+			timestampPrintVerbose("--> Processing(abort): %s", maybeFullPath(pathRel))
 
 			page._isSkipped                  = true
 			site._outputFileSkippedPageCount = site._outputFileSkippedPageCount + 1
 
-			page._isGenerating                   = false
-			site._pagesGenerating[page._pathOut] = nil
+			page._isGenerating                = false
+			site._pagesGenerating[pathRelOut] = nil
 			return
 		end
 
 		if not (page.isIndex.v or page.isSpecial.v) and not page._dateHasBeenUpdated then
 			-- @UX: Should there be an option to disable this? Maybe an option for suppressing all warnings?
-			timestampPrintWarning("%s did not update page.date.", maybeFullPath(page._path))
+			timestampPrintWarning("%s did not update page.date.", maybeFullPath(pathRel))
 		end
 
 		page.content.v           = pageContent
@@ -1859,16 +1956,16 @@ function _G.generateFromTemplateString(page, template, modTime, onPageInit)
 		page._isLocked = true
 		page._readonly = true
 
-		result = parseAndRunTemplate(page, page._pathForError, template, nil, false, onPageInit, nil)
+		result = parseAndRunTemplate(page, page._contentRealPath, template, nil, false, onPageInit, nil)
 	end
 
-	timestampPrintVerbose("--> Processing(finish): %s", maybeFullPath(page._path))
+	timestampPrintVerbose("--> Processing(finish): %s", maybeFullPath(pathRel))
 
-	writeOutputFile(page._category, page._pathOut, page.url.v, result, modTime, page._path)
+	writeOutputFile(page._category, pathRelOut, page.url.v, result, modTime, pathRel)
 	page._isGenerated = true
 
-	page._isGenerating                   = false
-	site._pagesGenerating[page._pathOut] = nil
+	page._isGenerating                = false
+	site._pagesGenerating[pathRelOut] = nil
 end
 
 -- generateFromTemplateFile( page )
@@ -2412,7 +2509,7 @@ do
 			_dateHasBeenUpdated = false,
 			_path               = pathRel,
 			_pathOut            = pathRelOut,
-			_pathForError       = maybeFullPath(F("%s/%s", DIR_CONTENT, pathRel)),
+			_contentRealPath    = F("%s/%s", DIR_CONTENT, pathRel),
 			_extension          = extLower,
 
 			isPage = {
@@ -2449,9 +2546,9 @@ do
 					if page._contentIsAvailable then
 						return field.v
 					elseif not page.isPage.v then
-						errorf(3, "page.content isn't available for non-page templates. (%s)", page._pathForError)
+						errorf(3, "page.content isn't available for non-page templates. (%s)", maybeFullPath(page._contentRealPath))
 					else
-						errorf(3, "page.content isn't available (probably because the page hasn't finished generating). (%s)", page._pathForError)
+						errorf(3, "page.content isn't available (probably because the page hasn't finished generating). (%s)", maybeFullPath(page._contentRealPath))
 					end
 				end,
 			},

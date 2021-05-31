@@ -1202,7 +1202,7 @@ local function setup()
 		-- Hacks. (These are not very robust!)
 		----------------------------------------------------------------
 
-		XXX_minimizeCss = function(s)
+		XXX_minimizeCss = function(s, sourcePath)
 			local oldLen = #s
 			local header = s:match"^/%*.-%*/" or ""
 
@@ -1217,13 +1217,13 @@ local function setup()
 			)
 
 			!if DEV then
-				if verbosePrint then  printf("[opti] %s  from %d  to %d  (diff=%d)", getFilename(path), oldLen, #s, oldLen-#s)  end
+				if verbosePrint then  printf("[opti] %s  from %d  to %d  (diff=%d)", getFilename(sourcePath or "<css>"), oldLen, #s, oldLen-#s)  end
 			!end
 
 			return s
 		end,
 
-		XXX_minimizeJavaScript = function(s)
+		XXX_minimizeJavaScript = function(s, sourcePath)
 			local oldLen = #s
 			local header = s:match"^/%*.-%*/" or ""
 
@@ -1236,13 +1236,13 @@ local function setup()
 			)
 
 			!if DEV then
-				if verbosePrint then  printf("[opti] %s  from %d  to %d  (diff=%d)", getFilename(path), oldLen, #s, oldLen-#s)  end
+				if verbosePrint then  printf("[opti] %s  from %d  to %d  (diff=%d)", getFilename(sourcePath or "<css>"), oldLen, #s, oldLen-#s)  end
 			!end
 
 			return s
 		end,
 
-		XXX_minimizeHtaccess = function(s)
+		XXX_minimizeHtaccess = function(s, sourcePath)
 			local oldLen = #s
 
 			s = (s
@@ -1252,7 +1252,7 @@ local function setup()
 			)
 
 			!if DEV then
-				if verbosePrint then  printf("[opti] %s  from %d  to %d  (diff=%d)", getFilename(path), oldLen, #s, oldLen-#s)  end
+				if verbosePrint then  printf("[opti] %s  from %d  to %d  (diff=%d)", getFilename(sourcePath or "<css>"), oldLen, #s, oldLen-#s)  end
 			!end
 
 			return s
