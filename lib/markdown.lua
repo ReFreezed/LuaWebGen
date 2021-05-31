@@ -5,7 +5,7 @@
 
 **Author:** Niklas Frykholm, <niklas@frykholm.se>
 **Date:** 31 May 2008
-**Edited by:** Marcus Thunström (2018-06-14, 2021-05-06)
+**Edited by:** Marcus Thunström (2018-06-14, 2021-05-31)
 
 This is an implementation of the popular text markup language Markdown in pure Lua.
 Markdown can convert documents written in a simple and easy to read text format
@@ -269,16 +269,6 @@ end
 local function strip_html(html)
 	local text = html:gsub("<.->", "")
 	return text
-end
-
-local function urlize(text)
-	text = text
-		:lower()
-		:gsub("[%p ]+", "-")
-		:gsub("^%-+", "")
-		:gsub("%-+$", "")
-
-	return text == "" and "-" or text
 end
 
 ----------------------------------------------------------------------
