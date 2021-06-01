@@ -254,10 +254,10 @@ if doRelease then
 			copyDirectoryRecursive("lib",      outputDir.."/lib")
 			copyDirectoryRecursive("srcgen",   outputDir.."/srcgen")
 			copyDirectoryRecursive("examples", outputDir.."/examples", {".gitignore","logs","output","temp"--[[,"Build.cmd"]]})
-			copyFile("temp/app.exe",        values.exePath)
-			copyFile("webgen.lua",          outputDir.."/webgen.lua")
-			copyFile("build/Changelog.txt", outputDir.."/_Changelog.txt")
-			copyFile("build/README.txt",    outputDir.."/_README.txt")
+			copyFile("CHANGELOG.txt",     outputDir.."/_CHANGELOG.txt")
+			copyFile("build/_README.txt", outputDir.."/_README.txt")
+			copyFile("webgen.lua",        outputDir.."/webgen.lua")
+			copyFile("temp/app.exe",      values.exePath)
 		end
 	end
 
@@ -271,9 +271,9 @@ if doRelease then
 		copyDirectoryRecursive("lib",      outputDir.."/lib")
 		copyDirectoryRecursive("srcgen",   outputDir.."/srcgen")
 		copyDirectoryRecursive("examples", outputDir.."/examples", {".gitignore","logs","output","temp","Build.cmd"})
-		copyFile("webgen.lua",          outputDir.."/webgen.lua")
-		copyFile("build/Changelog.txt", outputDir.."/_Changelog.txt")
-		copyFile("build/README.txt",    outputDir.."/_README.txt")
+		copyFile("CHANGELOG.txt",     outputDir.."/_CHANGELOG.txt")
+		copyFile("build/_README.txt", outputDir.."/_README.txt")
+		copyFile("webgen.lua",        outputDir.."/webgen.lua")
 	end
 
 	-- Zip for distribution!
