@@ -22,7 +22,7 @@ CSS files can also include code.
 	- [Windows](#windows)
 	- [Universal](#universal)
 	- [Build Website](#build-website)
-- [Documentation](https://github.com/ReFreezed/LuaWebGen/wiki)
+- [Documentation](http://luawebgen.refreezed.com/docs/)
 
 
 
@@ -80,6 +80,8 @@ Page layout template, `page.html`:
 {{ include"footer" }}
 ```
 
+See more examples in the [examples folder](https://github.com/ReFreezed/LuaWebGen/tree/master/examples).
+
 
 
 ## Installation / Usage
@@ -134,7 +136,7 @@ lua path/to/webgen.lua command [options]
 ### Build Website
 
 To generate a new empty website, run something like this from the
-[command line](https://github.com/ReFreezed/LuaWebGen/wiki/Command-Line):
+[command line](http://luawebgen.refreezed.com/docs/command-line/):
 
 ```batch
 webgen new site "my-website"
@@ -143,7 +145,7 @@ webgen new page "blog/first-post.md"
 webgen build
 ```
 
-LuaWebGen uses this [folder structure](https://github.com/ReFreezed/LuaWebGen/wiki/Home#folder-structure) for a website project:
+LuaWebGen uses this [folder structure](http://luawebgen.refreezed.com/docs/#folder-structure) for a website project:
 
 ```
 my-website/             -- Root of the website project.
@@ -159,6 +161,6 @@ my-website/             -- Root of the website project.
 
 Everything in the *content* folder will be processed and end up in the *output* folder.
 
-See the [wiki](https://github.com/ReFreezed/LuaWebGen/wiki) for the full documentation.
+See the [website](http://luawebgen.refreezed.com/docs/) for the full documentation.
 
 

@@ -1,8 +1,9 @@
 LuaWebGen
 Developed by Marcus 'ReFreezed' Thunström
 
-Website: https://github.com/ReFreezed/LuaWebGen
-Documentation: https://github.com/ReFreezed/LuaWebGen/wiki
+Website: http://luawebgen.refreezed.com/
+Documentation: http://luawebgen.refreezed.com/docs/
+Repository: https://github.com/ReFreezed/LuaWebGen
 
 1. Disclaimer
 2. Installation / Usage
@@ -98,8 +99,8 @@ Everything in the 'content' folder will be processed and end up in the
 (Note: The 'output' folder is automatically cleaned from files and folders that
 do not exist in the 'content' folder, so don't save files in the 'output' folder!)
 
-See the wiki for the full documentation:
-https://github.com/ReFreezed/LuaWebGen/wiki
+See the website for the full documentation:
+http://luawebgen.refreezed.com/docs/
 
 
 
@@ -139,6 +140,8 @@ Page layout template, page.html:
     </main>
 
     {{include"footer"}}
+
+See more examples in the [repository](https://github.com/ReFreezed/LuaWebGen/tree/master/examples).
 
 
 

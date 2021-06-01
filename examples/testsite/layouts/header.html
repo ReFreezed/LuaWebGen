@@ -12,9 +12,9 @@
 		{{ site.title }}
 	</title>
 
-	<link rel="canonical" href="{{ page.permalink }}">
+	<link rel="canonical" href="{{ url(page.permalink) }}">
 
-	<link rel="alternate" type="application/rss+xml" href="{{ site.baseUrl.."feed.rss" }}" title="{{ site.title }}">
+	<link rel="alternate" type="application/rss+xml" href="{{ url(site.baseUrl.."feed.rss") }}" title="{{ site.title }}">
 
 	<link rel="stylesheet" href="{{ /css/style.css }}">
 

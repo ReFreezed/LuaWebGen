@@ -830,7 +830,6 @@ do
 	-- stringResult = parseAndRunTemplate( page, path, template, fileType=fromPage, useCache, onPageInit=nil, packedArguments=nil )
 	-- onPageInit   = function( wrappedPage )
 	function _G.parseAndRunTemplate(page, path, template, fileType, useCache, onPageInit, args)
-		-- timestampPrintVerbose("--> Template(start): %s", maybeFullPath(path))
 		local result
 
 		if template == "" and not onPageInit then
@@ -864,7 +863,6 @@ do
 			end
 		end
 
-		-- timestampPrintVerbose("--> Template(finish): %s", maybeFullPath(path))
 		return result
 	end
 
@@ -991,7 +989,7 @@ function _G.writeOutputFile(category, pathRel, url, data, modTime, sourcePath)
 	if site._fileProcessors[extLower] then
 		!PUSH_CONTEXT "none"
 			local sourceSitePathRel = (sourcePath ~= "") and pathToSitePath(sourcePath) or ""
-			data                    = site._fileProcessors[extLower](data, sourceSitePathRel) -- @Doc sourceSitePathRel?
+			data                    = site._fileProcessors[extLower](data, sourceSitePathRel)
 		!POP_CONTEXT()
 
 		if type(data) ~= "string" then
@@ -1901,10 +1899,10 @@ function _G.generateFromTemplateString(page, template, modTime, onPageInit)
 	local pathRelOut = page._pathOut
 
 	if page._isGenerated then
-		errorf(2, "Page has already generated. (%s)", maybeFullPath(pathRel))
+		errorf(2, "Page has already generated. (%s)", maybeFullPath(page._contentRealPath))
 	end
 	if page._isGenerating or site._pagesGenerating[pathRelOut] then
-		errorf(2, "Recursive page generation detected. (You may want to call lock() in '%s')", maybeFullPath(pathRel))
+		errorf(2, "Recursive page generation detected. (You may want to call lock() in '%s')", maybeFullPath(page._contentRealPath))
 	end
 
 	page._isGenerating                = true
@@ -1914,7 +1912,7 @@ function _G.generateFromTemplateString(page, template, modTime, onPageInit)
 	local ext      = getExtension(filename)
 	local extLower = ext:lower()
 
-	timestampPrintVerbose("--> Processing(start): %s", maybeFullPath(pathRel))
+	timestampPrintVerbose("--> Processing(start): %s", maybeFullPath(page._contentRealPath))
 	local result
 
 	if page.isPage.v then
@@ -1927,7 +1925,7 @@ function _G.generateFromTemplateString(page, template, modTime, onPageInit)
 			(page.isDraft.v and not includeDrafts          ) or -- Is draft?
 			(datetimeToTime(page.publishDate:g()) > nowTime)    -- Is in future?
 		then
-			timestampPrintVerbose("--> Processing(abort): %s", maybeFullPath(pathRel))
+			timestampPrintVerbose("--> Processing(abort): %s", maybeFullPath(page._contentRealPath))
 
 			page._isSkipped                  = true
 			site._outputFileSkippedPageCount = site._outputFileSkippedPageCount + 1
@@ -1939,7 +1937,7 @@ function _G.generateFromTemplateString(page, template, modTime, onPageInit)
 
 		if not (page.isIndex.v or page.isSpecial.v) and not page._dateHasBeenUpdated then
 			-- @UX: Should there be an option to disable this? Maybe an option for suppressing all warnings?
-			timestampPrintWarning("%s did not update page.date.", maybeFullPath(pathRel))
+			timestampPrintWarning("%s did not update page.date.", maybeFullPath(page._contentRealPath))
 		end
 
 		page.content.v           = pageContent
@@ -1959,7 +1957,7 @@ function _G.generateFromTemplateString(page, template, modTime, onPageInit)
 		result = parseAndRunTemplate(page, page._contentRealPath, template, nil, false, onPageInit, nil)
 	end
 
-	timestampPrintVerbose("--> Processing(finish): %s", maybeFullPath(pathRel))
+	timestampPrintVerbose("--> Processing(finish): %s", maybeFullPath(page._contentRealPath))
 
 	writeOutputFile(page._category, pathRelOut, page.url.v, result, modTime, pathRel)
 	page._isGenerated = true
@@ -2129,7 +2127,7 @@ function _G.getLayoutTemplate(page)
 
 	local template, err = getFileContentsText(path)
 	if not template then
-		errorf("%s: Could not load layout '%s'. (%s)", maybeFullPath(page._path), page.layout.v, err)
+		errorf("%s: Could not load layout '%s'. (%s)", maybeFullPath(page._contentRealPath), page.layout.v, err)
 	end
 
 	site._layoutTemplates[path] = template

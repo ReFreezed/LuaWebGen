@@ -1,6 +1,19 @@
 Changelog
 LuaWebGen
 
+v1.4 (2021-06-01)
+- Added syntax for heredoc strings.
+- Added functions: percent(), urlRaw().
+- Added options: --baseurloverride, --meta, --fullpaths, --nogc.
+- Added better example sites.
+- Better support for when baseUrl is pointing to a subdirectory. (url(), {{url}} and other related code now fixes relative paths.)
+- include() can now take take extra arguments for the target layout to receive.
+- A warning is printed when page.date hasn't been updated for a page (except for index and special pages).
+- Much faster getImageDimensions() for most images.
+- Fixed "#" in redirection targets getting messed up and messing other stuff up.
+- Fixed config.rewriteOutputPath() sometimes having the wrong context.
+- Fixed a couple of error messages missing some information.
+
 v1.3.1 (2021-05-25)
 - Fixed non-page templates not getting processed before pages.
 - Added minimal example site.

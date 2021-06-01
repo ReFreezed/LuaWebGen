@@ -311,17 +311,17 @@ local function setup()
 			elseif arg == "--verbose" then
 				_G.verbosePrint = true
 
-			elseif arg == "--meta" then -- @Doc?
+			elseif arg == "--meta" then
 				_G.outputMetaprograms = true
 
-			elseif arg == "--nogc" then -- @Doc?
+			elseif arg == "--nogc" then
 				_G.enableGc = false
 				collectgarbage("stop")
 
-			elseif arg == "--fullpaths" then -- @Doc?
+			elseif arg == "--fullpaths" then
 				_G.useFullPaths = true
 
-			elseif arg == "--baseurloverride" then -- @Doc?
+			elseif arg == "--baseurloverride" then
 				i                  = i + 1
 				_G.baseUrlOverride = programArguments[i] or errorNoPos("[Arguments] Missing URL after '%s'.", argRaw)
 				arg                = arg .. '"' .. baseUrlOverride .. '"'
@@ -1072,7 +1072,7 @@ local function setup()
 			scriptEnvironmentGlobals.echoRaw(s:format(...))
 		end,
 
-		include = function(htmlFileBasename, ...) -- @Doc: Extra arguments.
+		include = function(htmlFileBasename, ...)
 			assertContext("template", "include")
 			if htmlFileBasename:find"^/" then
 				errorf(2, "Filename is not valid: %s", htmlFileBasename)
