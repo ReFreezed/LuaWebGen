@@ -34,7 +34,7 @@ return function()
 
 	--[==[ XML parsing.
 	local xmlStr = (
-		readTextFile"../local/test-wordpress-export.xml" or
+		readTextFile"../../local/test-wordpress-export.xml" or
 		-- assert(readTextFile"data/barf.xml") or
 		([=[<?xml version="1.0" encoding="UTF-8"?>
 			<information>
@@ -65,9 +65,9 @@ return function()
 
 	--[==[ HTML parsing.
 	local htmlStr = (
-		-- readTextFile"../local/test-youtube-watch-page.html" or
-		-- readTextFile"../local/test-deviantart-front-page.html" or
-		-- readTextFile"../local/test-aftonbladet-front-page.html" or
+		-- readTextFile"../../local/test-youtube-watch-page.html" or
+		-- readTextFile"../../local/test-deviantart-front-page.html" or
+		-- readTextFile"../../local/test-aftonbladet-front-page.html" or
 		([=[<!DOCTYPE html>
 			<html>
 				<head>
@@ -102,7 +102,121 @@ return function()
 	print(doc:toHtml())
 	--]==]
 
-	-- [[ Get image dimensions.
+	-- [[ Markdown parsing.
+	do
+		local TEST_OUTPUT_REPLACEMENTS = {
+			-- These are indeed not basic autolinks, but they are extended autolinks!
+			[616] = '<p>&lt; <a href="http://foo.bar">http://foo.bar</a> &gt;</p>\n', -- < http://foo.bar >  ->  <p>&lt; http://foo.bar &gt;</p>
+			[619] = '<p><a href="http://example.com">http://example.com</a></p>\n',   -- http://example.com  ->  <p>http://example.com</p>
+
+			-- This is indeed not a basic autolink, but it is an extended e-mail autolink!
+			[620] = '<p><a href="mailto:foo@bar.example.com">foo@bar.example.com</a></p>\n', -- foo@bar.example.com  ->  <p>foo@bar.example.com</p>
+		}
+
+		xml.htmlAllowNoAttributeValue = false
+
+		local docHtml = assert(readTextFile"../../local/gfm-spec.html")
+		local doc     = assert(xml.parseHtml(docHtml))
+		local tests   = {}
+
+		doc:walk(false, function(tag, node)
+			if node.attr.class == "example" then
+				local n      = 0
+				local input  = nil
+				local output = nil
+
+				node:walk(false, function(tag, innerNode)
+					if tag == "a" then
+						n = tonumber(innerNode.attr.href:match"^#example%-(%d+)$")
+						return "ignorechildren"
+
+					elseif tag == "pre" then
+						if not input then
+							input = innerNode:getText()
+							return "ignorechildren"
+						else
+							output = innerNode:getText()
+							return "stop"
+						end
+					end
+				end)
+
+				-- Normalize output. (The spec uses "<br />" etc.)
+				output = (output
+					:gsub("(<[bh]r) />", "%1>"):gsub("(<img.-) />", "%1>") -- We don't use self-closing symbols for known tags.
+					:gsub("%%5B", "["):gsub("%%5D", "]")                   -- We don't percent-encode "[" or "]" in URIs (because of IPv6).
+					:gsub('(<img)( src="[^"]*")( alt="[^"]*")', "%1%3%2")  -- We sort attributes alphabetically.
+					:gsub("'", "&apos;"):gsub("\194\160", "&nbsp;")        -- We HTML-encode more characters.
+				)
+
+				input  = input :gsub("→", "\t")
+				output = output:gsub("→", "\t")
+				output = TEST_OUTPUT_REPLACEMENTS[n] or output
+
+				table.insert(tests, {n=n, input=input, output=output})
+
+				return "ignorechildren"
+			end
+		end)
+
+		-- bool = range( test, min1,max1, ... )
+		-- bool = is   ( test, n1, ... )
+		local function range(test, ...)
+			for i = 1, select("#", ...), 2 do
+				if test.n >= select(i, ...) and test.n <= select(i+1, ...) then  return true  end
+			end
+			return false
+		end
+		local function is(test, ...)
+			for i = 1, select("#", ...) do
+				if test.n == select(i, ...) then  return true  end
+			end
+			return false
+		end
+
+		-- markdownRunInternalTests()
+		timerStart("markdown")
+
+		for _, test in ipairs(tests) do
+			if not (false
+				or is(test,175,363,548) -- @Incomplete: Full Unicode support. (Hah...)
+
+				-- or test.n < 118 -- Jump to HTML block parsing tests.
+				-- or test.n < 307 -- Jump to inline parsing tests.
+				-- or test.n < 360 -- Jump to emphasis parsing tests.
+				-- or test.n < 493 -- Jump to link parsing tests.
+			) then
+				-- print("Test#"..test.n)
+
+				local html = (markdown(test.input)
+					-- This is just so we pass tests we really should have passed. Sigh...
+					:gsub("'", "&apos;")
+				)
+
+				if html ~= test.output then
+					print(((
+						"Error @ Test "..test.n..":\n"
+						-- .."================================\n"
+						-- .."INPUT:\n"
+						-- ..test.input.."\n"
+						.."================================\n"
+						.."WANTED:\n"
+						..XXX_showWhitespace(test.output).."\n"
+						.."================================\n"
+						.."GOT:\n"
+						..XXX_showWhitespace(html)
+					):gsub("\t", "→")))
+
+					os.exit(1)
+				end
+			end
+		end
+
+		timerEnd()
+	end
+	--]]
+
+	--[[ Get image dimensions.
 	local path = "/images/sakura-trees.jpg"
 	local w, h = assert(XXX_getImageDimensionsFast(path, true))
 	assert(w == 510 and h == 340, "Bad size for "..path)

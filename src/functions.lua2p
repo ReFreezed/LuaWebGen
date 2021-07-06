@@ -33,8 +33,8 @@
 	getTimezone, getTimezoneOffsetString, getTimezoneOffset
 	gsubPlainSub, gmatchAndBetween
 	htaccessRewriteEscapeTestString, htaccessRewriteEscapeCondPattern, htaccessRewriteEscapeRuleSubstitution
-	indexOf, itemWith, itemWithAll
-	insertMultiple
+	indexOf, lastIndexOf, itemWith, itemWithAll
+	insertMultiple, removeItem, getItem, getLast
 	ipairsr, iprev
 	isAny
 	isArgs
@@ -54,10 +54,10 @@
 	percentEncode, partialEncodeUrl, fixRelativeUrl, fixRelativeUrlAndEncode, toAbsoluteAndEncodedUrl, urlize, urlToPrettyText
 	printNoLog, printfNoLog, log, print, printOnce, printf, printfOnce, timestampPrint, timestampPrintOnce, timestampPrintVerbose, timestampPrintError, timestampPrintWarning, timestampPrintWarningOnce, printObject, logErrorTraceback
 	pushContext, assertContext, getContext, isContext
-	removeItem
 	rewriteOutputPath
 	round
 	serializeLua
+	showWhitespace
 	sort
 	sortNatural, compareNatural
 	splitString
@@ -1639,6 +1639,11 @@ function dataParsers.xml(dataStr, path)
 	return doc
 end
 
+dataParserIsBinary.txt = false
+function dataParsers.txt(dataStr, path)
+	return dataStr
+end
+
 dataParserIsBinary.svg  = false ; dataParsers.svg  = dataParsers.xml
 -- dataParserIsBinary.htm  = false ; dataParsers.htm  = dataParsers.html
 -- dataParserIsBinary.wlua = false ; dataParsers.wlua = dataParsers.lua -- A bit silly, really.
@@ -2076,9 +2081,18 @@ end
 
 
 
-function _G.indexOf(t, v)
-	for i, item in ipairs(t) do
-		if item == v then  return i  end
+-- index = indexOf( array, value [, searchStartIndex=1 ] )
+function _G.indexOf(t, v, i)
+	for i = (i or 1), #t do
+		if t[i] == v then  return i  end
+	end
+	return nil
+end
+
+-- index = lastIndexOf( array, value [, searchStartIndex=#array ] )
+function _G.lastIndexOf(t, v, i)
+	for i = (i or #t), 1, -1 do
+		if t[i] == v then  return i  end
 	end
 	return nil
 end
@@ -2104,7 +2118,7 @@ end
 _G.encodeHtmlEntities = xmlLib.encodeRequiredEntities
 
 -- html = markdownToHtml( markdown )
-_G.markdownToHtml = markdownLib
+_G.markdownToHtml = markdownLib.parse
 
 function _G.doesValueLookLikeHtml(v)
 	return type(v) == "string" and v:find!(NOSPACE"^ %s* < [!%a/] .* > %s* $") ~= nil
@@ -2769,18 +2783,6 @@ end
 
 
 
--- removeItem( array, value1, ... )
--- @Incomplete: Change into this: anythingGotRemoved = removeItem( array, value1, ... )
-function _G.removeItem(t, ...)
-	for i = 1, select("#", ...) do
-		local iToRemove = indexOf(t, select(i, ...))
-
-		if iToRemove then  table.remove(t, iToRemove)  end
-	end
-end
-
-
-
 -- Same as string.gsub(), but "%" has no meaning in the substitution.
 function _G.gsubPlainSub(s, pat, repl)
 	return s:gsub(pat, (repl:gsub("%%", "%%%%")))
@@ -3109,6 +3111,26 @@ function insertMultiple(t, ...)
 	end
 end
 
+-- removeItem( array, value1, ... )
+-- @Incomplete: Change into this: anythingGotRemoved = removeItem( array, value1, ... )
+function _G.removeItem(t, ...)
+	for i = 1, select("#", ...) do
+		local iToRemove = indexOf(t, select(i, ...))
+
+		if iToRemove then  table.remove(t, iToRemove)  end
+	end
+end
+
+-- item = getItem( array, index )
+-- index<0 means from the end (-1 is last, -2 is next last etc.).
+function _G.getItem(t, i)
+	return t[i < 0 and #t+1+i or i]
+end
+
+function _G.getLast(t)
+	return t[#t]
+end
+
 
 
 function _G.maybeFullPath(path)
@@ -3135,6 +3157,29 @@ function _G.loadLuaFile(path, env)
 
 	if env then  setfenv(chunk, env)  end
 	return chunk
+end
+
+
+
+do
+	!local ASCII_ONLY = DEV and 1==1
+
+	local WHITESPACE_REPLACEMENTS = {
+		[" "]  = !(ASCII_ONLY and "."      or "•"),
+		["\t"] = !(ASCII_ONLY and "{TAB}"  or "→"),
+		["\n"] = !(ASCII_ONLY and "{NL}\n" or "↓\n"),
+	}
+
+	-- string = showWhitespace( string [, removeNewlines=false ] )
+	function _G.showWhitespace(s, removeNewlines)
+		s = s:gsub("\n$", !(ASCII_ONLY and "{NL}" or "↓")):gsub("[ \t\n]", WHITESPACE_REPLACEMENTS)
+
+		if removeNewlines then
+			s = s:gsub("\n", "")
+		end
+
+		return s
+	end
 end
 
 

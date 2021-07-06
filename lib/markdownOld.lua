@@ -168,8 +168,6 @@ end
 
 -- Converts tabs to spaces
 function detab(text)
-
-	--[[ @Edit: What in the world is going on here?
 	local tab_width = 4
 	local function rep(match)
 		local spaces = -#match
@@ -177,8 +175,6 @@ function detab(text)
 		return match .. string.rep(" ", spaces)
 	end
 	text = text:gsub("([^\n]-)\t", rep)
-	]]
-	text = text:gsub("\t", "    ") -- Is more than this @New line needed?
 
 	return text
 end

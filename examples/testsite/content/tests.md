@@ -102,7 +102,7 @@ One {{* "Space"  }} Allowed
 
 {{fori {5,99,- -8}}}
 - {{it}}
-{{end}}
+{{*end}}
 
 URL: {{ /foo }}
 URL: {{ ./foo }}
@@ -196,26 +196,26 @@ Favorite fruit is neither apple nor banana. :(
 
 {{ for i = 1, 3 }}
 - For {{ i }}
-{{ end }}
+{{* end }}
 
 {{ for 3 }}
-- Short form {{ i }}
-{{ end }}
+* Short form {{ i }}
+{{* end }}
 
 {{ for < 3 }}
 - Backwards {{ i }}
-{{ end }}
+{{* end }}
 
 {{ local n = 3 }}
-{{ while n > 0 }}
-- Countdown #{{ n }}
-{{ n = n-1 }}
-{{ end }}
+{{* while n > 0 }}
+* Countdown #{{ n }}
+{{* n = n-1 }}
+{{* end }}
 
 {{ repeat }}
-{{ n = n+1 }}
+{{* n = n+1 }}
 - Count #{{ n }}
-{{ until n >= 3 }}
+{{* until n >= 3 }}
 
 
 
@@ -224,12 +224,12 @@ Favorite fruit is neither apple nor banana. :(
 Dogs:
 {{ fori dog in data.dogs }}
 - {{ i }}: {{ dog.name }} (age {{ dog.age }})
-{{ end }}
+{{* end }}
 
 Cats, in reverse:
 {{ fori < data.cats.cats }}
 - {{ i }}: {{ it.name }} (age {{ it.age }})
-{{ end }}
+{{* end }}
 
 {{ io.write("JSON: ") ; printObject(data.random) }}
 {{ io.write("XML: ")  ; print(data.barf:getFirstElement()) }}

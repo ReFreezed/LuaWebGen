@@ -1,0 +1,2620 @@
+--[[============================================================
+--=
+--=  Markdown parsing module (GitHub Flavored Markdown)
+--=
+--=-------------------------------------------------------------
+--=
+--=  LuaWebGen - static website generator in Lua!
+--=  - Written by Marcus 'ReFreezed' Thunström
+--=  - MIT License (See LICENSE.txt)
+--=
+--==============================================================
+
+	parse
+
+--============================================================]]
+
+local markdown = {}
+
+!(
+local PATTERN_CHAR                        = "[%z\1-\127\194-\244][\128-\191]*"
+local PATTERN_LINE                        = "[^\n]*"
+local PATTERN_BLANK_LINE                  = "^[ \t]*$"
+local PATTERN_WHITESPACE_CHAR             = "[ \t\n\v\f]" -- Excluding \r.
+local PATTERN_WHITESPACE_SEQUENCE         = PATTERN_WHITESPACE_CHAR.."+"
+local PATTERN_UNICODE_WHITESPACE_CHAR     = PATTERN_WHITESPACE_CHAR -- @Incomplete: Include Unicode Zs.
+local PATTERN_NON_WHITESPACE_CHAR         = "[^ \t\n\v\f]"
+local PATTERN_NON_UNICODE_WHITESPACE_CHAR = "[^ \t\n\v\f]" -- @Incomplete: Include Unicode Zs.
+local PATTERN_ASCII_PUNCTUATION_CHAR      = "[\33-\47\58-\64\91-\96\123-\126]"
+local PATTERN_PUNCTUATION_CHAR            = PATTERN_ASCII_PUNCTUATION_CHAR -- @Incomplete: Include Unicode Pc+Pd+Pe+Pf+Pi+Po+Ps.
+
+local REPLACEMENT_CHARACTER = "\239\191\189" -- U+FFFD
+
+local function PRINT(...)
+	if not DEV then  return ""  end
+	-- do  return "print(" .. table.concat({...}, ", ") .. ")"  end -- DEBUG
+	return ""
+end
+local function WHERE(path, ln)
+	if not DEV then  return ""  end
+	-- do  return "print('>>>>>>>> "..path:gsub('"',"")..":"..ln..": '..showWhitespace((line or s or ''):sub(pos or 1/0)))"  end -- DEBUG
+	return ""
+end
+)
+
+
+
+local function trimWhitespace(s)
+	return (s:gsub(!("^"..PATTERN_WHITESPACE_SEQUENCE), ""):gsub(!(PATTERN_WHITESPACE_SEQUENCE.."$"), ""))
+end
+
+local function hasElement(el, tagName)
+	for _, childNode in ipairs(el) do
+		if xmlLib.isElement(childNode) and (childNode.tag == tagName or hasElement(childNode, tagName)) then
+			return true
+		end
+	end
+	return false
+end
+
+local function addText(buffer, s, i1, i2)
+	if i1 <= i2 then  table.insert(buffer, s:sub(i1, i2))  end
+	return i2 + 1
+end
+
+
+
+-- column, position = shiftBlockPosition( line, column, position, amount )
+local function shiftBlockPosition(line, col, pos, amount)
+	for i = 1, amount do
+		if line:byte(pos) == !(BYTE"\t") then
+			col = col + 1
+			if col%4 == 1 then  pos = pos + 1  end -- At tab stop.
+		else
+			pos = pos + 1
+			col = col + 1
+		end
+	end
+	return col, pos
+end
+
+local getBlockStart_lastColumn   = 1
+local getBlockStart_lastPosition = 1
+
+-- column, position = getBlockStart( line, pattern=nil, column, position [, maxIndentation=3 ] )
+-- 'maxIndentation' must not be more than the max width of a tab (4) if 'pat' is set.
+-- Returns nil if 'pat' is set but there is no match.
+local function getBlockStart(line, pat, col, pos, maxIndent)
+	--[[
+		pos      |1---5---9|1---5---9|1---5---9|1---5---9|
+		see      |tx  .   .| tx .   .|  tx.   .|   tx   .|
+		treat_as |~~~x.   .| ~~x.   .|  ~x.   .|   tx   .|
+		col      |1---5---9|1---5---9|1---5---9|1---5---9|
+		match_pos|  +0        +0        +0         +1    |
+		match_col|  +3        +2        +1        +1     |
+	]]
+	for i = 1, (maxIndent or 3) do
+		if not (line:byte(pos) == !(BYTE" ") or line:byte(pos) == !(BYTE"\t")) then
+			break
+		end
+		col, pos = shiftBlockPosition(line, col, pos, 1)
+	end
+
+	if pat and not line:find(pat, pos) then  return nil  end
+
+	getBlockStart_lastColumn   = col
+	getBlockStart_lastPosition = pos
+
+	return col, pos
+end
+
+-- contents, column = getBlockContents( line, column, position [, maxIndentation=3 ] )
+local function getBlockContents(line, col, pos, maxIndent)
+	--
+	-- The line may have up to maxIndent spaces/columns of indentation.
+	-- We handle both space characters and variable-width tabs.
+	--
+	for i = 1, (maxIndent or 3) do
+		if not (line:byte(pos) == !(BYTE" ") or line:byte(pos) == !(BYTE"\t")) then
+			break
+		end
+		col, pos = shiftBlockPosition(line, col, pos, 1)
+	end
+
+	local content = line:sub(pos)
+
+	if line:byte(pos) == !(BYTE"\t") and col%4 ~= 1 then
+		local spaces = 3 - ((col+2) % 4)
+		content = (" "):rep(spaces) .. line:sub(pos+1)
+		-- @@PRINT(">>>>1", "col",col, "pos",pos, "spaces",spaces)
+	else
+		content = line:sub(pos)
+		-- @@PRINT(">>>>2", "col",col, "pos",pos)
+	end
+
+	return content, col
+end
+
+local HTML_BLOCK_TAGS = !(Set{
+	"address","article","aside","base","basefont","blockquote","body","caption","center","col","colgroup",
+	"dd","details","dialog","dir","div","dl","dt","fieldset","figcaption","figure","footer","form","frame",
+	"frameset","h1","h2","h3","h4","h5","h6","head","header","hr","html","iframe","legend","li","link",
+	"main","menu","menuitem","nav","noframes","ol","optgroup","option","p","param","section","source",
+	"summary","table","tbody","td","tfoot","th","thead","title","tr","track","ul",
+	-- "script","style","pre",
+})
+
+local function isHtmlBlockStartByRule6(line, col, pos)
+	local _, i = getBlockStart(line, "^<", col, pos)
+	if not i then  return false  end
+	pos = i + 1
+
+	pos = line:match("^/?()", pos)
+
+	local tagName, posNext = line:match("^(%a+)()", pos)
+	if not tagName   then  return false  end
+	if #tagName > 10 then  return false  end -- The longest tag we're interested in is 10 characters.
+	pos = posNext
+
+	if not (
+		line:find(!("^"..PATTERN_WHITESPACE_CHAR), pos) -- The tag can be partial (even invalid after this point) for this rule.
+		or line:find("^/?>", pos)
+	) then
+		return false
+	end
+
+	return HTML_BLOCK_TAGS[tagName:lower()] == true
+end
+
+local function isHtmlBlockStartByRule7(line, col, pos)
+	local _, i = getBlockStart(line, "^<", col, pos)
+	if not i then  return false  end
+	pos = i + 1
+
+	local isEndTag = @@IS_CHAR(line, pos, "/")
+	if isEndTag then  pos = pos + 1  end
+
+	local tagName, posNext = line:match("^(%a[-%w]*)()", pos)
+	if not tagName then  return false  end
+	pos = posNext
+
+	-- This is not needed as these tags should already have been handled.
+	-- if not isEndTag and @@CONSTSET{"script","style","pre"}[tagName:lower()] then
+	-- 	return false
+	-- end
+
+	if isEndTag then
+		pos = line:match(!("^"..PATTERN_WHITESPACE_CHAR.."*()"), pos)
+
+	else
+		-- Attributes.
+		while true do
+			local posNext = line:match(!("^"..PATTERN_WHITESPACE_CHAR.."+[_:%a][-_:%w.]*()"), pos)
+			if not posNext then  break  end
+			pos = posNext
+
+			-- Optional value. @Speed
+			pos = (
+				line:match(!("^"..PATTERN_WHITESPACE_CHAR.."*="..PATTERN_WHITESPACE_CHAR..'*"[^"]*"()'), pos) or
+				line:match(!("^"..PATTERN_WHITESPACE_CHAR.."*="..PATTERN_WHITESPACE_CHAR.."*'[^']*'()"), pos) or
+				line:match(!("^"..PATTERN_WHITESPACE_CHAR.."*="..PATTERN_WHITESPACE_CHAR.."*[^ \t\n\v\f\"'=<>`]+()"), pos) or
+				pos
+			)
+		end
+
+		pos = line:match(!("^"..PATTERN_WHITESPACE_CHAR.."*/?()"), pos)
+	end
+
+	if not line:find(!("^>"..PATTERN_WHITESPACE_CHAR.."*$"), pos) then
+		return false
+	end
+
+	return true
+end
+
+
+
+-- entityCharacter, endPosition = parseEntity( s, position )
+-- Returns nil on error.
+local function parseEntity(s, pos)
+	local entityHtml = s:match("^&#?%w+;", pos)
+	if not entityHtml then  return nil  end
+
+	local entityChar = xmlLib.decodeEntities(entityHtml, false)
+	if entityChar == entityHtml then  return nil  end
+
+	if entityChar == "\0" then -- @Incomplete: Also replace invalid codepoints with REPLACEMENT_CHARACTER.
+		entityChar = !(REPLACEMENT_CHARACTER)
+	end
+
+	return entityChar, pos+#entityHtml-1
+end
+
+
+
+local function normalizeLinkLabel(label)
+	label = trimWhitespace(label)
+	label = label:gsub(!(PATTERN_WHITESPACE_SEQUENCE), " ")
+	label = label:lower() -- @Incomplete: Perform Unicode case fold instead of this (and possibly before trimming whitespace).
+	return label
+end
+
+-- linkLabel, endLn, endPosition = parseLinkLabel( lines, ln, line, position )
+-- Returns nil on error.
+local function parseLinkLabel(lines, ln, line, pos)
+	if not @@IS_CHAR(line, pos, "[") then  @@WHERE(@file,@line) return nil  end
+	pos = pos + 1
+
+	if @@IS_CHAR(line, pos, "]") then  @@WHERE(@file,@line) return nil  end
+
+	local labelContentMaxPos = pos + 998
+	local textStartPos       = pos
+	local buffer             = {}
+
+	while pos <= labelContentMaxPos do
+		local i, c = line:match("()([%[%]\\])", pos)
+
+		if not i then
+			-- Continue on the next line if it's not empty. (Hopefully this is the correct way of parsing,
+			-- because the spec doesn't seem to say anything about this more than an example... (Seems it's not!))
+			if lines[ln+1] and not lines[ln+1].line:find!(PATTERN_BLANK_LINE) then
+				addText(buffer, line, textStartPos, #line)
+				table.insert(buffer, "\n")
+
+				ln           = ln + 1
+				line         = lines[ln].line
+				pos          = 1
+				textStartPos = 1
+
+				labelContentMaxPos = 999 -- @Cleanup: Calculate a better value, I guess. It's not important. For now we check the resulting length before returning success.
+
+			else
+				@@WHERE(@file,@line)
+				return nil
+			end
+
+		else
+			pos = i
+
+			if c == "[" then
+				@@WHERE(@file,@line)
+				return nil
+
+			elseif c == "]" then
+				if pos-1 > labelContentMaxPos then  @@WHERE(@file,@line) return nil  end
+
+				addText(buffer, line, textStartPos, pos-1)
+
+				local label = table.concat(buffer)
+				if #label > 999 then  @@WHERE(@file,@line) return nil  end
+
+				label = normalizeLinkLabel(label)
+				if label == "" then  @@WHERE(@file,@line) return nil  end
+
+				return label, ln, pos
+
+			elseif c == "\\" and line:find(!("^"..PATTERN_ASCII_PUNCTUATION_CHAR), pos+1) then
+				--[[ No, labels do not resolve escapes!
+				addText(buffer, line, textStartPos, pos-1)
+				textStartPos = pos + 1
+				]]
+				pos = pos + 2
+
+			else
+				pos = pos + 1
+			end
+		end
+	end
+
+	@@WHERE(@file,@line)
+	return nil
+end
+
+-- linkDestination, endPosition = parseLinkDestination( s, position )
+-- Returns nil on error.
+local function parseLinkDestination(s, pos)
+	-- Quoted destination:
+	--   <destination>
+	if @@IS_CHAR(s, pos, "<") then
+		pos                = pos + 1
+		local textStartPos = pos
+		local buffer       = {}
+
+		while true do
+			local i, c = s:match("()([<>\\\n&])", pos)
+			if not i then  return nil  end
+			pos = i
+
+			if c == ">" then
+				addText(buffer, s, textStartPos, pos-1)
+				pos = pos + 1
+				break
+
+			elseif c == "\\" and s:find(!("^"..PATTERN_ASCII_PUNCTUATION_CHAR), pos+1) then
+				addText(buffer, s, textStartPos, pos-1)
+				textStartPos = pos + 1
+				pos          = pos + 2
+
+			elseif c == "&" then
+				local entityChar, endPos = parseEntity(s, pos)
+
+				if entityChar then
+					addText(buffer, s, textStartPos, pos-1)
+					table.insert(buffer, entityChar)
+					textStartPos = endPos + 1
+					pos          = textStartPos
+				else
+					pos = pos + 1
+				end
+
+			elseif c == "<" or c == "\n" then
+				return nil
+
+			else
+				pos = pos + 1
+			end
+		end
+
+		return table.concat(buffer), pos-1
+
+	-- Unquoted destination:
+	--   destination
+	else
+		local textStartPos = pos
+		local parenBalance = 0
+		local buffer       = {}
+
+		while true do
+			local i, c = s:match("()([()\\ \1-\31&])", pos)
+			if not i then
+				pos = #s + 1
+				break
+			end
+			pos = i
+
+			if c == " " or c:byte() <= 31 then
+				break
+
+			elseif c == "(" then
+				parenBalance = parenBalance + 1
+				pos          = pos + 1
+
+			elseif c == ")" then
+				if parenBalance == 0 then
+					break
+				end
+
+				parenBalance = parenBalance - 1
+				pos          = pos + 1
+
+			elseif c == "\\" and s:find(!("^"..PATTERN_ASCII_PUNCTUATION_CHAR), pos+1) then
+				addText(buffer, s, textStartPos, pos-1)
+				textStartPos = pos + 1
+				pos          = pos + 2
+
+			elseif c == "&" then
+				local entityChar, endPos = parseEntity(s, pos)
+
+				if entityChar then
+					addText(buffer, s, textStartPos, pos-1)
+					table.insert(buffer, entityChar)
+					textStartPos = endPos + 1
+					pos          = textStartPos
+				else
+					pos = pos + 1
+				end
+
+			else
+				pos = pos + 1
+			end
+		end
+
+		if pos-1 >= textStartPos then
+			addText(buffer, s, textStartPos, pos-1)
+		end
+
+		local destination = table.concat(buffer)
+		if destination == "" then  return nil  end
+
+		return destination, pos-1
+	end
+end
+
+-- linkTitle, endLn, endPos = parseLinkTitle( lines, ln, line, position )
+-- Returns nil on error.
+local function parseLinkTitle(lines, ln, line, pos)
+	local delimMode -- '"' | "'" | "()"
+	if     @@IS_CHAR(line, pos, '"') then  delimMode = '"'
+	elseif @@IS_CHAR(line, pos, "'") then  delimMode = "'"
+	elseif @@IS_CHAR(line, pos, "(") then  delimMode = "()"
+	else return nil end
+	pos = pos + 1
+
+	local textStartPos = pos
+	local parenBalance = 0
+	local buffer       = {}
+
+	while true do
+		local i, c = line:match("()([\\\"'()&])", pos)
+
+		if not i then
+			-- Continue on the next line if it's not empty. (Hopefully this is the correct way of parsing,
+			-- because the spec isn't very clear about container blocks here... (Seems it's not!))
+			if lines[ln+1] and not lines[ln+1].line:find!(PATTERN_BLANK_LINE) then
+				addText(buffer, line, textStartPos, #line)
+				table.insert(buffer, "\n")
+
+				ln           = ln + 1
+				line         = lines[ln].line
+				pos          = 1
+				textStartPos = 1
+
+			else
+				return nil
+			end
+
+		else
+			pos = i
+
+			if c == delimMode then
+				addText(buffer, line, textStartPos, pos-1)
+				pos = pos + 1
+				break
+
+			elseif c == "(" and delimMode == "()" then
+				parenBalance = parenBalance + 1
+				pos          = pos + 1
+
+			elseif c == ")" and delimMode == "()" then
+				parenBalance = parenBalance - 1
+
+				if parenBalance < 0 then
+					addText(buffer, line, textStartPos, pos-1)
+					pos = pos + 1
+					break
+				end
+
+				pos = pos + 1
+
+			elseif c == "\\" and line:find(!("^"..PATTERN_ASCII_PUNCTUATION_CHAR), pos+1) then
+				addText(buffer, line, textStartPos, pos-1)
+				textStartPos = pos + 1
+				pos          = pos + 2
+
+			elseif c == "&" then
+				local entityChar, endPos = parseEntity(line, pos)
+
+				if entityChar then
+					addText(buffer, line, textStartPos, pos-1)
+					table.insert(buffer, entityChar)
+					textStartPos = endPos + 1
+					pos          = textStartPos
+				else
+					pos = pos + 1
+				end
+
+			else
+				pos = pos + 1
+			end
+		end
+	end
+
+	if delimMode == "()" and parenBalance > 0 then  return nil  end
+
+	return table.concat(buffer), ln, pos-1
+end
+
+
+
+-- success           = parseLinkReferenceDefinition( lines, lineNumber, line, column, position, parsingInfoOutput )
+-- parsingInfoOutput = { label=linkLabel, destination=linkDestination, title=linkTitle|nil, endLn=ln }
+local function parseLinkReferenceDefinition(lines, ln, line, col, pos, parsingInfoOutput)
+	local _, i = getBlockStart(line, "^%[", col, pos)
+	if not i then  @@WHERE(@file,@line) return false  end
+	pos = i
+
+	-- Parse link label.
+	local label, endLn, endPos = parseLinkLabel(lines, ln, line, pos)
+	if not label then  @@WHERE(@file,@line) return false  end
+	ln   = endLn
+	line = lines[ln].line
+	pos  = endPos + 1
+
+	if not @@IS_CHAR(line, pos, ":") then  @@WHERE(@file,@line) return false  end
+	pos = pos + 1
+
+	-- Ignore whitespace, maybe including one newline.
+	if lines[ln+1] and line:find(!("^"..PATTERN_WHITESPACE_CHAR.."*$"), pos) then
+		ln   = ln + 1
+		line = lines[ln].line
+		pos  = 1
+	end
+	pos = line:match(!("^"..PATTERN_WHITESPACE_CHAR.."*()"), pos)
+
+	-- Parse link destination.
+	local destination, endPos = parseLinkDestination(line, pos)
+	if not destination then  @@WHERE(@file,@line) return false  end
+	pos = endPos + 1
+
+	local posAfterLinkDestination = pos
+	local  lnAfterLinkDestination = ln
+
+	-- Parse optional link title.
+	local title = nil
+
+	if not line:find(!("^"..PATTERN_NON_WHITESPACE_CHAR), pos) then -- There must be whitespace between destination and title.
+		-- Ignore whitespace, maybe including one newline.
+		if lines[ln+1] and line:find(!("^"..PATTERN_WHITESPACE_CHAR.."*$"), pos) then
+			ln   = ln + 1
+			line = lines[ln].line
+			pos  = 1
+		end
+		pos = line:match(!("^"..PATTERN_WHITESPACE_CHAR.."*()"), pos)
+
+		local  endLn, endPos
+		title, endLn, endPos = parseLinkTitle(lines, ln, line, pos)
+
+		if title and lines[endLn].line:find(!("^"..PATTERN_WHITESPACE_CHAR.."*$"), endPos+1) then
+			ln   = endLn
+			line = lines[ln].line
+			pos  = endPos + 1
+		else
+			title = nil
+		end
+	end
+
+	if not title then
+		ln   = lnAfterLinkDestination
+		line = lines[ln].line
+		pos  = posAfterLinkDestination
+	end
+
+	-- We must be at the end of the current line at this point.
+	if not line:find(!("^"..PATTERN_WHITESPACE_CHAR.."*$"), pos) then  @@WHERE(@file,@line) return false  end
+
+	parsingInfoOutput.label       = label
+	parsingInfoOutput.destination = destination
+	parsingInfoOutput.title       = title -- May be nil.
+	parsingInfoOutput.endLn       = ln
+	return true
+end
+
+
+
+local function getEndOfHtmlTag(s, pos)
+	if not @@IS_CHAR(s, pos, "<") then  return nil  end
+	pos = pos + 1
+
+	local isEndTag = @@IS_CHAR(s, pos, "/")
+	if isEndTag then  pos = pos + 1  end
+
+	pos = s:match("^%a[-%w]*()", pos)
+	if not pos then  return nil  end
+
+	if isEndTag then
+		pos = s:match(!("^"..PATTERN_WHITESPACE_CHAR.."*()"), pos)
+
+	else
+		-- Attributes.
+		while true do
+			local posNext = s:match(!("^"..PATTERN_WHITESPACE_CHAR.."+[_:%a][-_:%w.]*()"), pos)
+			if not posNext then  break  end
+			pos = posNext
+
+			-- Optional value. @Speed
+			pos = (
+				s:match(!("^"..PATTERN_WHITESPACE_CHAR.."*="..PATTERN_WHITESPACE_CHAR..'*"[^"]*"()'), pos) or
+				s:match(!("^"..PATTERN_WHITESPACE_CHAR.."*="..PATTERN_WHITESPACE_CHAR.."*'[^']*'()"), pos) or
+				s:match(!("^"..PATTERN_WHITESPACE_CHAR.."*="..PATTERN_WHITESPACE_CHAR.."*[^ \t\n\v\f\"'=<>`]+()"), pos) or
+				pos
+			)
+		end
+
+		pos = s:match(!("^"..PATTERN_WHITESPACE_CHAR.."*/?()"), pos)
+	end
+
+	if not @@IS_CHAR(s, pos, ">") then  return nil  end
+	return pos
+end
+
+local function getEndOfComment(s, pos)
+	pos = s:match("^<!%-%-()", pos)
+	if not pos then  return nil  end
+
+	local contentStartPos = pos
+	if s:find("^%-?>", contentStartPos) then  return nil  end
+
+	local i1, i2 = s:find("-->", pos, true)
+	if not i1 then  return nil  end
+
+	local contentEndPos = i1 - 1
+	pos                 = i2 + 1
+
+	if s:find("^%-", contentEndPos)                           then  return nil  end
+	if s:find("--", contentStartPos, true) <= contentEndPos-1 then  return nil  end
+
+	return pos-1
+end
+
+local function getEndOfCdataSection(s, pos)
+	pos = s:match("^<!%[CDATA%[.-%]%]>()", pos)
+	return pos and pos-1 or nil
+end
+
+local function getEndOfXmlDeclaration(s, pos)
+	pos = s:match("^<![A-Z]+.->()", pos)
+	return pos and pos-1 or nil
+end
+
+local function getEndOfProcessingInstruction(s, pos)
+	pos = s:match("^<%?.-%?>()", pos)
+	return pos and pos-1 or nil
+end
+
+
+-- uri, posNext = parseUriAutolinkContent( s, position )
+-- Returns nil on error.
+local function parseUriAutolinkContent(s, pos)
+	local uri, posAfterScheme, posNext = s:match("^(%a[-+.%w]+():[^ \1-\31<>]*)()", pos)
+	if not uri then
+		-- void
+	elseif posAfterScheme-pos > 32 then
+		return nil
+	else
+		return uri, uri, posNext
+	end
+end
+
+-- uri, text, nextPosition = parseEmailAutolinkContent( s, position )
+-- Returns nil on error.
+local function parseEmailAutolinkContent(s, pos0)
+	--
+	--   1| [ a-z A-Z 0-9 .!#$%&'*+/=?^_`{|}~- ]+ @ [ a-z A-Z 0-9 ]
+	--   2| ( [ a-z A-Z 0-9 - ]{0,61} [ a-z A-Z 0-9 ] )?
+	--   3| (
+	--   4|   \. [ a-z A-Z 0-9 ]
+	--   5|   ( [ a-z A-Z 0-9 - ]{0,61} [ a-z A-Z 0-9 ] )?
+	--   6| )*
+	--
+	local pos = pos0
+
+	-- 1
+	pos = s:match("^[%w.!#$%%&'*+/=?^_`{|}~%-]+@[%w]()", pos)
+	if not pos then  return nil  end
+
+	-- 2
+	local posNext = s:match("^[-%w]*%w()", pos)
+
+	if posNext then
+		if posNext > pos+61 then  return nil  end
+		pos = posNext
+	end
+
+	-- 3..6
+	while true do
+		-- 4
+		local posNext = s:match("^%.%w()", pos)
+		if not posNext then  break  end
+		pos = posNext
+
+		-- 5
+		local posNext = s:match("^[-%w]*%w()", pos)
+
+		if posNext then
+			if posNext > pos+61 then  return nil  end
+			pos = posNext
+		end
+	end
+
+	local emailAddress = s:sub(pos0, pos-1)
+	return "mailto:"..emailAddress, emailAddress, pos
+end
+
+-- endPosition|nil = getEndOfDomainNamePlusTrail( s, position )
+local function getEndOfDomainNamePlusTrail(s, pos)
+	-- Match domain segments.
+	pos = s:match("^[-_%a]+%.[-_%a]+()", pos)
+	if not pos then  return nil  end
+
+	while true do
+		local posNext = s:match("^%.[-_%a]+()", pos)
+		if not posNext then  break  end
+		pos = posNext
+	end
+
+	-- Ensure no underscores in the last two domain segments.
+	local segNumFromEnd = 1
+
+	for pos = pos, 1, -1 do -- @Speed: Can we get rid of this loop?
+		if @@IS_CHAR(s, pos, "_") then  return nil  end
+
+		if @@IS_CHAR(s, pos, ".") then
+			if segNumFromEnd == 2 then  break  end
+			segNumFromEnd = segNumFromEnd + 1
+		end
+	end
+
+	-- Match port, path and later stuff.
+	local pathStartPos = pos
+	local posNext      = s:match("^[^ <]*()", pos)
+
+	if posNext > pos then
+		-- Handle trailing ')' - in case the URL is at the end of a parenthesis.
+		if @@IS_CHAR(s, posNext-1, ")") then
+			local parenBalance = 0
+
+			for _pos = pos, posNext-1 do
+				-- @Speed: Skip forward as much as possible.
+				if @@IS_CHAR(s, _pos, "(") then
+					parenBalance = parenBalance + 1
+				elseif @@IS_CHAR(s, _pos, ")") then
+					parenBalance = parenBalance - 1
+					if parenBalance < 0 then
+						posNext = _pos
+						break
+					end
+				end
+			end
+
+		-- Handle trailing ';' - look for possible entity reference to exclude.
+		elseif @@IS_CHAR(s, posNext-1, ";") then
+			for _pos = posNext-2, pos, -1 do
+				-- @Speed: Skip forward as much as possible.
+				if @@IS_CHAR(s, _pos, "&") then -- @Incomplete: Handle "&#ddd;" (though the spec doesn't include that format).
+					if s:find("^%w", _pos+1) then
+						posNext = _pos
+					end
+					break
+				elseif s:find("^%W", _pos) then
+					break
+				end
+			end
+
+		-- Exclude certain trailing punctuation.
+		elseif @@IS_CHAR(s, posNext-1, "?!.,:*_~") then
+			posNext = posNext - 1
+		end
+
+		pos = posNext
+	end
+
+	return pos-1
+end
+
+-- url, nextPosition = parseDomainNamePlusTrail( s, position )
+-- Returns nil on error.
+local function parseDomainNamePlusTrail(s, pos)
+	local endPos = getEndOfDomainNamePlusTrail(s, pos)
+	if not endPos then  return nil  end
+
+	return s:sub(pos, endPos), endPos+1
+end
+
+-- url, text, nextPosition = parseExtendedWwwAutolink( s, position )
+-- Returns nil on error.
+local function parseExtendedWwwAutolink(s, pos)
+	if not s:find("^www%.", pos) then  return nil  end
+	pos = pos + 4
+
+	local url, posNext = parseDomainNamePlusTrail(s, pos)
+	if not url then  return nil  end
+
+	return "http://www."..url, "www."..url, posNext
+end
+
+-- url, text, nextPosition = parseExtendedUrlAutolink( s, position )
+-- Returns nil on error.
+local function parseExtendedUrlAutolink(s, pos)
+	local prefix, posNext = s:match("^(https?://)()", pos)
+	if not prefix then  return nil  end
+	pos = posNext
+
+	local url, posNext = parseDomainNamePlusTrail(s, pos)
+	if not url then  return nil  end
+	url = prefix..url
+
+	return url, url, posNext
+end
+
+-- url, text, nextPosition = parseExtendedEmailAutolink( s, position )
+-- Returns nil on error.
+local function parseExtendedEmailAutolink(s, pos)
+	local uri, text, posNext = parseEmailAutolinkContent(s, pos)
+	if not uri then  return nil  end
+
+	if s:find("^[^ \t\n\v\f.]", posNext) then  return nil  end
+
+	return uri, text, posNext
+end
+
+
+
+local function DelimiterStack()
+	return {bottom=nil, top=nil, bottomLimit=nil} -- Doubly linked list.
+end
+
+local function delimiterStackPush(delimStack, item)
+	-- Note: Inactive delimiter items should be removed from the stack and their token be converted to "text" or "html".
+	item.canOpen  = true
+	item.canClose = true
+	item.previous = delimStack.top
+	item.next     = nil
+
+	if delimStack.top then
+		delimStack.top.next = item
+	else
+		delimStack.top    = item
+		delimStack.bottom = item
+	end
+	delimStack.top = item
+
+	return item
+end
+
+local function delimiterStackRemove(delimStack, item)
+	if item.previous then  item.previous.next = item.next      end
+	if item.next     then  item.next.previous = item.previous  end
+
+	if item == delimStack.bottom then  delimStack.bottom = item.next      end
+	if item == delimStack.top    then  delimStack.top    = item.previous  end
+
+	item.previous = nil
+	item.next     = nil
+
+	return item
+end
+
+-- closingItem|nil = findNextClosingDelimiterRun( delimiterStack, currentItem )
+local function findNextClosingDelimiterRun(delimStack, maybeClosingItem)
+	while true do
+		if maybeClosingItem.token.type == "delimiterrun" and maybeClosingItem.canClose then
+			return maybeClosingItem
+		end
+
+		maybeClosingItem = maybeClosingItem.next
+		if not maybeClosingItem then  return nil  end
+	end
+end
+
+local function findOpeningDelimiterRun(delimStack, closingItem, openersBottom)
+	local maybeOpeningItem  = closingItem.previous
+	local runType           = closingItem.token.runType
+	local closingLevel      = #closingItem.token.value % 3
+	local closingCanOpen    = closingItem.canOpen and closingItem.canClose
+	local closingIsNonThree = closingLevel ~= 0
+	local openerBottom      = openersBottom[runType][closingLevel]
+
+	while maybeOpeningItem do
+		if maybeOpeningItem == delimStack.bottomLimit then  return nil  end
+		if maybeOpeningItem == openerBottom           then  return nil  end
+
+		if
+			maybeOpeningItem.token.type == "delimiterrun"
+			and maybeOpeningItem.token.runType == runType
+			and maybeOpeningItem.canOpen
+			and not ( -- §9/§10
+				closingIsNonThree
+				and (closingCanOpen or maybeOpeningItem.canClose)
+				and (closingLevel + #maybeOpeningItem.token.value) % 3 == 0
+			)
+		then
+			return maybeOpeningItem
+		end
+
+		maybeOpeningItem = maybeOpeningItem.previous
+	end
+
+	return nil
+end
+
+local function processEmphasis(inlineTokens, delimStack, sourceString)
+	-- @@PRINT"processEmphasis"
+
+	local item
+	if delimStack.bottomLimit then
+		item = delimStack.bottomLimit.next
+	else
+		item = delimStack.bottom
+	end
+
+	local openersBottom = {
+		["*"] = {[0]=delimStack.bottomLimit, [1]=delimStack.bottomLimit, [2]=delimStack.bottomLimit}, -- The number keys are delimiterLevel%3.
+		["_"] = {[0]=delimStack.bottomLimit, [1]=delimStack.bottomLimit, [2]=delimStack.bottomLimit},
+		["~"] = {[0]=delimStack.bottomLimit, [1]=delimStack.bottomLimit, [2]=delimStack.bottomLimit},
+	}
+
+	while item do
+		local closingItem = findNextClosingDelimiterRun(delimStack, item)
+		if not closingItem then  break  end
+		-- @@PRINT("found closing at "..closingItem.token.position1)
+
+		item              = closingItem
+		local openingItem = findOpeningDelimiterRun(delimStack, closingItem, openersBottom)
+
+		if openingItem then
+			-- @@PRINT("found opening at "..openingItem.token.position1)
+			local isStrong = (#closingItem.token.value >= 2) and (#openingItem.token.value >= 2)
+
+			local openingTokIndex = lastIndexOf(inlineTokens, openingItem.token)
+			@@ASSERT(openingTokIndex, sourceString)
+			table.insert(inlineTokens, openingTokIndex+1, {
+				position1 = openingItem.token.position1,
+				position2 = openingItem.token.position2,
+				type      = "html",
+				value     = (closingItem.token.runType == "~" and "<del>") or (isStrong and "<strong>") or ("<em>"),
+			})
+
+			local closingTokIndex = indexOf(inlineTokens, closingItem.token, openingTokIndex+2)
+			@@ASSERT(closingTokIndex, sourceString)
+			table.insert(inlineTokens, closingTokIndex, {
+				position1 = closingItem.token.position1,
+				position2 = closingItem.token.position2,
+				type      = "html",
+				value     = (closingItem.token.runType == "~" and "</del>") or (isStrong and "</strong>") or ("</em>"),
+			})
+
+			openingItem.token.value = openingItem.token.value:sub(isStrong and 3 or 2) -- @Speed: We can save the level as an integer on the token.
+			closingItem.token.value = closingItem.token.value:sub(isStrong and 3 or 2) -- @Speed: We can save the level as an integer on the token.
+
+			-- Make sure future emphasis don't overlap. (Not 100% sure what we're doing here is correct... @Robustness)
+			do
+				local itemInbetween = openingItem.next
+
+				while itemInbetween and itemInbetween ~= closingItem do
+					local nextItem = itemInbetween.next
+					if itemInbetween.canOpen then
+						itemInbetween.canOpen = false
+						if not itemInbetween.canClose then -- @Cleanup: Why is canClose true sometimes? Maybe we should set it to false somewhere we currently don't? @Speed?
+							delimiterStackRemove(delimStack, itemInbetween)
+						end
+					end
+					itemInbetween = nextItem
+				end
+			end
+
+			if openingItem.token.value == "" then
+				openingItem.token.type = "text"
+				delimiterStackRemove(delimStack, openingItem)
+			end
+			if closingItem.token.value == "" then
+				item                   = closingItem.next
+				closingItem.token.type = "text"
+				delimiterStackRemove(delimStack, closingItem)
+			end
+
+		else
+			openersBottom[closingItem.token.runType][#closingItem.token.value%3] = item.previous -- This speeds up further searches.
+
+			if not closingItem.canOpen then
+				-- The delimiter cannot close nor open, so remove it.
+				delimiterStackRemove(delimStack, closingItem)
+			end
+
+			item = item.next
+		end
+	end
+
+	-- Make sure unprocessed delimiters cannot cross processed delimiters.
+	item           = delimStack.top
+	local afterPos = (delimStack.bottomLimit and delimStack.bottomLimit.token.position1 or 0) -- @Cleanup: Maybe only use bottomLimit here instead of using position1. bottomLimit, if set, seem to have been removed from the stack for some reason? I'm confused... ~2021-07-01
+
+	while item do
+		if item.token.position1 <= afterPos then  break  end
+
+		local prevItem = item.previous
+		delimiterStackRemove(delimStack, item)
+		item = prevItem
+	end
+end
+
+-- linkDestination, linkTitle|nil, endPosition = parseInlineLinkParenthesis( s, position )
+-- Returns nil on error.
+local function parseInlineLinkParenthesis(s, pos)
+	if not @@IS_CHAR(s, pos, "(") then  @@WHERE(@file,@line) return nil  end
+	pos = pos + 1
+
+	pos = s:match(!("^"..PATTERN_WHITESPACE_CHAR.."*()"), pos)
+
+	if @@IS_CHAR(s, pos, ")") then  return "", nil, pos  end -- The destination is optional, but with no destination there can't be a title, so we're done at this point.
+
+	local destination, endPos = parseLinkDestination(s, pos)
+	if not destination then  @@WHERE(@file,@line) return nil  end
+	pos = endPos + 1
+
+	local posNext                    = s:match(!("^"..PATTERN_WHITESPACE_CHAR.."*()"), pos)
+	local whitespaceAfterDestination = (posNext > pos)
+	pos                              = posNext
+
+	local title = nil
+
+	if whitespaceAfterDestination then
+		local  _, endPos
+		title, _, endPos = parseLinkTitle(EMPTY_TABLE, 1, s, pos)
+
+		if title then
+			pos = endPos + 1
+			pos = s:match(!("^"..PATTERN_WHITESPACE_CHAR.."*()"), pos)
+		end
+	end
+
+	if not @@IS_CHAR(s, pos, ")") then  @@WHERE(@file,@line) return nil  end
+	pos = pos + 1
+
+	return destination, title, pos-1
+end
+
+-- The last token in inlineTokens must be the closing token.
+local function doesLinkTextHaveBalancedBrackets(inlineTokens, openingTok)
+	local bracketBalance  = 0
+	local closingTokIndex = #inlineTokens
+	local tokIndex        = lastIndexOf(inlineTokens, openingTok) + 1
+
+	-- @@PRINT("////////////////")
+
+	while tokIndex < closingTokIndex do
+		-- @@PRINT(tokIndex, inlineTokens[tokIndex].type, showWhitespace(tostring(inlineTokens[tokIndex].value)))
+
+		if inlineTokens[tokIndex].type == "[" then
+			bracketBalance = bracketBalance + 1
+
+		elseif inlineTokens[tokIndex].type == "]" then
+			bracketBalance = bracketBalance - 1
+			if bracketBalance < 0 then  return false  end
+		end
+
+		tokIndex = tokIndex + 1
+	end
+
+	return bracketBalance == 0
+end
+
+-- document = tokensToDocument( tokens, fromTokenIndex, toTokenIndex )
+-- Returns nil and a message on error.
+local function tokensToDocument(tokens, i1, i2)
+	local buffer = {}
+	table.insert(buffer, "<document>")
+
+	for i = (i1 or 1), (i2 or #tokens) do
+		local tok = tokens[i]
+		if tok.type == "text" or tok.type == "escape" or tok.type == "delimiterrun" then
+			table.insert(buffer, encodeHtmlEntities(tok.value))
+		elseif tok.type == "html" then
+			table.insert(buffer, tok.value)
+		else
+			table.insert(buffer, encodeHtmlEntities(tok.type))
+		end
+	end
+
+	table.insert(buffer, "</document>")
+
+	local doc, err = xmlLib.parseHtml(table.concat(buffer), "<MarkdownInline>")
+	return doc, err
+end
+
+-- endPosition|nil = lookForLinkOrImage( inlineTokens, delimStack, linkReferenceDefinitions, s )
+local function lookForLinkOrImage(inlineTokens, delimStack, linkReferenceDefinitions, s)
+	local item = delimStack.top
+
+	while item do
+		if (item.token.type == "[" or item.token.type == "![") and doesLinkTextHaveBalancedBrackets(inlineTokens, item.token) then
+			local openingItem = item
+			local closingTok  = inlineTokens[#inlineTokens]
+
+			--
+			-- Is it an inline link?
+			--
+			local isLink      = false
+			local destination = ""
+			local title       = nil
+			local endPos      = closingTok.position2
+
+			-- Inline link:
+			--   [content](destination title)
+			local _destination, _title, _endPos = parseInlineLinkParenthesis(s, closingTok.position2+1)
+
+			if _destination then
+				isLink      = true
+				destination = _destination
+				title       = _title
+				endPos      = _endPos
+			end
+
+			--
+			-- Is it a reference link?
+			--
+
+			-- Link reference:
+			--   [content][label]
+			local openingItemCanBeStartOfLabel = true
+
+			if not isLink then
+				local label, _, _endPos = parseLinkLabel(EMPTY_TABLE, 1, s, closingTok.position2+1)
+
+				if not label then
+					-- void
+
+				elseif linkReferenceDefinitions[label] then
+					local linkRefDef = linkReferenceDefinitions[label]
+					isLink           = true
+					destination      = linkRefDef.destination
+					title            = linkRefDef.title -- May be nil.
+					endPos           = _endPos
+
+				else
+					-- Collapsed/shortcut reference links cannot be followed by labels, even if the label is undefined.
+					openingItemCanBeStartOfLabel = false
+				end
+			end
+
+			-- Collapsed/shortcut reference link:
+			--   [label][]
+			--   [label]
+			local isImage = (openingItem.token.type == "![")
+
+			if not isLink and openingItemCanBeStartOfLabel then
+				local pos = openingItem.token.position1
+				if isImage then  pos = pos + 1  end
+				local label, _, _endPos = parseLinkLabel(EMPTY_TABLE, 1, s, pos)
+
+				if --[[label and]] _endPos == endPos and linkReferenceDefinitions[label] then -- @Cleanup: The _endPos check is probably unnecessary.
+					local linkRefDef = linkReferenceDefinitions[label]
+					isLink           = true
+					destination      = linkRefDef.destination
+					title            = linkRefDef.title -- May be nil.
+
+					if s:find("^%[%]", endPos+1) then  endPos = endPos + 2  end
+				end
+			end
+
+			--
+			-- Treat as link/image or return failure.
+			--
+			if not isLink then  return nil  end
+
+			-- @@PRINT("Link/image: "..s:sub(openingItem.token.position1, endPos))
+
+			delimStack.bottomLimit = openingItem
+			processEmphasis(inlineTokens, delimStack, s)
+
+			local openingTokIndex = lastIndexOf(inlineTokens, openingItem.token)
+			@@ASSERT(openingTokIndex, s)
+
+			local closingTokIndex = #inlineTokens
+			@@ASSERT(inlineTokens[closingTokIndex] == closingTok, s)
+
+			-- Image.
+			if isImage then
+				-- @Speed: Maybe we should just concatenate all non-HTML tokens instead of parsing HTML and
+				-- using getHtmlText(). (We'll have to make sure we don't have text in HTML tokens then.)
+				local inlineDoc = assert(tokensToDocument(inlineTokens, openingTokIndex+1, closingTokIndex-1))
+
+				openingItem.token.type  = "html"
+				openingItem.token.value = F(
+					(title and '<img src="%s" alt="%s" title="%s">' or '<img src="%s" alt="%s">'),
+					encodeHtmlEntities((partialEncodeUrl(destination):gsub("%%%x%x", string.upper))),
+					encodeHtmlEntities(inlineDoc:getHtmlText()),
+					(title and encodeHtmlEntities(title))
+				)
+
+				for i = openingTokIndex+1, closingTokIndex do
+					inlineTokens[i].type  = "text"
+					inlineTokens[i].value = ""
+				end
+
+			-- Link.
+			else
+				openingItem.token.type  = "html"
+				openingItem.token.value = F(
+					(title and '<a href="%s" title="%s">' or '<a href="%s">'),
+					encodeHtmlEntities((partialEncodeUrl(destination):gsub("%%%x%x", string.upper))),
+					(title and encodeHtmlEntities(title))
+				)
+
+				closingTok.type  = "html"
+				closingTok.value = "</a>"
+
+				-- Prevent links within links.
+				local item = openingItem.previous
+
+				while item do
+					local prevItem = item.previous
+					if item.token.type == "[" then
+						delimiterStackRemove(delimStack, item)
+					end
+					item = prevItem
+				end
+			end
+
+			delimiterStackRemove(delimStack, openingItem)
+
+			return endPos
+		end
+
+		item = item.previous
+	end
+
+	return nil
+end
+
+local function parseInline(parentEl, s, linkReferenceDefinitions)
+	--[[
+		token = {
+			position1=startPosition, position2=endPosition, type=tokenType, [ value=value, ]
+			[ runType="*"|"_"|"~", precededByPunctuation=bool, followedByPunctuation=bool, leftFlanking=bool, rightFlanking=bool, ]
+		}
+		tokenType = "text" | "escape" | "delimiterrun" | "html" | "[" | "![" | "]" | "(" | ")" | "<" | ">" | '"' | "'" | "`"
+	]]
+	local inlineTokens = {}
+	local delimStack   = DelimiterStack()
+	local pos          = 1
+	local textStartPos = 1
+
+	while pos <= #s do
+		local i = s:find("[\\*_~!%[%]<`& a-z]", pos)
+		if not i then  break  end
+		pos = i
+
+		local b = s:byte(pos)
+
+		-- Autolink. ['autolink' extension]
+		if b >= !(BYTE"a") and b <= !(BYTE"z") then
+			if pos == 1 or @@IS_CHAR(s, pos-1, " \t\n\v\f*_~(") then
+				local            uri, text, posNext = parseExtendedWwwAutolink  (s, pos)
+				if not uri then  uri, text, posNext = parseExtendedUrlAutolink  (s, pos)  end
+				if not uri then  uri, text, posNext = parseExtendedEmailAutolink(s, pos)  end
+
+				if uri then
+					if pos > textStartPos then
+						table.insert(inlineTokens, {position1=textStartPos, position2=pos-1, type="text", value=s:sub(textStartPos, pos-1)})
+					end
+					table.insert(inlineTokens, {position1=pos,       position2=pos,       type="html", value='<a href="'..encodeHtmlEntities((partialEncodeUrl(uri):gsub("%%%x%x", string.upper)))..'">'})
+					table.insert(inlineTokens, {position1=pos,       position2=posNext-1, type="text", value=text})
+					table.insert(inlineTokens, {position1=posNext-1, position2=posNext-1, type="html", value="</a>"})
+					textStartPos = posNext
+					pos          = textStartPos
+				else
+					pos = s:match("[a-z]*()", pos+1)
+				end
+
+			else
+				pos = s:match("[a-z]*()", pos+1)
+			end
+
+		-- Hard line break.
+		elseif b == !(BYTE" ") then
+			local posAfterNl = s:match("^ *\n()", pos+1)
+			if posAfterNl then
+				if pos > textStartPos then
+					table.insert(inlineTokens, {position1=textStartPos, position2=pos-1, type="text", value=s:sub(textStartPos, pos-1)})
+				end
+				if posAfterNl >= pos+3 then -- pos=space, pos+1=space, pos+2=newline, pos+3=posAfterNl
+					table.insert(inlineTokens, {position1=pos, position2=posAfterNl-1, type="html", value="<br>\n"})
+				else
+					table.insert(inlineTokens, {position1=pos, position2=posAfterNl-1, type="html", value="\n"}) -- Ignore trailing spaces.
+				end
+				pos          = posAfterNl
+				textStartPos = pos
+			else
+				pos = s:match(" *()", pos+1)
+			end
+
+		-- Escape sequence.
+		elseif b == !(BYTE"\\") then
+			if s:find(!("^"..PATTERN_ASCII_PUNCTUATION_CHAR), pos+1) then
+				if pos > textStartPos then
+					table.insert(inlineTokens, {position1=textStartPos, position2=pos-1, type="text", value=s:sub(textStartPos, pos-1)})
+				end
+				table.insert(inlineTokens, {position1=pos, position2=pos+1, type="escape", value=s:sub(pos+1, pos+1)})
+				pos          = pos + 2
+				textStartPos = pos
+
+			elseif @@IS_CHAR(s, pos+1, "\n") then
+				if pos > textStartPos then
+					table.insert(inlineTokens, {position1=textStartPos, position2=pos-1, type="text", value=s:sub(textStartPos, pos-1)})
+				end
+				table.insert(inlineTokens, {position1=pos, position2=pos+1, type="html", value="<br>\n"})
+				pos          = pos + 2
+				textStartPos = pos
+
+			else
+				pos = pos + 1
+			end
+
+		-- Emphasis.
+		-- Strikethrough emphasis. ['strikethrough' extension]  (Should strikethrough follow the same rules as "normal" emphasis? Who knows! The spec is useless! :UselessSpec)
+		elseif b == !(BYTE"*") or b == !(BYTE"_") or b == !(BYTE"~") then
+			local delimRunChars = s:match(((b == !(BYTE"*") and "^%*+") or (b == !(BYTE"_") and "^_+") or ("^~+")), pos)
+
+			if b == !(BYTE"~") and delimRunChars ~= "~~" then
+				pos = pos + #delimRunChars
+
+			else
+				if pos > textStartPos then
+					table.insert(inlineTokens, {position1=textStartPos, position2=pos-1, type="text", value=s:sub(textStartPos, pos-1)})
+				end
+
+				local runType = s:sub(pos, pos)
+				local posPrev = pos - 1 --utf8.getStartOfCharacter(s, pos-1)
+				local posNext = pos + #delimRunChars
+
+				local precededByText  = s:find(!("^"..PATTERN_NON_UNICODE_WHITESPACE_CHAR), posPrev) ~= nil
+				local followedByText  = s:find(!("^"..PATTERN_NON_UNICODE_WHITESPACE_CHAR), posNext) ~= nil
+				local precededByPunct = s:find(!("^"..PATTERN_PUNCTUATION_CHAR), posPrev) ~= nil
+				local followedByPunct = s:find(!("^"..PATTERN_PUNCTUATION_CHAR), posNext) ~= nil
+
+				local tok = {
+					position1 = pos,
+					position2 = pos + #delimRunChars - 1,
+					type      = "delimiterrun",
+					runType   = runType,
+					value     = delimRunChars,
+
+					precededByPunctuation = precededByPunct,
+					followedByPunctuation = followedByPunct,
+
+					leftFlanking = (
+						followedByText
+						and (not followedByPunct or (not precededByText or precededByPunct))
+					),
+					rightFlanking = (
+						precededByText
+						and (not precededByPunct or (not followedByText or followedByPunct))
+					),
+				}
+
+				table.insert(inlineTokens, tok)
+
+				pos          = posNext
+				textStartPos = pos
+
+				local item = delimiterStackPush(delimStack, {token=tok})
+
+				if runType == "*" then
+					item.canOpen  = tok.leftFlanking  -- §1/§5
+					item.canClose = tok.rightFlanking -- §3/§7
+				elseif runType == "_" then
+					item.canOpen  = tok.leftFlanking  and (not tok.rightFlanking or tok.precededByPunctuation) -- §2/§6
+					item.canClose = tok.rightFlanking and (not tok.leftFlanking  or tok.followedByPunctuation) -- §4/§8
+				elseif runType == "~" then
+					item.canOpen  = tok.leftFlanking -- These rules are just guesses. :UselessSpec
+					item.canClose = tok.rightFlanking
+				else
+					error(runType)
+				end
+			end
+
+		-- Strikethrough emphasis. ['strikethrough' extension]
+		elseif b == !(BYTE"~") then
+			if @@IS_CHAR(s, pos+1, "~") then
+				if pos > textStartPos then
+					table.insert(inlineTokens, {position1=textStartPos, position2=pos-1, type="text", value=s:sub(textStartPos, pos-1)})
+				end
+				table.insert(inlineTokens, {position1=pos, position2=pos+1, type="~~"})
+				pos          = pos + 2
+				textStartPos = pos
+			else
+				pos = pos + 1
+			end
+
+		-- Code span.
+		elseif b == !(BYTE"`") --[[and not @@IS_CHAR(s, pos-1, "`")]] then
+			local backticks = s:match("^`+", pos)
+			local _, i2     = s:find("[^`]"..backticks.."%f[^`]", pos+#backticks)
+
+			if i2 then
+				if pos > textStartPos then
+					table.insert(inlineTokens, {position1=textStartPos, position2=pos-1, type="text", value=s:sub(textStartPos, pos-1)})
+				end
+
+				local codeStr = s:sub(pos+#backticks, i2-#backticks):gsub("\n", " ")
+
+				if @@IS_CHAR(codeStr, 1, " ") and @@IS_CHAR(codeStr, #codeStr, " ") and codeStr:find"[^ ]" then
+					codeStr = codeStr:sub(2, -2)
+				end
+
+				table.insert(inlineTokens, {position1=pos, position2=pos, type="html", value="<code>"})
+				table.insert(inlineTokens, {position1=pos, position2=i2,  type="text", value=codeStr})
+				table.insert(inlineTokens, {position1=i2,  position2=i2,  type="html", value="</code>"})
+
+				pos          = i2 + 1
+				textStartPos = pos
+
+			else
+				pos = pos + #backticks
+			end
+
+		-- HTML entity.
+		elseif b == !(BYTE"&") then
+			local entityChar, endPos = parseEntity(s, pos)
+
+			if entityChar then
+				if pos > textStartPos then
+					table.insert(inlineTokens, {position1=textStartPos, position2=pos-1, type="text", value=s:sub(textStartPos, pos-1)})
+				end
+				table.insert(inlineTokens, {position1=pos, position2=endPos, type="text", value=entityChar})
+				textStartPos = endPos + 1
+				pos          = textStartPos
+			else
+				pos = pos + 1
+			end
+
+		-- Raw HTML or URI/e-mail autolink.
+		elseif b == !(BYTE"<") then
+			local endPos = (
+				getEndOfHtmlTag              (s, pos) or
+				getEndOfComment              (s, pos) or
+				getEndOfCdataSection         (s, pos) or
+				getEndOfXmlDeclaration       (s, pos) or
+				getEndOfProcessingInstruction(s, pos)
+			)
+
+			if endPos then
+				if pos > textStartPos then
+					table.insert(inlineTokens, {position1=textStartPos, position2=pos-1, type="text", value=s:sub(textStartPos, pos-1)})
+				end
+
+				local tag = s:sub(pos, endPos)
+
+				-- Disallowed raw HTML. ['tagfilter' extension]
+				local tagName = tag:match("^</?(%a[-%w]*)")
+				if tagName and #tagName <= 9 and @@CONSTSET{"iframe","noembed","noframes","plaintext","script","style","textarea","title","xmp"}[tagName:lower()] then
+					tag = tag:gsub("^.", "&lt;")
+				end
+
+				-- @Robustness: The <markdown:rawhtml> tag could potentially collide with user data! We use this instead of NULL because we call xmlLib.parseHtml() which require valid data. :BadRawhtmlTag
+				if inlineTokens[3] and inlineTokens[#inlineTokens].type == "</markdown:rawhtml>" then
+					table.remove(inlineTokens) -- Combine successive rawhtml tokens.
+				else
+					table.insert(inlineTokens, {position1=pos, position2=pos, type="html", value="<markdown:rawhtml>"})
+				end
+				table.insert(inlineTokens, {position1=pos,    position2=endPos, type="text", value=tag})
+				table.insert(inlineTokens, {position1=endPos, position2=endPos, type="html", value="</markdown:rawhtml>"})
+
+				textStartPos = endPos + 1
+				pos          = textStartPos
+
+			else
+				local            uri, text, posNext = parseUriAutolinkContent  (s, pos+1)
+				if not uri then  uri, text, posNext = parseEmailAutolinkContent(s, pos+1)  end
+
+				if uri and @@IS_CHAR(s, posNext, ">") then
+					if pos > textStartPos then
+						table.insert(inlineTokens, {position1=textStartPos, position2=pos-1, type="text", value=s:sub(textStartPos, pos-1)})
+					end
+					posNext = posNext + 1 -- '>'
+					table.insert(inlineTokens, {position1=pos,       position2=pos,       type="html", value='<a href="'..encodeHtmlEntities((partialEncodeUrl(uri):gsub("%%%x%x", string.upper)))..'">'})
+					table.insert(inlineTokens, {position1=pos,       position2=posNext-1, type="text", value=text})
+					table.insert(inlineTokens, {position1=posNext-1, position2=posNext-1, type="html", value="</a>"})
+					textStartPos = posNext
+					pos          = textStartPos
+				else
+					pos = pos + 1
+				end
+			end
+
+		-- Image start.
+		elseif b == !(BYTE"!") then
+			if @@IS_CHAR(s, pos+1, "[") then
+				if pos > textStartPos then
+					table.insert(inlineTokens, {position1=textStartPos, position2=pos-1, type="text", value=s:sub(textStartPos, pos-1)})
+				end
+
+				local tok = {position1=pos, position2=pos+1, type="!["}
+				table.insert(inlineTokens, tok)
+
+				pos          = pos + 2
+				textStartPos = pos
+
+				delimiterStackPush(delimStack, {token=tok})
+
+			else
+				pos = pos + 1
+			end
+
+		-- Link start.
+		elseif b == !(BYTE"[") then
+			if pos > textStartPos then
+				table.insert(inlineTokens, {position1=textStartPos, position2=pos-1, type="text", value=s:sub(textStartPos, pos-1)})
+			end
+
+			local tok = {position1=pos, position2=pos, type="["}
+			table.insert(inlineTokens, tok)
+
+			pos          = pos + 1
+			textStartPos = pos
+
+			delimiterStackPush(delimStack, {token=tok})
+
+		-- Link/image end.
+		elseif b == !(BYTE"]") then
+			if pos > textStartPos then
+				table.insert(inlineTokens, {position1=textStartPos, position2=pos-1, type="text", value=s:sub(textStartPos, pos-1)})
+			end
+
+			local tok = {position1=pos, position2=pos, type="]"}
+			table.insert(inlineTokens, tok)
+
+			pos          = (lookForLinkOrImage(inlineTokens, delimStack, linkReferenceDefinitions, s) or pos) + 1
+			textStartPos = pos
+
+		else
+			pos = pos + 1
+		end
+	end
+
+	if textStartPos <= #s then
+		table.insert(inlineTokens, {position1=textStartPos, position2=#s, type="text", value=s:sub(textStartPos, #s)})
+	end
+
+	!if DEV and 1==0 then
+		for i, tok in ipairs(inlineTokens) do
+			print(F("tok%d: %-12s  leftFlanking=%-5s  rightFlanking=%-5s  value=%s",
+				i,
+				tok.type,
+				tok.leftFlanking  ~= nil and tostring(tok.leftFlanking)  or "",
+				tok.rightFlanking ~= nil and tostring(tok.rightFlanking) or "",
+				showWhitespace(tok.value or ""),
+			nil))
+		end
+	!end
+
+	delimStack.bottomLimit = nil
+	processEmphasis(inlineTokens, delimStack, s)
+
+	local inlineDoc = assert(tokensToDocument(inlineTokens))
+
+	-- Fix :BadRawhtmlTag not being NULL.
+	inlineDoc:walk(false, function(tagName, el)
+		if tagName == "markdown:rawhtml" then
+			el.tag = "\0\0" -- We use double NULL to distinguish inline elements from block-level elements so the newline insertion silliness works.
+		end
+	end)
+
+	for _, node in ipairs(inlineDoc) do
+		table.insert(parentEl, node)
+	end
+end
+
+
+
+local function fixCell(cell)
+	cell = trimWhitespace(cell)
+	cell = cell:gsub("\\.", @@CONST{["\\|"]="|"})
+	return cell
+end
+
+local function parseTableCells(s, mustHavePipes, careAboutDelim)
+	local pos        = s:match!("^"..PATTERN_WHITESPACE_CHAR.."*()")
+	local pipeCount  = 0
+	local cells      = nil
+	local canBeDelim = careAboutDelim
+
+	if @@IS_CHAR(s, pos, "|") then
+		pos       = pos + 1
+		pipeCount = pipeCount + 1
+	end
+
+	local cellStartPos = pos
+
+	while true do
+		local i, c = s:match("()([\\|])", pos)
+		if not i then  break  end
+		pos = i
+
+		if c == "\\" then
+			pos = pos + 2 -- Ignore the next character no matter what it is. Let the inline parser resolve escapes!
+
+		elseif c == "|" then
+			pipeCount = pipeCount + 1
+
+			local cell = fixCell(s:sub(cellStartPos, pos-1))
+			cells      = cells or {}
+			table.insert(cells, cell)
+			canBeDelim = canBeDelim and (cell:find"^:?%-+:?$" ~= nil)
+
+			pos          = pos + 1
+			cellStartPos = pos
+		end
+	end
+
+	if pipeCount == 0 and mustHavePipes then  return nil  end
+
+	if cellStartPos <= #s then
+		local cell = fixCell(s:sub(cellStartPos, #s))
+		cells      = cells or {}
+		table.insert(cells, cell)
+		canBeDelim = canBeDelim and (cell:find"^:?%-+:?$" ~= nil)
+	end
+
+	return cells, canBeDelim
+end
+
+
+
+-- infoString = processInfoString( infoString )
+local function processInfoString(s)
+	s = trimWhitespace(s)
+	if s == "" then  return ""  end
+
+	local pos          = 1
+	local textStartPos = 1
+	local buffer       = {}
+
+	while true do
+		local i, c = s:match("()([\\&])", pos)
+		if not i then  break  end
+		pos = i
+
+		if c == "\\" and s:find(!("^"..PATTERN_ASCII_PUNCTUATION_CHAR), pos+1) then
+			addText(buffer, s, textStartPos, pos-1)
+			textStartPos = pos + 1
+			pos          = pos + 2
+
+		elseif c == "&" then
+			local entityChar, endPos = parseEntity(s, pos)
+
+			if entityChar then
+				addText(buffer, s, textStartPos, pos-1)
+				table.insert(buffer, entityChar)
+				textStartPos = endPos + 1
+				pos          = textStartPos
+			else
+				pos = pos + 1
+			end
+
+		else
+			pos = pos + 1
+		end
+	end
+
+	if textStartPos <= #s then
+		addText(buffer, s, textStartPos, #s)
+	end
+
+	return table.concat(buffer)
+end
+
+
+
+-- html = markdown.parse( markdownString )
+function markdown.parse(s)
+	@@PRINT"==================="
+	@@PRINT(showWhitespace(s))
+	local pos   = 1
+	local ln    = 0
+	local lines = {}
+
+	if s:find("\0", 1, true) then
+		s = s:gsub("%z", !(REPLACEMENT_CHARACTER))
+	end
+
+	while pos <= #s do
+		ln                 = ln + 1
+		local i1, i2, line = s:find(!("^("..PATTERN_LINE..")"), pos)
+		lines[ln]          = {from=i1, to=i2, ln=ln, line=line}
+		pos                = i2 + 2 -- Skip the newline (if there is one - otherwise we jump past EOF, which is fine).
+	end
+
+	local doc                      = xmlLib.element("document")
+	local blankLines               = {}
+	local openBlockStack           = {doc}
+	local inlineContainers         = {}
+	local linkReferenceDefinitions = {}
+	local lastLeafBlockType        = "blank" -- "blank"|"break"|"code"|"heading"|"linkrefdef"|"paragraph"|"table"|"html"
+	local lastLineLeafBlockType    = "blank"
+	local lastLineContainerLevel   = 1
+	ln                             = 1
+
+	-- Match top-level blocks.
+	while lines[ln] do
+		local line = lines[ln].line
+		local pos  = 1
+		local col  = 1
+
+		local currentContainerLevel = 1
+
+		@@PRINT"-------------------"
+		@@PRINT(ln, showWhitespace(line))
+
+		!(
+		-- leafBlockType = leafBlockType|"<empty>"|"<same>"
+		local function BREAK_AFTER_LEAF_BLOCK(leafBlockType)
+			return (
+				leafBlockType == "<same>" and `
+					for blockLevelToClose = #openBlockStack, currentContainerLevel+2, -1 do  openBlockStack[blockLevelToClose] = nil  end -- Close previous blocks in the same parent.
+					if blankLines[1] then  blankLines = {}  end -- Having a leaf block means the line wasn't empty.
+					break
+				`
+				or leafBlockType == "<empty>" and `
+					lastLineLeafBlockType = "blank"
+					break
+				`
+				or `
+					for blockLevelToClose = #openBlockStack, currentContainerLevel+2, -1 do  openBlockStack[blockLevelToClose] = nil  end -- Close previous blocks in the same parent.
+					if blankLines[1] then  blankLines = {}  end -- Having a leaf block means the line wasn't empty.
+					lastLeafBlockType     = "`..leafBlockType..`"
+					lastLineLeafBlockType = lastLeafBlockType
+					break
+				`
+			)
+		end
+		local CONTINUE_AFTER_CONTAINER_BLOCK = ``
+		)
+
+		-- Match container and leaf blocks.
+		while true do
+			@@PRINT("pos="..pos.." col="..col)
+
+			--
+			-- Special handling.
+			--
+
+			-- [Leaf] HTML block (continuation). (This has to be the very first rule because we may want to match even a blank line!)
+			if openBlockStack[currentContainerLevel+1] and openBlockStack[currentContainerLevel+1].tag == "\0" and openBlockStack[currentContainerLevel+1]._activeHtmlBlock then
+				local htmlEl   = openBlockStack[currentContainerLevel+1]
+				local contents = line:sub(pos)
+				local isBlank  = (contents:find!(PATTERN_BLANK_LINE) ~= nil)
+
+				if isBlank then
+					@@PRINT"!blank"
+					table.insert(blankLines, contents)
+
+				else
+					for i, emptyLine in ipairs(blankLines) do
+						-- assert(emptyLine:find!(PATTERN_BLANK_LINE))
+						table.insert(htmlEl, emptyLine)
+						table.insert(htmlEl, "\n")
+						blankLines[i] = nil
+					end
+
+					@@PRINT"+html"
+					table.insert(htmlEl, "\n")
+					table.insert(htmlEl, contents)
+				end
+
+				if
+					line:find(htmlEl._endPattern1, pos)
+					or htmlEl._endPattern2 and line:find(htmlEl._endPattern2, pos)
+					or htmlEl._endPattern3 and line:find(htmlEl._endPattern3, pos)
+				then
+					htmlEl._activeHtmlBlock = false
+				end
+
+				if isBlank then
+					!!(BREAK_AFTER_LEAF_BLOCK"<empty>")
+				else
+					!!(BREAK_AFTER_LEAF_BLOCK"html")
+				end
+
+			-- [Leaf] Blank line.
+			elseif line:find(!(PATTERN_BLANK_LINE), pos) then
+				@@PRINT"!blank"
+				table.insert(blankLines, line:sub(pos))
+
+				if openBlockStack[currentContainerLevel+1] and openBlockStack[currentContainerLevel+1].tag == "blockquote" then
+					-- Blank lines always break block quotes.
+					for blockLevelToClose = #openBlockStack, currentContainerLevel+1, -1 do  openBlockStack[blockLevelToClose] = nil  end
+					!!(BREAK_AFTER_LEAF_BLOCK"blank")
+				end
+
+				!!(BREAK_AFTER_LEAF_BLOCK"<empty>") -- Note: We preserve the block stack so we can add stuff to its elements.
+
+			-- [Container] List item (continuation). (This has to be the first rule after blank line because the exact indentation is very significant!)
+			elseif
+				openBlockStack[currentContainerLevel+1]
+				and @@CONSTSET{"ul","ol"}[openBlockStack[currentContainerLevel+1].tag]
+				and getBlockStart(line, nil, col, pos, 1/0)-col >= openBlockStack[currentContainerLevel+1]._contentOffset
+				and not (
+					blankLines[2]
+					and not openBlockStack[currentContainerLevel+1][#openBlockStack[currentContainerLevel+1]][1]
+				)
+			then
+				currentContainerLevel = currentContainerLevel + 1 -- Enter list.
+				local listEl          = openBlockStack[currentContainerLevel]
+				@@PRINT("="..listEl.tag)
+
+				col, pos = shiftBlockPosition(line, col, pos, listEl._contentOffset)
+
+				currentContainerLevel = currentContainerLevel + 1 -- Enter list item.
+				@@PRINT"=li"
+
+				if
+					listEl._isTight
+					and lastLineLeafBlockType == "blank"
+					and listEl[#listEl][1]
+					-- Don't make list loose if we will continue an inner list item.
+					and not (
+						openBlockStack[currentContainerLevel+1]
+						and @@CONSTSET{"ul","ol"}[openBlockStack[currentContainerLevel+1].tag]
+						and getBlockStart(line, nil, col, pos, 1/0)-col >= openBlockStack[currentContainerLevel+1]._contentOffset
+					)
+					-- Don't make list loose if we're in a fenced code block.
+					and not (
+						openBlockStack[currentContainerLevel+1]
+						and openBlockStack[currentContainerLevel+1].tag == "pre"
+						and openBlockStack[currentContainerLevel+1]._activeFencedCodeBlock
+					)
+				then
+					@@PRINT"!loose"
+					listEl._isTight = false
+				end
+
+				!!(CONTINUE_AFTER_CONTAINER_BLOCK)
+
+			-- [Leaf] Fenced code block (continuation).
+			elseif openBlockStack[currentContainerLevel+1] and openBlockStack[currentContainerLevel+1].tag == "pre" and openBlockStack[currentContainerLevel+1]._activeFencedCodeBlock then
+				local preEl  = openBlockStack[currentContainerLevel+1]
+				local codeEl = preEl[1]
+
+				local toTrim  = (preEl._contentStartColumn-1) % 4
+				local trimPat = toTrim > 0 and "^"..(" ?"):rep(toTrim) or nil -- :HandleTabs
+
+				for i, emptyLine in ipairs(blankLines) do
+					if trimPat then  emptyLine = emptyLine:gsub(trimPat, "")  end
+					table.insert(codeEl, emptyLine)
+					table.insert(codeEl, "\n")
+					blankLines[i] = nil
+				end
+
+				if getBlockStart(line, preEl._endPattern, col, pos) then
+					preEl._activeFencedCodeBlock = false
+
+				else
+					local contents = line:sub(pos)
+					if trimPat then  contents = contents:gsub(trimPat, "")  end
+
+					@@PRINT"+code"
+					table.insert(codeEl, contents)
+					table.insert(codeEl, "\n")
+				end
+
+				!!(BREAK_AFTER_LEAF_BLOCK"code")
+
+			--
+			-- Normal matches.
+			--
+
+			-- [Container] Block quote.
+			elseif getBlockStart(line, "^>", col, pos) then
+				col = getBlockStart_lastColumn   + 1
+				pos = getBlockStart_lastPosition + 1
+
+				if @@IS_CHAR(line, pos, " \t") then
+					col, pos = shiftBlockPosition(line, col, pos, 1)
+				end
+
+				currentContainerLevel = currentContainerLevel + 1 -- Enter blockquote.
+				local blockquoteEl    = openBlockStack[currentContainerLevel]
+
+				if blockquoteEl and blockquoteEl.tag == "blockquote" then
+					@@PRINT"=blockquote"
+
+				else
+					@@PRINT"blockquote"
+					blockquoteEl = xmlLib.element("blockquote")
+
+					table.insert(openBlockStack[currentContainerLevel-1], blockquoteEl)
+					openBlockStack[currentContainerLevel] = blockquoteEl
+
+					-- for blockLevelToClose = #openBlockStack, currentContainerLevel+1, -1 do  openBlockStack[blockLevelToClose] = nil  end -- This does nothing here, I think?
+				end
+
+				!!(CONTINUE_AFTER_CONTAINER_BLOCK)
+
+			-- [Leaf] ATX heading.
+			elseif getBlockStart(line, "^##?#?#?#?#?[ \t]", col, pos) or getBlockStart(line, "^##?#?#?#?#?$", col, pos) then
+				local hashes, contents = line:match(!("^[ \t]*(#+)"..PATTERN_WHITESPACE_CHAR.."*(.*)"), pos) -- 'contents' may be empty.
+				contents               = contents:gsub("^#+ *$", ""):gsub(" +#+ *$", "")
+
+				@@PRINT("h"..#hashes)
+				local headingEl = xmlLib.element("h"..#hashes, contents)
+				table.insert(inlineContainers, headingEl)
+
+				table.insert(openBlockStack[currentContainerLevel], headingEl)
+				openBlockStack[currentContainerLevel+1] = headingEl
+
+				!!(BREAK_AFTER_LEAF_BLOCK"heading")
+
+			-- [Leaf] Setext heading.
+			elseif
+				lastLineLeafBlockType ~= "blank"
+				and getBlockStart(line, "^=+[ \t]*$", col, pos)
+				and (openBlockStack[currentContainerLevel+1] or EMPTY_TABLE).tag == "p"
+			then
+				@@PRINT"-paragraph" @@PRINT"h1"
+				openBlockStack[currentContainerLevel+1].tag = "h1"
+				!!(BREAK_AFTER_LEAF_BLOCK"heading")
+
+			elseif
+				lastLineLeafBlockType ~= "blank"
+				and getBlockStart(line, "^%-+[ \t]*$", col, pos)
+				and (openBlockStack[currentContainerLevel+1] or EMPTY_TABLE).tag == "p"
+				and not (
+					getBlockStart(line, "^%-[ \t]", col, pos) or
+					getBlockStart(line, "^%-$", col, pos)
+				)
+			then
+				@@PRINT"-paragraph" @@PRINT"h2"
+				openBlockStack[currentContainerLevel+1].tag = "h2"
+				!!(BREAK_AFTER_LEAF_BLOCK"heading")
+
+			-- [Leaf] Thematic break. (After setext heading.)
+			elseif
+				getBlockStart(line, !(NOSPACE0"^ %* [\0\t]* %* [\0\t]* %* [\0\t%*]* $"), col, pos) or
+				getBlockStart(line, !(NOSPACE0"^ %- [\0\t]* %- [\0\t]* %- [\0\t%-]* $"), col, pos) or
+				getBlockStart(line, !(NOSPACE0"^  _ [\0\t]*  _ [\0\t]*  _ [\0\t _]* $"), col, pos)
+			then
+				@@PRINT"hr"
+				local ruleEl = xmlLib.element("hr")
+
+				table.insert(openBlockStack[currentContainerLevel], ruleEl)
+				openBlockStack[currentContainerLevel+1] = ruleEl
+
+				!!(BREAK_AFTER_LEAF_BLOCK"break")
+
+			-- [Container] List item. (After thematic break.)
+			elseif
+				(
+					getBlockStart(line, "^[-+*][ \t]", col, pos) or
+					getBlockStart(line, "^[-+*]$",     col, pos) or
+					getBlockStart(line, "^%d%d?%d?%d?%d?%d?%d?%d?%d?[.)][ \t]", col, pos) or
+					getBlockStart(line, "^%d%d?%d?%d?%d?%d?%d?%d?%d?[.)]$",     col, pos)
+				)
+				and not (
+					-- Sometimes we cannot interrupt a paragraph.
+					lastLineLeafBlockType == "paragraph"
+					and openBlockStack[currentContainerLevel+1]
+					and openBlockStack[currentContainerLevel+1].tag == "p"
+					and (
+						-- An empty list item.
+						line:match("^[ \t]*%S+[ \t]*$", pos)
+						-- Numeric lists not starting with 1.
+						or (line:find("^[ \t]*%d", pos) and not line:find("^[ \t]*1%.", pos))
+					)
+				)
+			then
+				local listStartCol = col
+
+				col = getBlockStart_lastColumn
+				pos = getBlockStart_lastPosition
+
+				-- Gather marker info and go to after marker.
+				local nStr, listMarker, posNext = line:match("^(%d*)(%S)()", pos)
+
+				col = col + (posNext - pos)
+				pos = posNext
+
+				-- Skip one space after marker.
+				col, pos = shiftBlockPosition(line, col, pos, 1)
+
+				-- If the line is blank, or if the first block is an indented
+				-- code block, then contentOffset should be 1 past the space.
+				local contentCol, contentPos = getBlockStart(line, nil, col, pos)
+
+				if line:find("^[^ \t]", contentPos) then
+					pos = contentPos
+					col = contentCol
+				end
+
+				local contentOffset = col - listStartCol
+
+				-- Create elements and stuff.
+				local ordered = (nStr ~= "")
+				local tagName = (ordered and "ol" or "ul")
+
+				currentContainerLevel = currentContainerLevel + 1 -- Enter list.
+				local listEl          = openBlockStack[currentContainerLevel]
+
+				if listEl and listEl.tag == tagName and listEl._listMarker == listMarker then
+					@@PRINT("="..listEl.tag)
+
+					if listEl._isTight and lastLineLeafBlockType == "blank" and currentContainerLevel >= lastLineContainerLevel then
+						@@PRINT"!loose"
+						listEl._isTight = false
+					end
+
+				else
+					@@PRINT(tagName)
+					listEl             = xmlLib.element(tagName)
+					listEl._listMarker = listMarker
+					listEl._isTight    = true
+
+					nStr = nStr:gsub("^0*(%d+)$", "%1")
+					if ordered and nStr ~= "1" then
+						listEl.attr.start = nStr
+					end
+
+					table.insert(openBlockStack[currentContainerLevel-1], listEl)
+					openBlockStack[currentContainerLevel] = listEl
+
+					-- for blockLevelToClose = #openBlockStack, currentContainerLevel+1, -1 do  openBlockStack[blockLevelToClose] = nil  end -- We do this below.
+				end
+
+				currentContainerLevel = currentContainerLevel + 1 -- Enter list item.
+				listEl._contentOffset = contentOffset -- Update this per list item.  @Cleanup: Maybe move this to the actual list item.
+
+				@@PRINT"li"
+				local itemEl = xmlLib.element("li")
+				table.insert(listEl, itemEl)
+				openBlockStack[currentContainerLevel] = itemEl
+
+				for blockLevelToClose = #openBlockStack, currentContainerLevel+1, -1 do  openBlockStack[blockLevelToClose] = nil  end
+
+				!!(CONTINUE_AFTER_CONTAINER_BLOCK)
+
+			-- [Leaf] Fenced code block.
+			elseif getBlockStart(line, "^```+[^`]*$", col, pos) or getBlockStart(line, "^~~~", col, pos) then
+				local contentStartPos, fenceChar = line:match("()(%S)", pos)
+				local pat                        = (fenceChar == "`") and "^[ \t]*(`+)(.*)" or "^[ \t]*(~+)(.*)"
+				local fence, infoString          = line:match(pat, pos)
+				infoString                       = processInfoString(infoString)
+				local infoWord                   = infoString:match!("^"..PATTERN_NON_WHITESPACE_CHAR.."+")
+				local classValue                 = infoWord and "language-"..infoWord or nil -- :NotInSpec (though mentioned!)
+
+				@@PRINT"pre"
+				local codeEl              = xmlLib.element("code", {class=classValue})
+				local preEl               = xmlLib.element("pre",  codeEl)
+				preEl._endPattern         = "^" .. fenceChar:rep(#fence) .. "+[ \t]*$"
+				preEl._contentStartColumn = contentStartPos
+
+				table.insert(openBlockStack[currentContainerLevel], preEl)
+				openBlockStack[currentContainerLevel+1] = preEl
+
+				preEl._activeFencedCodeBlock = true
+				!!(BREAK_AFTER_LEAF_BLOCK"code")
+
+			-- [Leaf] HTML block.
+			elseif -- §1
+				getBlockStart(line, "^<[Ss][Cc][Rr][Ii][Pp][Tt]", col, pos) and not getBlockStart(line, !("^<......".."[^ \t\n\v\f>]"), col, pos) or
+				getBlockStart(line, "^<[Ss][Tt][Yy][Ll][Ee]",     col, pos) and not getBlockStart(line, !("^<....." .."[^ \t\n\v\f>]"), col, pos) or
+				getBlockStart(line, "^<[Pp][Rr][Ee]",             col, pos) and not getBlockStart(line, !("^<..."   .."[^ \t\n\v\f>]"), col, pos)
+			then
+				!local HTML_ELEMENT_PRE = PRINT`"html"`..`
+					local htmlEl = xmlLib.element("\0", line:sub(pos)) -- Note: The name of HTML blocks is NULL so we don't collide with user data.
+					table.insert(openBlockStack[currentContainerLevel], htmlEl)
+					openBlockStack[currentContainerLevel+1] = htmlEl
+				`
+				!local HTML_ELEMENT_POST = `
+					htmlEl._activeHtmlBlock = not (
+						line:find(htmlEl._endPattern1, pos)
+						or htmlEl._endPattern2 and line:find(htmlEl._endPattern2, pos)
+						or htmlEl._endPattern3 and line:find(htmlEl._endPattern3, pos)
+					)
+				`..BREAK_AFTER_LEAF_BLOCK"html"
+
+				!!(HTML_ELEMENT_PRE)
+				htmlEl._endPattern1 = "</[Ss][Cc][Rr][Ii][Pp][Tt]>"
+				htmlEl._endPattern2 = "</[Pp][Rr][Ee]>"
+				htmlEl._endPattern3 = "</[Ss][Tt][Yy][Ll][Ee]>"
+				!!(HTML_ELEMENT_POST)
+
+			elseif getBlockStart(line, "^<!%-%-", col, pos) then -- §2
+				!!(HTML_ELEMENT_PRE)
+				htmlEl._endPattern1 = "%-%->"
+				!!(HTML_ELEMENT_POST)
+
+			elseif getBlockStart(line, "^<%?", col, pos) then -- §3
+				!!(HTML_ELEMENT_PRE)
+				htmlEl._endPattern1 = "%?>"
+				!!(HTML_ELEMENT_POST)
+
+			elseif getBlockStart(line, "^<![A-Z]", col, pos) then -- §4
+				!!(HTML_ELEMENT_PRE)
+				htmlEl._endPattern1 = ">"
+				!!(HTML_ELEMENT_POST)
+
+			elseif getBlockStart(line, "^<!%[CDATA%[", col, pos) then -- §5
+				!!(HTML_ELEMENT_PRE)
+				htmlEl._endPattern1 = "%]%]>"
+				!!(HTML_ELEMENT_POST)
+
+			elseif
+				isHtmlBlockStartByRule6(line, col, pos) -- §6
+				or ( -- §7
+					isHtmlBlockStartByRule7(line, col, pos)
+					and not (
+						lastLineLeafBlockType == "paragraph"
+						and openBlockStack[currentContainerLevel+1]
+						and openBlockStack[currentContainerLevel+1].tag == "p"
+					)
+				)
+			then
+				!!(HTML_ELEMENT_PRE)
+				htmlEl._endPattern1 = !("^"..PATTERN_WHITESPACE_CHAR.."*$")
+				!!(HTML_ELEMENT_POST)
+
+			-- [Leaf] Link reference definition.
+			elseif lastLineLeafBlockType ~= "paragraph" and parseLinkReferenceDefinition(lines, ln, line, col, pos, @@STATIC(linkRefDefParsingInfo)) then
+				local linkRefDef = {
+					label       = linkRefDefParsingInfo.label,
+					destination = linkRefDefParsingInfo.destination,
+					title       = linkRefDefParsingInfo.title,
+				}
+
+				if linkReferenceDefinitions[linkRefDef.label] then
+					timestampPrintWarning("Duplicate link reference label '%s'.", linkRefDef.label) -- @Polish: We probably want a file path in the message.
+				else
+					@@PRINT("linkRefDef '"..linkRefDef.label.."' '"..linkRefDef.destination.."' '"..(linkRefDef.title or "").."'")
+					linkReferenceDefinitions[linkRefDef.label] = linkRefDef
+				end
+
+				ln = linkRefDefParsingInfo.endLn
+
+				!!(BREAK_AFTER_LEAF_BLOCK"linkrefdef")
+
+			-- [Leaf] Continuation paragraph or indented code block.
+			elseif getBlockStart(line, "^[ \t]", col, pos) then
+				local contents = getBlockContents(line, col, pos, 4)
+
+				if lastLineLeafBlockType ~= "blank" and openBlockStack[#openBlockStack].tag == "p" then
+					contents = contents:gsub(!("^"..PATTERN_WHITESPACE_SEQUENCE), "")
+
+					@@PRINT"+inline"
+
+					local paragraphEl = openBlockStack[#openBlockStack]
+					table.insert(paragraphEl, "\n")
+					table.insert(paragraphEl, contents)
+
+					!!(BREAK_AFTER_LEAF_BLOCK"paragraph")
+
+				elseif openBlockStack[currentContainerLevel+1] and openBlockStack[currentContainerLevel+1].tag == "pre" then
+					@@PRINT"+code"
+
+					local codeEl = openBlockStack[currentContainerLevel+1][1]
+					assert(codeEl.tag == "code")
+
+					for i, emptyLine in ipairs(blankLines) do
+						table.insert(codeEl, emptyLine:sub(5)) -- :HandleTabs
+						table.insert(codeEl, "\n")
+						blankLines[i] = nil
+					end
+
+					table.insert(codeEl, contents)
+					table.insert(codeEl, "\n")
+
+					!!(BREAK_AFTER_LEAF_BLOCK"code")
+
+				else
+					@@PRINT"pre"
+					local codeEl = xmlLib.element("code", {contents, "\n"})
+					local preEl  = xmlLib.element("pre", codeEl)
+
+					table.insert(openBlockStack[currentContainerLevel], preEl)
+					openBlockStack[currentContainerLevel+1] = preEl
+
+					!!(BREAK_AFTER_LEAF_BLOCK"code")
+				end
+
+			-- [Leaf] Paragraph, table or lazy continuation.
+			else
+				local contents      = line:sub(pos) -- No need to handle tabs since we trim away all leading whitespace anyway.
+				local lastOpenBlock = openBlockStack[#openBlockStack]
+
+				if lastLineLeafBlockType ~= "blank" and lastOpenBlock.tag == "p" then
+					local paragraphEl = lastOpenBlock
+
+					-- Table. ['table' extension]
+					if not paragraphEl[2] and contents:find("|", 1, true) then
+						local delimCells, canBeDelim =                parseTableCells(contents,       true, true)
+						local headerCells            = canBeDelim and parseTableCells(paragraphEl[1], true, false) or nil
+
+						if headerCells and #headerCells == #delimCells then
+							@@PRINT"-paragraph" @@PRINT"table"
+							local tableEl = paragraphEl
+							tableEl.tag   = "table"
+							removeItem(inlineContainers, tableEl)
+
+							local headerRowEl = xmlLib.element("tr")
+							tableEl[1]        = xmlLib.element("thead", headerRowEl) -- Replaces the text node.
+
+							for i, headerCell in ipairs(headerCells) do
+								local cellEl = xmlLib.element("th", headerCell)
+								table.insert(inlineContainers, cellEl)
+								headerRowEl[i] = cellEl
+
+								local delimCell = delimCells[i]
+								local alignL    = @@IS_CHAR(delimCell, 1,          ":")
+								local alignR    = @@IS_CHAR(delimCell, #delimCell, ":")
+
+								if alignL and alignR then  cellEl.attr.align = "center"
+								elseif alignL        then  cellEl.attr.align = "left"
+								elseif alignR        then  cellEl.attr.align = "right"
+								end
+							end
+
+							-- openBlockStack[currentContainerLevel+1] = tableEl -- Not needed, right?
+
+							!!(BREAK_AFTER_LEAF_BLOCK"table")
+						end
+					end
+
+					-- Lazy continuation.
+					contents = contents:gsub(!("^"..PATTERN_WHITESPACE_SEQUENCE), "")
+
+					@@PRINT"+lazy"
+					table.insert(paragraphEl, "\n")
+					table.insert(paragraphEl, contents)
+
+					currentContainerLevel = #openBlockStack - 1
+					!!(BREAK_AFTER_LEAF_BLOCK"paragraph")
+
+				-- Table continuation.
+				elseif lastLineLeafBlockType ~= "blank" and lastOpenBlock.tag == "table" then
+					local tableEl     = lastOpenBlock
+					local headerRowEl = tableEl[1][1]
+					local bodyEl      = tableEl[2]
+
+					if not bodyEl then
+						bodyEl     = xmlLib.element("tbody")
+						tableEl[2] = bodyEl
+					end
+
+					local rowEl = xmlLib.element("tr")
+					table.insert(bodyEl, rowEl)
+
+					local cells = parseTableCells(contents, false, false)
+
+					for i, headerCellEl in ipairs(headerRowEl) do
+						local cellEl = xmlLib.element("td", {align=headerCellEl.attr.align, (cells[i] or "")})
+						table.insert(inlineContainers, cellEl)
+						rowEl[i] = cellEl
+					end
+
+					!!(BREAK_AFTER_LEAF_BLOCK"table")
+
+				-- Paragraph.
+				else
+					contents       = contents:gsub(!("^"..PATTERN_WHITESPACE_SEQUENCE), "")
+					local parentEl = openBlockStack[currentContainerLevel]
+
+					-- Task list item. ['tasklist' extension]
+					if parentEl.tag == "li" and not parentEl[1] and (contents:find"^%[[ Xx]%] " or contents:find"^%[[ Xx]%]$") then
+						local checkboxEl = xmlLib.element("input", {type="checkbox", disabled="", checked=((not contents:find"^%[ ") and "" or nil)})
+						table.insert(parentEl, checkboxEl)
+						table.insert(parentEl, " ")
+
+						-- Trim away the task list item marker and one space. 'contents' may be empty
+						-- after this. The spec says nothing about further trimming. We also don't
+						-- know in the input should be inside the paragraph element. Sigh...
+						contents = contents:sub(5)
+					end
+
+					@@PRINT"p"
+					local paragraphEl = xmlLib.element("p")
+					table.insert(inlineContainers, paragraphEl)
+
+					table.insert(parentEl, paragraphEl)
+					openBlockStack[currentContainerLevel+1] = paragraphEl
+
+					table.insert(paragraphEl, (contents:gsub(!("^"..PATTERN_WHITESPACE_SEQUENCE), "")))
+
+					!!(BREAK_AFTER_LEAF_BLOCK"paragraph")
+				end
+			end
+		end--while true
+
+		ln                     = ln + 1
+		lastLineContainerLevel = currentContainerLevel
+	end--while lines[ln]
+
+	@@PRINT"-------------------"
+
+	-- Parse inlines.
+	for _, inlineContainer in ipairs(inlineContainers) do
+		local contents = table.concat(inlineContainer):gsub("^[ \t]+", ""):gsub("[ \t]+$", "")
+
+		for i = #inlineContainer, 1, -1 do
+			inlineContainer[i] = nil
+		end
+
+		parseInline(inlineContainer, contents, linkReferenceDefinitions)
+	end
+
+	-- Fix tight lists and store HTML block contents.
+	local htmlBlocks     = {--[[ ["id1"]=html, ... ]]}
+	local htmlBlockCount = 0
+
+	doc:walk(true, function(tagName, el)
+		if tagName == "ul" or tagName == "ol" then
+			local listEl = el
+
+			if listEl._isTight then
+				for _, itemEl in ipairsr(listEl) do
+					for childIndex, childNode in ipairsr(itemEl) do
+						if xmlLib.isElement(childNode) and childNode.tag == "p" then
+							local paragraphEl = childNode
+
+							table.remove(itemEl, childIndex)
+
+							for paragraphChildIndex, paragraphChild in ipairs(paragraphEl) do
+								table.insert(itemEl, childIndex+paragraphChildIndex-1, paragraphChild)
+							end
+						end
+					end
+				end
+			end
+
+		elseif tagName == "\0" or tagName == "\0\0" then
+			htmlBlockCount    = htmlBlockCount + 1
+			local idStr       = F("%d", htmlBlockCount)
+			htmlBlocks[idStr] = table.concat(el)
+			el[1]             = idStr
+
+			-- Disallowed raw HTML (which seems to apply to HTML blocks too according to the single example in the spec). ['tagfilter' extension] :UselessSpec
+			if tagName == "\0" then
+				htmlBlocks[idStr] = htmlBlocks[idStr]:gsub("<(/?)(%a[-%w]*)", function(slash, tagName)
+					if #tagName <= 9 and @@CONSTSET{"iframe","noembed","noframes","plaintext"--[[,"script","style"]],"textarea","title","xmp"}[tagName:lower()] then
+						return "&lt;" .. slash .. tagName
+					end
+				end)
+			end
+
+			-- @@PRINT("Store"..idStr..": "..showWhitespace(htmlBlocks[idStr], true))
+
+			for i = #el, 2, -1 do
+				el[i] = nil
+			end
+		end
+	end)
+
+	-- Fix newlines around elements.
+	doc:walk(true, function(tagName, parentEl)
+		for i, el in ipairsr(parentEl) do
+			if xmlLib.isText(el) then
+				-- void
+
+			elseif @@CONSTSET{"p","h1","h2","h3","h4","h5","h6","hr","pre","th","td","\0"}[el.tag] then
+				-- Newline after end tag.
+				table.insert(parentEl, i+1, "\n")
+
+			elseif @@CONSTSET{"li"}[el.tag] then
+				-- Newline after end tag.
+				table.insert(parentEl, i+1, "\n")
+				-- Sometimes newline after start tag.
+				if xmlLib.isElement(el[1]) and not @@CONSTSET{"a","em","strong","input"}[el[1].tag] then
+					table.insert(el, 1, "\n")
+				end
+
+			elseif @@CONSTSET{"blockquote","ul","ol","table","thead","tbody","tr"}[el.tag] then
+				-- Newline after end tag.
+				table.insert(parentEl, i+1, "\n")
+				-- Newline after start tag.
+				table.insert(el, 1, "\n")
+				-- Sometimes newline before start tag.
+				if parentEl.tag == "li" and i > 1 and xmlLib.isText(parentEl[i-1]) then -- @Robustness @Polish: The isText() check should probably also check for inline tags, like <em>.
+					table.insert(parentEl, i, "\n")
+				end
+			end
+		end
+	end)
+
+	local html = doc:contentsToHtml()
+
+	-- Restore HTML blocks.
+	if htmlBlockCount > 0 then
+		-- html = html:gsub("%z", "html") -- DEBUG
+		html = html:gsub("<%z%z?>(%d+)</%z%z?>", function(idStr)
+			return htmlBlocks[idStr]
+		end)
+	end
+	@@ASSERT(not html:find("\0", 1, true))
+
+	return html
+end
+
+
+
+!if DEV then
+function markdown.runInternalTests()
+	local failCount = 0
+
+	print()
+	print("shiftBlockPosition()")
+	print()
+	local function test(ln, label, line, col,pos, amount, expectedCol,expectedPos)
+		local colNext, posNext = shiftBlockPosition(line, col, pos, amount)
+		print(F(
+			"%s  %-15s %d %d | expected %d %d | got %d %d",
+			label, showWhitespace(line),col,pos, expectedCol,expectedPos, colNext,posNext
+		))
+		if posNext ~= expectedPos then  print(!(@file..":")..ln..": failed position.") ; failCount = failCount+1  end
+		if colNext ~= expectedCol then  print(!(@file..":")..ln..": failed column.")   ; failCount = failCount+1  end
+	end
+	test(@line, "0.  ",  "foo",      1,1, 1, 2,2)
+	print()
+	test(@line, "t1. ",  "\tfoo",    1,1, 1, 2,1)
+	test(@line, "t2. ",  "\tfoo",    2,1, 1, 3,1)
+	test(@line, "t3. ",  "\tfoo",    3,1, 1, 4,1)
+	test(@line, "t4. ",  "\tfoo",    4,1, 1, 5,2)
+	print()
+	test(@line, "tt1.",  "\t\tfoo",  3,1, 1, 4,1)
+	test(@line, "tt2.",  "\t\tfoo",  4,1, 1, 5,2)
+	test(@line, "tt3.",  "\t\tfoo",  5,2, 1, 6,2)
+	print()
+	test(@line, "at1.",  "a\tfoo",   1,1, 1, 2,2)
+	test(@line, "at2.",  "a\tfoo",   2,2, 1, 3,2)
+	test(@line, "at3.",  "a\tfoo",   3,2, 1, 4,2)
+	test(@line, "at4.",  "a\tfoo",   4,2, 1, 5,3)
+	print()
+	test(@line, "tat1.", "\ta\tfoo", 4,1, 1, 5,2)
+	test(@line, "tat2.", "\ta\tfoo", 5,2, 1, 6,3)
+	test(@line, "tat3.", "\ta\tfoo", 6,3, 1, 7,3)
+	print()
+
+	print()
+	print("getBlockStart()")
+	print()
+	local function test(ln, label, line, pat, col,pos, indent, expectedCol,expectedPos)
+		local colNext, posNext = getBlockStart(line, pat, col, pos, indent)
+		print(F(
+			"%s  %-15s %d %d | expected %d %d | got %s %s",
+			label, showWhitespace(line),col,pos, expectedCol,expectedPos, (colNext or "-"),(posNext or "-")
+		))
+		if posNext ~= expectedPos then  print(!(@file..":")..ln..": failed position.") ; failCount = failCount+1  end
+		if colNext ~= expectedCol then  print(!(@file..":")..ln..": failed column.")   ; failCount = failCount+1  end
+	end
+	test(@line, "s0.  ",  "foo",       "^f",  1,1, 3, 1,1)
+	test(@line, "s1.  ",  " foo",      "^f",  1,1, 3, 2,2)
+	test(@line, "s2.  ",  "  foo",     "^f",  1,1, 3, 3,3)
+	test(@line, "s3.  ",  "   foo",    "^f",  1,1, 3, 4,4)
+	test(@line, "s4.  ",  "    foo",   "^ f", 1,1, 3, 4,4)
+	print()
+	test(@line, "t1.  ",  "\tfoo",     "^\t", 1,1, 3, 4,1)
+	test(@line, "t2.  ",  "\tfoo",     "^f",  2,1, 3, 5,2)
+	test(@line, "t3.  ",  "\tfoo",     "^f",  3,1, 3, 5,2)
+	test(@line, "t4.  ",  "\tfoo",     "^f",  4,1, 3, 5,2)
+	print()
+	test(@line, "ts1. ",  "\t foo",    "^\t", 1,1, 3, 4,1)
+	test(@line, "ts2. ",  "\t foo",    "^ ",  2,1, 3, 5,2)
+	test(@line, "ts3. ",  "\t foo",    "^f",  3,1, 3, 6,3)
+	test(@line, "ts4. ",  "\t foo",    "^f",  4,1, 3, 6,3)
+	print()
+	test(@line, "tt1. ",  "\t\tfoo",   "^\t", 1,1, 3, 4,1)
+	test(@line, "tt2. ",  "\t\tfoo",   "^\t", 2,1, 3, 5,2)
+	test(@line, "tt3. ",  "\t\tfoo",   "^\t", 3,1, 3, 6,2)
+	test(@line, "tt4. ",  "\t\tfoo",   "^\t", 4,1, 3, 7,2)
+	print()
+	test(@line, "st1. ",  " \tfoo",    "^\t", 1,1, 3, 4,2)
+	test(@line, "st2. ",  " \tfoo",    "^f",  2,2, 3, 5,3)
+	test(@line, "st3. ",  " \tfoo",    "^f",  3,2, 3, 5,3)
+	print()
+	test(@line, "tst1.",  "\t \tfoo",  "^\t", 1,1, 3, 4,1)
+	test(@line, "tst2.",  "\t \tfoo",  "^ ",  2,1, 3, 5,2)
+	test(@line, "tst3.",  "\t \tfoo",  "^\t", 3,1, 3, 6,3)
+	test(@line, "tst4.",  "\t \tfoo",  "^\t", 4,1, 3, 7,3)
+	test(@line, "tst5.",  "\t \tfoo",  "^\t", 5,2, 3, 8,3)
+	test(@line, "tst6.",  "\t \tfoo",  "^f",  6,3, 3, 9,4)
+	test(@line, "tst7.",  "\t \tfoo",  "^f",  7,3, 3, 9,4)
+	test(@line, "tst8.",  "\t \tfoo",  "^f",  8,3, 3, 9,4)
+	print()
+	test(@line, "sst1.",  "  \tfoo",   "^\t", 1,1, 3, 4,3)
+	test(@line, "sst1.",  "  \tfoo",   "^f",  2,2, 3, 5,4)
+	test(@line, "sst1.",  "  \tfoo",   "^f",  3,3, 3, 5,4)
+	test(@line, "sst1.",  "  \tfoo",   "^f",  4,3, 3, 5,4)
+	test(@line, "sst1.",  "  \tfoo",   "^f",  5,4, 3, 5,4)
+	print()
+	test(@line, "tsst1.", "\t  \tfoo", "^ ",  3,1, 3, 6,3)
+	test(@line, "tsst2.", "\t  \tfoo", "^\t", 4,1, 3, 7,4)
+	test(@line, "tsst3.", "\t  \tfoo", "^\t", 5,2, 3, 8,4)
+	test(@line, "tsst4.", "\t  \tfoo", "^f",  6,3, 3, 9,5)
+	test(@line, "tsst5.", "\t  \tfoo", "^f",  7,4, 3, 9,5)
+	test(@line, "tsst6.", "\t  \tfoo", "^f",  8,4, 3, 9,5)
+	test(@line, "tsst7.", "\t  \tfoo", "^f",  9,5, 3, 9,5)
+	print()
+
+	print()
+	print("getBlockContents()")
+	print()
+	local function test(ln, label, line, col,pos, expectedContents,expectedCol)
+		local contents, colNext = getBlockContents(line, col, pos)
+		print(F(
+			"%s  %d %-20s | expected %d %-16s | got %d %s",
+			label, col,showWhitespace(line), expectedCol,showWhitespace(expectedContents), colNext,showWhitespace(contents)
+		))
+		if contents ~= expectedContents then  print(!(@file..":")..ln..": failed contents.") ; failCount = failCount+1  end
+		if colNext  ~= expectedCol      then  print(!(@file..":")..ln..": failed column.")   ; failCount = failCount+1  end
+	end
+	test(@line, "s0.  ",  "foo",       1,1, "foo",     1)
+	test(@line, "s1.  ",  " foo",      1,1, "foo",     2)
+	test(@line, "s2.  ",  "  foo",     1,1, "foo",     3)
+	test(@line, "s3.  ",  "   foo",    1,1, "foo",     4)
+	test(@line, "s4.  ",  "    foo",   1,1, " foo",    4)
+	print()
+	test(@line, "t1.  ",  "\tfoo",     1,1, " foo",    4)
+	test(@line, "t2.  ",  "\tfoo",     2,1, "foo",     5)
+	test(@line, "t3.  ",  "\tfoo",     3,1, "foo",     5)
+	test(@line, "t4.  ",  "\tfoo",     4,1, "foo",     5)
+	print()
+	test(@line, "ts1. ",  "\t foo",    1,1, "  foo",   4)
+	test(@line, "ts2. ",  "\t foo",    2,1, " foo",    5)
+	test(@line, "ts3. ",  "\t foo",    3,1, "foo",     6)
+	test(@line, "ts4. ",  "\t foo",    4,1, "foo",     6)
+	print()
+	test(@line, "tt1. ",  "\t\tfoo",   1,1, " \tfoo",  4)
+	test(@line, "tt2. ",  "\t\tfoo",   2,1, "\tfoo",   5)
+	test(@line, "tt3. ",  "\t\tfoo",   3,1, "   foo",  6)
+	test(@line, "tt4. ",  "\t\tfoo",   4,1, "  foo",   7)
+	print()
+	test(@line, "st1. ",  " \tfoo",    1,1, " foo",    4)
+	test(@line, "st2. ",  " \tfoo",    2,2, "foo",     5)
+	test(@line, "st3. ",  " \tfoo",    3,2, "foo",     5)
+	print()
+	test(@line, "tst1.",  "\t \tfoo",  1,1, "  \tfoo", 4)
+	test(@line, "tst2.",  "\t \tfoo",  2,1, " \tfoo",  5)
+	test(@line, "tst3.",  "\t \tfoo",  3,1, "   foo",  6) -- We don't get "\tfoo" because the second tab is both touching the indentation and the content, and is 3 wide. (Not sure if this is correct behavior. Sounds weird. There are no relevant examples in the spec. Maybe this never happens in any situation that matters. See :SpaceTabSituations.)
+	test(@line, "tst4.",  "\t \tfoo",  4,1, "  foo",   7)
+	test(@line, "tst5.",  "\t \tfoo",  5,2, " foo",    8)
+	test(@line, "tst6.",  "\t \tfoo",  6,3, "foo",     9)
+	test(@line, "tst7.",  "\t \tfoo",  7,3, "foo",     9)
+	test(@line, "tst8.",  "\t \tfoo",  8,3, "foo",     9)
+	print()
+	test(@line, "sst1.",  "  \tfoo",   1,1, " foo",    4)
+	test(@line, "sst1.",  "  \tfoo",   2,2, "foo",     5)
+	test(@line, "sst1.",  "  \tfoo",   3,3, "foo",     5)
+	test(@line, "sst1.",  "  \tfoo",   4,3, "foo",     5)
+	test(@line, "sst1.",  "  \tfoo",   5,4, "foo",     5)
+	print()
+	test(@line, "tsst1.", "\t  \tfoo", 3,1, " \tfoo",  6) -- We don't get "   foo" because the second tab is completely inside the content and thus we should not tinker with it.
+	test(@line, "tsst2.", "\t  \tfoo", 4,1, "  foo",   7)
+	test(@line, "tsst3.", "\t  \tfoo", 5,2, " foo",    8)
+	test(@line, "tsst4.", "\t  \tfoo", 6,3, "foo",     9)
+	test(@line, "tsst5.", "\t  \tfoo", 7,4, "foo",     9)
+	test(@line, "tsst6.", "\t  \tfoo", 8,4, "foo",     9)
+	test(@line, "tsst7.", "\t  \tfoo", 9,5, "foo",     9)
+	print()
+	--[[
+		:SpaceTabSituations
+
+		1 = tab stop
+		s = space
+		t = tab
+		C = content (including any additional whitespace)
+
+		12341234
+		>sssstttC
+		||||||||
+		||||||++- Two spaces that's part of the code block content.
+		|||||+--- Fourth space of indentation telling us it's a code block (but not part of the content).
+		||+++---- Three spaces of block indentation.
+		|+------- Space after quote marker.
+		+-------- Quote marker.
+
+		12341234
+		s>ssssttC
+		 |||||||
+		 ||||||+--- One space space that's part of the code block content.
+		 |||||+---- Fourth space of indentation telling us it's a code block (but not part of the content).
+		 ||+++----- Three spaces of block indentation.
+		 |+-------- Space after quote marker.
+		 +--------- Quote marker.
+
+		12341234
+		ss>sssstC
+		  ||||||
+		  |||||+---- Fourth space of indentation telling us it's a code block (but not part of the content).
+		  ||+++----- Three spaces of block indentation.
+		  |+-------- Space after quote marker.
+		  +--------- Quote marker.
+
+		123412341234
+		sss>ssssttttC
+		   |||||||||
+		   ||||||+++- Three spaces that's part of the code block content.
+		   |||||+---- Fourth space of indentation telling us it's a code block (but not part of the content).
+		   ||+++----- Three spaces of block indentation.
+		   |+-------- Space after quote marker.
+		   +--------- Quote marker.
+	]]
+
+	if failCount > 0 then
+		print(F("[Markdown] Failed %d internal tests!", failCount))
+	else
+		print(F("[Markdown] Internal tests succeeded!"))
+	end
+	os.exit(failCount > 0 and 1 or 2)
+end
+!end
+
+
+
+return markdown

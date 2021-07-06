@@ -479,7 +479,8 @@ local function setup()
 		ipairsr          = ipairsr,
 		isAny            = isAny,
 		isValueHtml      = doesValueLookLikeHtml,
-		markdown         = markdownToHtml,
+		markdown         = markdownToHtml, !!(DEV and `markdownRunInternalTests=markdownLib.runInternalTests,` or ``)
+		markdownOld      = markdownOldLib, -- @Renamed @Deprecated
 		max              = math.max,
 		min              = math.min,
 		newStringBuilder = newStringBuilder, newBuffer = newStringBuilder, -- newBuffer() is @Deprecated, I guess? 2021-05-15
@@ -502,6 +503,8 @@ local function setup()
 		urlExists        = urlExists,
 		urlRaw           = partialEncodeUrl,
 		urlize           = urlize,
+
+		XXX_showWhitespace = showWhitespace,
 
 		chooseExistingFile = function(sitePathWithoutExt, exts)
 			local pathWithoutExt = sitePathToPath(sitePathWithoutExt, 2)

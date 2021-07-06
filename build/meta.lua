@@ -10,17 +10,22 @@
 --==============================================================
 
 	ARGS
+	ASSERT
+	BYTE
+	CONST, CONSTSET, STATIC
 	convertTextFileEncoding, addBomToUft16File
 	copyFile, copyFilesInDirectory, copyDirectoryRecursive
 	errorf
 	execute, executeRequired
 	F
 	getReleaseVersion
+	getStringBytes
 	indexOf
+	IS_CHAR
 	isFile, isDirectory
 	loadParams
 	makeDirectory, makeDirectoryRecursive, removeDirectory, removeDirectoryRecursive
-	NOSPACE
+	NOSPACE, NOSPACE0
 	PUSH_CONTEXT, POP_CONTEXT
 	readFile, writeFile, writeTextFile
 	Set
@@ -34,7 +39,8 @@
 
 --============================================================]]
 
-_G.F = string.format
+_G.BYTE = string.byte
+_G.F    = string.format
 
 
 
@@ -371,8 +377,14 @@ end
 
 
 
+-- Remove spaces.
 function _G.NOSPACE(s)
 	return (s:gsub(" +", ""))
+end
+
+-- Remove spaces and replace NULL bytes with new spaces afterwards.
+function _G.NOSPACE0(s)
+	return (s:gsub(" +", ""):gsub("%z", " "))
 end
 
 
@@ -401,7 +413,7 @@ do
 
 					__LUA(F(
 						"if %s then  errorf(%d, \"Bad argument #%d '%s'. (Expected %s, got %%s)\", type(%s))  end",
-						ifFormat:format(argName, typesCode),
+						F(ifFormat, argName, typesCode),
 						errLevel + 1,
 						n,
 						argName,
@@ -431,7 +443,7 @@ end
 
 
 function errorf(s, ...)
-	error(s:format(...), 2)
+	error(F(s, ...), 2)
 end
 
 
@@ -473,6 +485,99 @@ function _G.Set(values)
 		set[v] = true
 	end
 	return set
+end
+
+
+
+local function compare(v1, v2)
+	if type(v1) ~= type(v2) then  return false     end
+	if type(v1) ~= "table"  then  return v1 == v2  end
+
+	for k in pairs(v1) do
+		if not compare(v1[k], v2[k]) then  return false  end
+	end
+	for k in pairs(v2) do
+		if v1[k] == nil then  return false  end
+	end
+
+	return true
+end
+
+-- name = @@CONST{ ... }
+function _G.CONST(tCode)
+	local t = assert(loadstring("return "..tCode))()
+
+	for _, constName in ipairs(constants) do
+		if compare(constants[constName], t) then  return constName  end
+	end
+
+	local constName = "CONST" .. (#constants+1)
+	table.insert(constants, constName)
+	constants[constName] = t
+
+	return constName
+end
+
+-- name = @@CONSTSET{ value1, ... }
+function _G.CONSTSET(valuesCode)
+	return CONST("Set("..valuesCode..")")
+end
+
+-- name = @@STATIC( identifier )
+-- name = @@STATIC{ ... }
+function _G.STATIC(tCodeOrIdent)
+	local staticName, t
+
+	if tCodeOrIdent:find"^{" then
+		staticName = "STATIC" .. (#statics+1)
+		t          = assert(loadstring("return"..tCodeOrIdent))()
+	else
+		staticName = tCodeOrIdent
+		t          = {}
+	end
+
+	assert(not statics[staticName], staticName)
+
+	table.insert(statics, staticName)
+	statics[staticName] = t
+
+	return staticName
+end
+
+
+
+-- @@ASSERT( condition [, message=auto ] )
+function ASSERT(condCode, messageCode)
+	if not DEV then  return ""  end
+
+	messageCode = messageCode or F("%q", "Assertion failed: "..condCode)
+
+	return "if not ("..condCode..") then error("..messageCode..") end"
+end
+
+
+
+-- bool     = @@IS_CHAR( string, position, stringWithOneAsciiCharacter )
+-- true|nil = @@IS_CHAR( string, position, stringWithMultipleAsciiCharacters )
+function _G.IS_CHAR(sCode, posCode, cCode)
+	local c = assert(loadstring("return "..cCode))()
+	assert(type(c) == "string")
+	assert(#c > 0)
+
+	if posCode == "1" then  posCode = ""  end
+
+	if #c == 1 then
+		return F("((%s):byte(%s) == %d)", sCode, posCode, c:byte())
+	else
+		return F("%s[(%s):byte(%s)]", CONSTSET('{getStringBytes'..cCode..'}'), sCode, posCode)
+	end
+end
+
+
+
+-- byte1, ... = getStringBytes( string )
+function _G.getStringBytes(s)
+	return s:byte(1, #s)
 end
 
 

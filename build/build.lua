@@ -93,6 +93,9 @@ traverseDirectory("src", function(pathIn)
 			makeDirectoryRecursive(dir)
 		end
 
+		metaEnv.constants = {}
+		metaEnv.statics   = {}
+
 		pp.processFile{
 			pathIn   = pathIn,
 			pathOut  = pathOut,
@@ -101,6 +104,35 @@ traverseDirectory("src", function(pathIn)
 			debug           = false,
 			backtickStrings = true,
 			canOutputNil    = false,
+
+			onAfterMeta = function(lua)
+				local               header, _, rest = lua:match"^(#![^\n]*\n%-%-%[(=*)%[.-%]%2%]\n)(.*)"
+				if not header then  header, _, rest = lua:match          "^(%-%-%[(=*)%[.-%]%2%]\n)(.*)"
+				if not header then  header, _, rest = "", nil, lua
+				end end
+
+				local buffer = {}
+				table.insert(buffer, header)
+
+				for _, constName in ipairs(metaEnv.constants) do
+					table.insert(buffer, "local ")
+					table.insert(buffer, constName)
+					table.insert(buffer, " = ")
+					table.insert(buffer, pp.toLua(constants[constName]))
+					table.insert(buffer, "\n")
+				end
+				for _, staticName in ipairs(metaEnv.statics) do
+					table.insert(buffer, "local ")
+					table.insert(buffer, staticName)
+					table.insert(buffer, " = ")
+					table.insert(buffer, pp.toLua(statics[staticName]))
+					table.insert(buffer, "\n")
+				end
+
+				table.insert(buffer, rest)
+
+				return table.concat(buffer)
+			end,
 
 			onError = function(err)
 				os.exit(1)

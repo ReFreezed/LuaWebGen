@@ -23,7 +23,7 @@
 	xml.clone, xml.filter
 	xml.compare
 	xml.eachChild, xml.eachChildElement, xml.eachMatchingChildElement
-	xml.encodeRequiredEntities, xml.encodeMoreEntities
+	xml.encodeRequiredEntities, xml.encodeMoreEntities, xml.decodeEntities
 	xml.getAttributes, xml.setAttribute, xml.updateAttributes
 	xml.getChildByName, xml.findAllElementsByName
 	xml.getFirstElement
@@ -90,7 +90,9 @@ local HTML_END_TAG_PATTERNS_FOR_TAGS_WITH_UNENCODED_CONTENTS = {
 
 
 
-local xml   = {}
+local xml = {
+	htmlAllowNoAttributeValue = true, -- @Doc (Maybe this should be an argument for toHtml()?)
+}
 xml.__index = xml
 
 
@@ -133,9 +135,9 @@ local function insertNode(el, node)
 	end
 end
 
--- position = decodeEntities( string, position, stringForError, 0,                      pathForError, isHtml, element )
--- string   = decodeEntities( string, 1,        stringForError, positionOffsetForError, pathForError, isHtml, nil     )
-local function decodeEntities(s, pos, sForError, posOffsetForError, pathForError, isHtml, el)
+-- position = _decodeEntities( string, position, stringForError, 0,                      pathForError, isHtml, element, strict ) -- Decode one entity.
+-- string   = _decodeEntities( string, 1,        stringForError, positionOffsetForError, pathForError, isHtml, nil,     strict ) -- Decode all entities.
+local function _decodeEntities(s, pos, sForError, posOffsetForError, pathForError, isHtml, el, strict)
 	!(
 	local _INSERT = `
 		if el then  insertNode(el, ?)  else  table.insert(replacements, ?)  end
@@ -152,61 +154,88 @@ local function decodeEntities(s, pos, sForError, posOffsetForError, pathForError
 		if not i then  break  end
 		pos = i + 1
 
-		if isHtml and not s:find("^#?%w+;", pos) then
-			fileWarning(pathForError, sForError, posOffsetForError+pos-1, "Encountered unencoded '&'. Treating it as text.")
+		if (isHtml or not strict) and not s:find("^#?%w+;", pos) then
+			if strict then
+				fileWarning(pathForError, sForError, posOffsetForError+pos-1, "Encountered unencoded '&'. Treating it as text.")
+			end
 
 			@@INSERT("&")
 
 			if not el then
-				-- @Cleanup: Don't use the 'replacements' thingy so we don't have to do this hack.
+				-- @Cleanup @Speed: Don't use the 'replacements' thingy so we don't have to do this hack. :AmpersandReplacements
 				s                 = s:sub(1, pos-1) .. "amp;" .. s:sub(pos)
 				posOffsetForError = posOffsetForError - !(#"amp;")
 			end
 
 		else
+			local ok = true -- Only used if not strict.
+
 			-- Entity, hex number.
 			if s:find("^#[Xx]", pos) then
-				pos = pos + !(#"#x")
+				pos                = pos + !(#"#x")
+				local _, i2, cpStr = s:find(!("^(0*%x+)"), pos)
 
-				local i1, i2, cpStr = s:find(!("^(0*%x+)"), pos)
-				if not i1 then
+				if i2 then
+					pos      = i2 + 1
+					local cp = tonumber(cpStr, 16)
+					@@INSERT(utf8.codepointToString(cp))
+
+				elseif not strict then
+					ok  = false
+					pos = pos - !(#"#x")
+					@@INSERT("&")
+					s = s:sub(1, pos-1) .. "amp;" .. s:sub(pos) -- :AmpersandReplacements
+
+				else
 					fileError(pathForError, sForError, posOffsetForError+pos, "Invalid format for hexadecimal entity number.")
 				end
-				pos = i2 + 1
-
-				local cp = tonumber(cpStr, 16)
-				@@INSERT(utf8.codepointToString(cp))
 
 			-- Entity, decimal number.
 			elseif s:find("^#", pos) then
-				pos = pos + !(#"#")
+				pos                = pos + !(#"#")
+				local _, i2, cpStr = s:find(!("^(0*%d+)"), pos)
 
-				local i1, i2, cpStr = s:find(!("^(0*%d+)"), pos)
-				if not i1 then
+				if i2 then
+					pos      = i2 + 1
+					local cp = tonumber(cpStr, 10)
+					@@INSERT(utf8.codepointToString(cp))
+
+				elseif not strict then
+					ok  = false
+					pos = pos - !(#"#")
+					@@INSERT("&")
+					s = s:sub(1, pos-1) .. "amp;" .. s:sub(pos) -- :AmpersandReplacements
+
+				else
 					fileError(pathForError, sForError, posOffsetForError+pos, "Invalid format for decimal entity number.")
 				end
-				pos = i2 + 1
-
-				local cp = tonumber(cpStr, 10)
-				@@INSERT(utf8.codepointToString(cp))
 
 			-- Entity, name.
 			else
-				local i1, i2, entityName = s:find(!("^("..PATTERN_NAME_CHAR.."+)"), pos)
-				if not i1 then
-					fileError(pathForError, sForError, posOffsetForError+pos, "Invalid format for entity name.")
-				elseif not ENTITY_NAME_TO_UTF8[entityName] then
+				local _, i2, entityName = s:find(!("^("..PATTERN_NAME_CHAR.."+)"), pos)
+
+				if ENTITY_NAME_TO_UTF8[entityName] then
+					pos = i2 + 1
+					@@INSERT(ENTITY_NAME_TO_UTF8[entityName])
+
+				elseif not strict then
+					ok = false
+					@@INSERT("&")
+					s = s:sub(1, pos-1) .. "amp;" .. s:sub(pos) -- :AmpersandReplacements
+
+				elseif i2 then
 					fileError(pathForError, sForError, posOffsetForError+pos, "Unknown entity name '%s'.", entityName)
+				else
+					fileError(pathForError, sForError, posOffsetForError+pos, "Invalid format for entity name.")
 				end
-				pos = i2 + 1
-
-				@@INSERT(ENTITY_NAME_TO_UTF8[entityName])
 			end
 
-			if not s:find("^;", pos) then
-				fileError(pathForError, sForError, posOffsetForError+pos, "Expected ';' at the end of the entity.")
+			if ok then
+				if not s:find("^;", pos) then
+					fileError(pathForError, sForError, posOffsetForError+pos, "Expected ';' at the end of the entity.")
+				end
+				pos = pos + !(#";")
 			end
-			pos = pos + !(#";")
 		end
 
 		if el then  break  end
@@ -272,7 +301,7 @@ local function parseAttributes(s, pos, pathForError, isHtml, attrs)
 				end
 
 				local attrValue = s:sub(attrValuePos, pos-1)
-				attrs[attrName] = decodeEntities(attrValue, 1, s, attrValuePos-1, pathForError, isHtml, nil)
+				attrs[attrName] = _decodeEntities(attrValue, 1, s, attrValuePos-1, pathForError, isHtml, nil, true)
 				pos             = pos + !(#'"')
 
 			-- Unquoted value.
@@ -286,7 +315,7 @@ local function parseAttributes(s, pos, pathForError, isHtml, attrs)
 				pos = i2 + 1
 
 				local attrValue = s:sub(attrValuePos, pos-1)
-				attrs[attrName] = decodeEntities(attrValue, 1, s, attrValuePos-1, pathForError, isHtml, nil)
+				attrs[attrName] = _decodeEntities(attrValue, 1, s, attrValuePos-1, pathForError, isHtml, nil, true)
 
 			else
 				fileError(pathForError, s, pos, "Expected a quote for the value of attribute '%s'.", attrName)
@@ -498,7 +527,7 @@ local function parseElementContents(s, pos, pathForError, el, isHtml, isTop)
 		elseif s:find("^&", pos) then
 			if isTop then  fileError(pathForError, s, posOffsetForError+pos, "Invalid data outside root element.")  end
 
-			pos = decodeEntities(s, pos, s, 0, pathForError, isHtml, el)
+			pos = _decodeEntities(s, pos, s, 0, pathForError, isHtml, el, true)
 
 		-- Text.
 		else
@@ -1229,7 +1258,8 @@ local function nodeToHtml(buffer, node)
 		return
 	end
 
-	local tagName = el.tag -- (Don't call :lower() because that may make HTML_XML_ENTRY_TAGS[tagName] true and we end up in a weird situation. Only normalize when parsing!)
+	local tagName          = el.tag -- (Don't call :lower() because that may make HTML_XML_ENTRY_TAGS[tagName] true and we end up in a weird situation. Only normalize when parsing!)
+	local allowNoAttrValue = xml.htmlAllowNoAttributeValue
 
 	table.insert(buffer, "<")
 	table.insert(buffer, tagName)
@@ -1238,7 +1268,7 @@ local function nodeToHtml(buffer, node)
 		table.insert(buffer, " ")
 		table.insert(buffer, attrName)
 
-		if attrValue ~= "" then
+		if not (attrValue == "" and allowNoAttrValue) then
 			table.insert(buffer, '="')
 			table.insert(buffer, xml.encodeMoreEntities(attrValue))
 			table.insert(buffer, '"')
@@ -1666,6 +1696,16 @@ function xml.encodeMoreEntities(s)
 	end
 
 	return s
+end
+
+-- text = decodeEntities( htmlText [, strict=true ] ) -- @Doc
+-- Returns nil and a message on error.
+function xml.decodeEntities(s, strict)
+	-- Note: The pcall() is useless if 'strict' is false because we will never get an error.
+	local ok, textOrMessage = pcall(_decodeEntities, s, 1, stringForError, positionOffsetForError, pathForError, isHtml, nil, strict~=false)
+	if not ok then  return nil, textOrMessage  end
+
+	return textOrMessage
 end
 
 
