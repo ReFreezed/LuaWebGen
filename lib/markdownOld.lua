@@ -1141,7 +1141,9 @@ function strip_link_definitions(text)
 	local linkdb = {}
 
 	local function link_def(id, url, title)
-		id = id:match("%[(.+)%]"):lower()
+		id = id:match("%[(.+)%]")
+		if not id then  return  end
+		id = id:lower()
 		linkdb[id] = linkdb[id] or {}
 		linkdb[id].url = url or linkdb[id].url
 		linkdb[id].title = title or linkdb[id].title

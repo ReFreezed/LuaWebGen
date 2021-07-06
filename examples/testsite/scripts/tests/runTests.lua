@@ -26,11 +26,23 @@ return function()
 		return contents
 	end
 
+	local function formatBytes(n)
+		if     n >= 1024^4/10 then  return F("%.2f TiB", n/1024^4)
+		elseif n >= 1024^3/10 then  return F("%.2f GiB", n/1024^3)
+		elseif n >= 1024^2/10 then  return F("%.2f MiB", n/1024^2)
+		elseif n >= 1024^1/10 then  return F("%.2f KiB", n/1024^1)
+		else                        return F("%d bytes", n       )  end
+	end
+
+
+
 	--[[ XML module tests.
 	-- require"pl.xml"
 	timerStart("our") ; tests.xmlTests(xml)             ; timerEnd()
 	-- timerStart("pl")  ; tests.xmlTests(require"pl.xml") ; timerEnd()
 	--]]
+
+
 
 	--[==[ XML parsing.
 	local xmlStr = (
@@ -62,6 +74,8 @@ return function()
 	-- print(doc:tostring("","    ","  ", true))
 	-- print(doc:tostring())
 	--]==]
+
+
 
 	--[==[ HTML parsing.
 	local htmlStr = (
@@ -101,6 +115,8 @@ return function()
 	timerStart("html") ; local doc = assert(xml.parseHtml(htmlStr, "foo.html")) ; timerEnd()
 	print(doc:toHtml())
 	--]==]
+
+
 
 	-- [[ Markdown parsing.
 	do
@@ -193,7 +209,7 @@ return function()
 					:gsub("'", "&apos;")
 				)
 
-				if html ~= test.output then
+				if html ~= test.output and 1==1 then
 					print(((
 						"Error @ Test "..test.n..":\n"
 						-- .."================================\n"
@@ -216,6 +232,8 @@ return function()
 	end
 	--]]
 
+
+
 	--[[ Get image dimensions.
 	local path = "/images/sakura-trees.jpg"
 	local w, h = assert(XXX_getImageDimensionsFast(path, true))
@@ -230,8 +248,12 @@ return function()
 	-- print(require"socket.core".gettime()-time)
 	--]]
 
+
+
 	print()
 	print("TESTS COMPLETED!!!")
+	print("Memory: "..formatBytes(collectgarbage"count"*1024))
 	print()
+
 	os.exit(2)
 end
