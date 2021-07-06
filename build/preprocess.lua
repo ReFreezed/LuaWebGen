@@ -118,7 +118,7 @@
 
 
 
-local PP_VERSION = "1.13.1"
+local PP_VERSION = "1.13.2"
 
 local MAX_DUPLICATE_FILE_INSERTS = 1000 -- @Incomplete: Make this a parameter for processFile()/processString().
 
@@ -282,7 +282,7 @@ function printErrorTraceback(message, level)
 			tableInsertFormat(buffer, "%d:", info.currentline)
 		end
 
-		if info.name then
+		if (info.name or "") ~= "" then
 			tableInsertFormat(buffer, " in '%s'", info.name)
 		elseif info.what == "main" then
 			tableInsert(buffer, " in main chunk")
@@ -981,10 +981,8 @@ function serialize(buffer, v)
 				elseif c == quote                    then  tableInsert(buffer, [[\]]) ; tableInsert(buffer, quote) ; pos = pos+1
 
 				-- UTF-8 character.
-				elseif len == 1 and not shouldCodepointBeEscaped(cp) then  tableInsert(buffer, v:sub(pos, pos  )) ; pos = pos+1 -- @Speed: We can insert multiple single-byte characters sometimes!
-				elseif len == 2 and not shouldCodepointBeEscaped(cp) then  tableInsert(buffer, v:sub(pos, pos+1)) ; pos = pos+2
-				elseif len == 3 and not shouldCodepointBeEscaped(cp) then  tableInsert(buffer, v:sub(pos, pos+2)) ; pos = pos+3
-				elseif len == 4 and not shouldCodepointBeEscaped(cp) then  tableInsert(buffer, v:sub(pos, pos+3)) ; pos = pos+4
+				elseif len == 1 and not shouldCodepointBeEscaped(cp) then  tableInsert(buffer, v:sub(pos, pos      )) ; pos = pos+1 -- @Speed: We can insert multiple single-byte characters sometimes!
+				elseif len      and not shouldCodepointBeEscaped(cp) then  tableInsert(buffer, v:sub(pos, pos+len-1)) ; pos = pos+len
 
 				-- Anything else.
 				else
@@ -998,7 +996,7 @@ function serialize(buffer, v)
 			-- Minimize \nnn sequences that aren't followed by digits.
 			for _, i in ipairs(toMinimize) do
 				if not (buffer[i+1] and buffer[i+1]:find"^%d") then
-					buffer[i] = buffer[i]:gsub("0+(%d+)", "%1")
+					buffer[i] = buffer[i]:gsub("0+(%d)", "%1")
 				end
 			end
 

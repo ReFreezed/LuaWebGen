@@ -195,7 +195,7 @@ return function()
 
 		for _, test in ipairs(tests) do
 			if not (false
-				or is(test,175,363,548) -- @Incomplete: Full Unicode support. (Hah...)
+				or is(test,363) -- @Incomplete: Complete Unicode support.
 
 				-- or test.n < 118 -- Jump to HTML block parsing tests.
 				-- or test.n < 307 -- Jump to inline parsing tests.

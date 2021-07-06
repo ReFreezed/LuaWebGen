@@ -10,6 +10,8 @@
 --=
 --==============================================================
 
+	CHARACTER_PATTERN
+
 	codepointToString
 	getCharacterLength, getCodepointAndLength
 	getLength
@@ -17,11 +19,13 @@
 
 --============================================================]]
 
-local utf8 = {}
+local utf8 = {
+	CHARACTER_PATTERN = "[%z\1-\127\194-\244][\128-\191]*", -- @Doc
+}
 
-local byteToString = string.char
-local getByte      = string.byte
-local tableInsert  = table.insert
+local stringByte  = string.byte
+local stringChar  = string.char
+local tableInsert = table.insert
 
 
 
@@ -35,10 +39,10 @@ function utf8.codepointToString(cp, buffer)
 	if cp >= 128 then
 		-- void
 	elseif buffer then
-		tableInsert(buffer, byteToString(cp))
+		tableInsert(buffer, stringChar(cp))
 		return
 	else
-		return byteToString(cp)
+		return stringChar(cp)
 	end
 
 	local suffix = cp % 64
@@ -48,11 +52,11 @@ function utf8.codepointToString(cp, buffer)
 	if cp >= 32 then
 		-- void
 	elseif buffer then
-		tableInsert(buffer, byteToString(192+cp))
-		tableInsert(buffer, byteToString(c4))
+		tableInsert(buffer, stringChar(192+cp))
+		tableInsert(buffer, stringChar(c4))
 		return
 	else
-		return byteToString(192+cp, c4) -- @Speed @Memory
+		return stringChar(192+cp, c4) -- @Speed @Memory
 	end
 
 	suffix   = cp % 64
@@ -62,25 +66,25 @@ function utf8.codepointToString(cp, buffer)
 	if cp >= 16 then
 		-- void
 	elseif buffer then
-		tableInsert(buffer, byteToString(224+cp))
-		tableInsert(buffer, byteToString(c3))
-		tableInsert(buffer, byteToString(c4))
+		tableInsert(buffer, stringChar(224+cp))
+		tableInsert(buffer, stringChar(c3))
+		tableInsert(buffer, stringChar(c4))
 		return
 	else
-		return byteToString(224+cp, c3, c4) -- @Speed @Memory
+		return stringChar(224+cp, c3, c4) -- @Speed @Memory
 	end
 
 	suffix = cp % 64
 	cp     = (cp - suffix) / 64
 
 	if buffer then
-		tableInsert(buffer, byteToString(240+cp))
-		tableInsert(buffer, byteToString(128+suffix))
-		tableInsert(buffer, byteToString(c3))
-		tableInsert(buffer, byteToString(c4))
+		tableInsert(buffer, stringChar(240+cp))
+		tableInsert(buffer, stringChar(128+suffix))
+		tableInsert(buffer, stringChar(c3))
+		tableInsert(buffer, stringChar(c4))
 		return
 	else
-		return byteToString(240+cp, 128+suffix, c3, c4) -- @Speed @Memory
+		return stringChar(240+cp, 128+suffix, c3, c4) -- @Speed @Memory
 	end
 end
 
@@ -90,7 +94,7 @@ end
 -- Returns nil if the string is invalid at the position.
 function utf8.getCharacterLength(s, pos)
 	pos                  = pos or 1
-	local b1, b2, b3, b4 = getByte(s, pos, pos+3)
+	local b1, b2, b3, b4 = stringByte(s, pos, pos+3)
 
 	if b1 <= 127 then
 		return 1
@@ -129,10 +133,10 @@ function utf8.getCodepointAndLength(s, pos)
 	if not len then  return nil  end
 
 	-- 2^6=64, 2^12=4096, 2^18=262144
-	if len == 1 then                                                  return                                          getByte(s, pos), len  end
-	if len == 2 then  local b1, b2         = getByte(s, pos, pos+1) ; return                                   (b1-192)*64 + (b2-128), len  end
-	if len == 3 then  local b1, b2, b3     = getByte(s, pos, pos+2) ; return                   (b1-224)*4096 + (b2-128)*64 + (b3-128), len  end
-	do                local b1, b2, b3, b4 = getByte(s, pos, pos+3) ; return (b1-240)*262144 + (b2-128)*4096 + (b3-128)*64 + (b4-128), len  end
+	if len == 1 then                                                     return                                       stringByte(s, pos), len  end
+	if len == 2 then  local b1, b2         = stringByte(s, pos, pos+1) ; return                                   (b1-192)*64 + (b2-128), len  end
+	if len == 3 then  local b1, b2, b3     = stringByte(s, pos, pos+2) ; return                   (b1-224)*4096 + (b2-128)*64 + (b3-128), len  end
+	do                local b1, b2, b3, b4 = stringByte(s, pos, pos+3) ; return (b1-240)*262144 + (b2-128)*4096 + (b3-128)*64 + (b4-128), len  end
 end
 
 
@@ -160,7 +164,7 @@ end
 -- Returns nil if the string is invalid at the position.
 function utf8.getStartOfCharacter(s, pos)
 	for pos = pos, math.max(pos-3, 1), -1 do
-		local b = getByte(s, pos)
+		local b = stringByte(s, pos)
 
 		if b <= 127 or (b >= 194 and b <= 244) then
 			-- @Robustness: Verify that the following bytes are valid.

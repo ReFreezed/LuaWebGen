@@ -1,0 +1,81 @@
+--[[============================================================
+--=
+--=  Unicode data
+--=
+--=-------------------------------------------------------------
+--=
+--=  LuaWebGen - static website generator in Lua!
+--=  - Written by Marcus 'ReFreezed' Thunström
+--=  - MIT License (See LICENSE.txt)
+--=
+--============================================================]]
+
+!(
+-- Gather info about codepoints in general categories Zs and P for use in Markdown.
+----------------------------------------------------------------
+
+local gcCodepointSet = {}
+
+for line in io.lines"build/unicode/UnicodeData.txt" do
+	--[[
+		Fields:
+		 1.  Codepoint
+		 2.  Name
+		 3.  General_Category
+		 4.  Canonical_Combining_Class
+		 5.  Bidi_Class
+		 6.  Decomposition_Type
+		 7.  Decomposition_Mapping
+		 8.  Numeric_Type
+		 9.  Numeric_Value
+		 10. Bidi_Mirrored
+		 11. Unicode_1_Name (Obsolete as of 6.2.0)
+		 12. ISO_Comment (Obsolete as of 5.2.0; Deprecated and Stabilized as of 6.0.0)
+		 13. Simple_Uppercase_Mapping
+		 14. Simple_Lowercase_Mapping
+		 15. Simple_Titlecase_Mapping
+	]]
+	local cp, gc = line:match"^(%x+);[^;]*;([^;]*)"
+	gc           = (gc == "Zs" and gc) or (gc:match"P")
+
+	if gc then
+		cp = tonumber(cp, 16)
+
+		gcCodepointSet[gc]     = gcCodepointSet[gc] or {}
+		gcCodepointSet[gc][cp] = 1
+	end
+end
+-- print(toLua(gcCodepointSet))
+
+-- Gather info about case folding for use in Markdown.
+----------------------------------------------------------------
+
+local utf8        = require"src.utf8"
+local cpToString  = utf8.codepointToString
+local caseFolding = {}
+
+for line in io.lines"build/unicode/CaseFolding.txt" do
+	local cpFromStr, status, cpsToStr = line:match"^(%x+); ([CFST]); ([%x ]+)"
+
+	if status == "C" or status == "F" then
+		local cpFrom  = tonumber(cpFromStr, 16)
+		local charsTo = {}
+
+		for cpToStr in cpsToStr:gmatch"%x+" do
+			table.insert(charsTo, cpToString(tonumber(cpToStr, 16)))
+		end
+
+		caseFolding[cpFrom] = table.concat(charsTo)
+	end
+end
+-- print(toLua(caseFolding))
+
+----------------------------------------------------------------
+
+-- os.exit(2) -- DEBUG
+)
+
+return {
+	generalCategoryCodepointSet = !(gcCodepointSet), -- { P|Zs={[cp]=1,...}, ... }
+	caseFolding                 = !(caseFolding   ), -- { [fromCp]=toString, ... }
+}

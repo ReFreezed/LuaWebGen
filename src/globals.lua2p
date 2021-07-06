@@ -50,6 +50,7 @@ _G.jsonLib        = require"json"
 _G.markdownLib    = require"markdown"
 _G.markdownOldLib = require"markdownOld" -- @Deprecated
 _G.tomlLib        = require"toml"
+_G.unicode        = require"unicode"
 _G.urlLib         = require"url"
 _G.utf8           = require"utf8"
 _G.xmlLib         = require"xml"

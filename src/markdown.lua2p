@@ -17,7 +17,7 @@
 local markdown = {}
 
 !(
-local PATTERN_CHAR                        = "[%z\1-\127\194-\244][\128-\191]*"
+local PATTERN_CHAR                        = require"src.utf8".CHARACTER_PATTERN
 local PATTERN_LINE                        = "[^\n]*"
 local PATTERN_BLANK_LINE                  = "^[ \t]*$"
 local PATTERN_WHITESPACE_CHAR             = "[ \t\n\v\f]" -- Excluding \r.
@@ -235,7 +235,14 @@ end
 local function normalizeLinkLabel(label)
 	label = trimWhitespace(label)
 	label = label:gsub(!(PATTERN_WHITESPACE_SEQUENCE), " ")
-	label = label:lower() -- @Incomplete: Perform Unicode case fold instead of this (and possibly before trimming whitespace).
+
+	local getCodepoint = utf8.getCodepointAndLength
+	local caseFolding  = unicode.caseFolding
+
+	label = label:gsub(!(PATTERN_CHAR), function(c)
+		return caseFolding[getCodepoint(c)] -- May be nil.
+	end)
+
 	return label
 end
 
