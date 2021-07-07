@@ -14,7 +14,9 @@
 
 --============================================================]]
 
-local markdown = {}
+local markdown = {
+	addIdsToHeadings = true, -- @Incomplete: API.  @Doc
+}
 
 !(
 local WHITESPACE_CHARS = " \t\n\v\f" -- Excluding \r.
@@ -2319,7 +2321,7 @@ function markdown.parse(s)
 		parseInline(inlineContainer, contents, linkReferenceDefinitions)
 	end
 
-	-- Fix tight lists and store HTML block contents.
+	-- Fix tight lists, add IDs to headings and store HTML block contents.
 	local htmlBlocks     = {--[[ ["id1"]=html, ... ]]}
 	local htmlBlockCount = 0
 
@@ -2340,6 +2342,15 @@ function markdown.parse(s)
 							end
 						end
 					end
+				end
+			end
+
+		elseif @@CONSTSET{"h1","h2","h3","h4","h5","h6"}[tagName] then
+			if markdown.addIdsToHeadings then
+				local id = urlize(el:getHtmlText())
+
+				if not (id == "" or id == "-") then
+					el.attr.id = id
 				end
 			end
 
