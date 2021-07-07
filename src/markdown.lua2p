@@ -17,16 +17,15 @@
 local markdown = {}
 
 !(
-local PATTERN_CHAR                        = require"src.utf8".CHARACTER_PATTERN
-local PATTERN_LINE                        = "[^\n]*"
-local PATTERN_BLANK_LINE                  = "^[ \t]*$"
-local PATTERN_WHITESPACE_CHAR             = "[ \t\n\v\f]" -- Excluding \r.
-local PATTERN_WHITESPACE_SEQUENCE         = PATTERN_WHITESPACE_CHAR.."+"
-local PATTERN_UNICODE_WHITESPACE_CHAR     = PATTERN_WHITESPACE_CHAR -- @Incomplete: Include Unicode general category Zs.
-local PATTERN_NON_WHITESPACE_CHAR         = "[^ \t\n\v\f]"
-local PATTERN_NON_UNICODE_WHITESPACE_CHAR = "[^ \t\n\v\f]" -- @Incomplete: Include Unicode general category Zs.
-local PATTERN_ASCII_PUNCTUATION_CHAR      = "[\33-\47\58-\64\91-\96\123-\126]"
-local PATTERN_PUNCTUATION_CHAR            = PATTERN_ASCII_PUNCTUATION_CHAR -- @Incomplete: Include Unicode general category P (Pc+Pd+Pe+Pf+Pi+Po+Ps).
+local WHITESPACE_CHARS = " \t\n\v\f" -- Excluding \r.
+
+local PATTERN_CHAR                   = require"src.utf8".CHARACTER_PATTERN
+local PATTERN_LINE                   = "[^\n]*"
+local PATTERN_BLANK_LINE             = "^[ \t]*$"
+local PATTERN_WHITESPACE_CHAR        = "["..WHITESPACE_CHARS.."]"
+local PATTERN_WHITESPACE_SEQUENCE    = PATTERN_WHITESPACE_CHAR.."+"
+local PATTERN_NON_WHITESPACE_CHAR    = "[^"..WHITESPACE_CHARS.."]"
+local PATTERN_ASCII_PUNCTUATION_CHAR = "[\33-\47\58-\64\91-\96\123-\126]" -- !"#$%&'()*+,-./ :;<=>?@ [\]^_` {|}~
 
 local REPLACEMENT_CHARACTER = "\239\191\189" -- U+FFFD
 
@@ -197,7 +196,7 @@ local function isHtmlBlockStartByRule7(line, col, pos)
 			pos = (
 				line:match(!("^"..PATTERN_WHITESPACE_CHAR.."*="..PATTERN_WHITESPACE_CHAR..'*"[^"]*"()'), pos) or
 				line:match(!("^"..PATTERN_WHITESPACE_CHAR.."*="..PATTERN_WHITESPACE_CHAR.."*'[^']*'()"), pos) or
-				line:match(!("^"..PATTERN_WHITESPACE_CHAR.."*="..PATTERN_WHITESPACE_CHAR.."*[^ \t\n\v\f\"'=<>`]+()"), pos) or
+				line:match(!("^"..PATTERN_WHITESPACE_CHAR.."*="..PATTERN_WHITESPACE_CHAR.."*[^"..WHITESPACE_CHARS.."\"'=<>`]+()"), pos) or
 				pos
 			)
 		end
@@ -239,8 +238,8 @@ local function normalizeLinkLabel(label)
 	local getCodepoint = utf8.getCodepointAndLength
 	local caseFolding  = unicode.caseFolding
 
-	label = label:gsub(!(PATTERN_CHAR), function(c)
-		return caseFolding[getCodepoint(c)] -- May be nil.
+	label = label:gsub(!("()"..PATTERN_CHAR), function(pos)
+		return caseFolding[getCodepoint(label, pos)] -- May be nil.
 	end)
 
 	return label
@@ -612,7 +611,7 @@ local function getEndOfHtmlTag(s, pos)
 			pos = (
 				s:match(!("^"..PATTERN_WHITESPACE_CHAR.."*="..PATTERN_WHITESPACE_CHAR..'*"[^"]*"()'), pos) or
 				s:match(!("^"..PATTERN_WHITESPACE_CHAR.."*="..PATTERN_WHITESPACE_CHAR.."*'[^']*'()"), pos) or
-				s:match(!("^"..PATTERN_WHITESPACE_CHAR.."*="..PATTERN_WHITESPACE_CHAR.."*[^ \t\n\v\f\"'=<>`]+()"), pos) or
+				s:match(!("^"..PATTERN_WHITESPACE_CHAR.."*="..PATTERN_WHITESPACE_CHAR.."*[^"..WHITESPACE_CHARS.."\"'=<>`]+()"), pos) or
 				pos
 			)
 		end
@@ -829,7 +828,7 @@ local function parseExtendedEmailAutolink(s, pos)
 	local uri, text, posNext = parseEmailAutolinkContent(s, pos)
 	if not uri then  return nil  end
 
-	if s:find("^[^ \t\n\v\f.]", posNext) then  return nil  end
+	if s:find(!("^[^"..WHITESPACE_CHARS..".]"), posNext) then  return nil  end
 
 	return uri, text, posNext
 end
@@ -1265,7 +1264,7 @@ local function parseInline(parentEl, s, linkReferenceDefinitions)
 
 		-- Autolink. ['autolink' extension]
 		if b >= !(BYTE"a") and b <= !(BYTE"z") then
-			if pos == 1 or @@IS_CHAR(s, pos-1, " \t\n\v\f*_~(") then
+			if pos == 1 or @@IS_CHAR(s, pos-1, " \t\n\v\f*_~(") then -- WHITESPACE_CHARS
 				local            uri, text, posNext = parseExtendedWwwAutolink  (s, pos)
 				if not uri then  uri, text, posNext = parseExtendedUrlAutolink  (s, pos)  end
 				if not uri then  uri, text, posNext = parseExtendedEmailAutolink(s, pos)  end
@@ -1341,13 +1340,16 @@ local function parseInline(parentEl, s, linkReferenceDefinitions)
 				end
 
 				local runType = s:sub(pos, pos)
-				local posPrev = pos - 1 --utf8.getStartOfCharacter(s, pos-1)
+				local posPrev = (pos >= 2) and utf8.getStartOfCharacter(s, pos-1) or 0
 				local posNext = pos + #delimRunChars
 
-				local precededByText  = s:find(!("^"..PATTERN_NON_UNICODE_WHITESPACE_CHAR), posPrev) ~= nil
-				local followedByText  = s:find(!("^"..PATTERN_NON_UNICODE_WHITESPACE_CHAR), posNext) ~= nil
-				local precededByPunct = s:find(!("^"..PATTERN_PUNCTUATION_CHAR), posPrev) ~= nil
-				local followedByPunct = s:find(!("^"..PATTERN_PUNCTUATION_CHAR), posNext) ~= nil
+				local cpPrev = (posPrev >= 1 ) and utf8.getCodepointAndLength(s, posPrev) or 0
+				local cpNext = (posNext <= #s) and utf8.getCodepointAndLength(s, posNext) or 0
+
+				local precededByText  = (cpPrev > 0) and not (unicode.generalCategoryCodepointSet.Zs[cpPrev] or @@CONSTSET{ getStringBytes"\t\n\f" }[cpPrev])
+				local followedByText  = (cpNext > 0) and not (unicode.generalCategoryCodepointSet.Zs[cpNext] or @@CONSTSET{ getStringBytes"\t\n\f" }[cpNext])
+				local precededByPunct = unicode.generalCategoryCodepointSet.P[cpPrev] ~= nil
+				local followedByPunct = unicode.generalCategoryCodepointSet.P[cpNext] ~= nil
 
 				local tok = {
 					position1 = pos,
@@ -2072,9 +2074,9 @@ function markdown.parse(s)
 
 			-- [Leaf] HTML block.
 			elseif -- §1
-				getBlockStart(line, "^<[Ss][Cc][Rr][Ii][Pp][Tt]", col, pos) and not getBlockStart(line, !("^<......".."[^ \t\n\v\f>]"), col, pos) or
-				getBlockStart(line, "^<[Ss][Tt][Yy][Ll][Ee]",     col, pos) and not getBlockStart(line, !("^<....." .."[^ \t\n\v\f>]"), col, pos) or
-				getBlockStart(line, "^<[Pp][Rr][Ee]",             col, pos) and not getBlockStart(line, !("^<..."   .."[^ \t\n\v\f>]"), col, pos)
+				getBlockStart(line, "^<[Ss][Cc][Rr][Ii][Pp][Tt]", col, pos) and not getBlockStart(line, !("^<......".."[^"..WHITESPACE_CHARS..">]"), col, pos) or
+				getBlockStart(line, "^<[Ss][Tt][Yy][Ll][Ee]",     col, pos) and not getBlockStart(line, !("^<....." .."[^"..WHITESPACE_CHARS..">]"), col, pos) or
+				getBlockStart(line, "^<[Pp][Rr][Ee]",             col, pos) and not getBlockStart(line, !("^<..."   .."[^"..WHITESPACE_CHARS..">]"), col, pos)
 			then
 				!local HTML_ELEMENT_PRE = PRINT`"html"`..`
 					local htmlEl = xmlLib.element("\0", line:sub(pos)) -- Note: The name of HTML blocks is NULL so we don't collide with user data.

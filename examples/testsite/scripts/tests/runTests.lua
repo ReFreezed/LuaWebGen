@@ -194,14 +194,12 @@ return function()
 		timerStart("markdown")
 
 		for _, test in ipairs(tests) do
-			if not (false
-				or is(test,363) -- @Incomplete: Complete Unicode support.
-
-				-- or test.n < 118 -- Jump to HTML block parsing tests.
-				-- or test.n < 307 -- Jump to inline parsing tests.
-				-- or test.n < 360 -- Jump to emphasis parsing tests.
-				-- or test.n < 493 -- Jump to link parsing tests.
-			) then
+			if true
+				-- and test.n >= 118 -- Jump to HTML block parsing tests.
+				-- and test.n >= 307 -- Jump to inline parsing tests.
+				-- and test.n >= 360 -- Jump to emphasis parsing tests.
+				-- and test.n >= 493 -- Jump to link parsing tests.
+			then
 				-- print("Test#"..test.n)
 
 				local html = (markdown(test.input)
