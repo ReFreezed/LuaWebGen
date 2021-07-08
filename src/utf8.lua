@@ -20,7 +20,7 @@
 --============================================================]]
 
 local utf8 = {
-	CHARACTER_PATTERN = "[%z\1-\127\194-\244][\128-\191]*", -- @Doc
+	CHARACTER_PATTERN = "[%z\1-\127\194-\244][\128-\191]*",
 }
 
 local stringByte  = string.byte

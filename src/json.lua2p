@@ -253,6 +253,7 @@ local function parseValue(s, path, pos)
 end
 
 -- value = json.parse( jsonString [, filePathForErrors ] )
+-- value = json      ( jsonString [, filePathForErrors ] )
 -- Returns nil and a message on error.
 function json.parse(s, path)
 	path      = path or "<json>"
@@ -274,4 +275,8 @@ end
 
 
 
-return json
+return setmetatable(json, {
+	__call = function(_, ...)
+		return json.parse(...)
+	end,
+})

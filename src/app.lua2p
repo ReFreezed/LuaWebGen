@@ -446,9 +446,16 @@ local function setup()
 		utf8 = utf8,
 		xml  = xmlLib,
 
-		toml = { -- @Cleanup: Don't use 3rd party TOML library.
-			parse = dataParsers.toml,
-		},
+		toml = setmetatable( -- @Cleanup: Don't use 3rd party TOML library.
+			{
+				parse = dataParsers.toml,
+			},
+			{
+				__call = function(_, ...)
+					return dataParsers.toml(...)
+				end,
+			}
+		),
 
 		-- Site objects. (Create at site generation.)
 		site = nil,
@@ -479,7 +486,7 @@ local function setup()
 		ipairsr          = ipairsr,
 		isAny            = isAny,
 		isValueHtml      = doesValueLookLikeHtml,
-		markdown         = markdownToHtml, !!(DEV and `markdownRunInternalTests=markdownLib.runInternalTests,` or ``)
+		markdown         = markdownLib,
 		markdownOld      = markdownOldLib, -- @Renamed @Deprecated
 		max              = math.max,
 		min              = math.min,

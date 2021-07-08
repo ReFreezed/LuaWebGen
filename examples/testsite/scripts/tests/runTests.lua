@@ -129,7 +129,9 @@ return function()
 			[620] = '<p><a href="mailto:foo@bar.example.com">foo@bar.example.com</a></p>\n', -- foo@bar.example.com  ->  <p>foo@bar.example.com</p>
 		}
 
-		xml.htmlAllowNoAttributeValue = false
+		markdown.addIdsToHeadings      = false
+		xml.htmlAllowNoAttributeValue  = false
+		xml.htmlScrambleEmailAddresses = false
 
 		local docHtml = assert(readTextFile"../../local/gfm-spec.html")
 		local doc     = assert(xml.parseHtml(docHtml))
@@ -190,7 +192,7 @@ return function()
 			return false
 		end
 
-		-- markdownRunInternalTests()
+		-- markdown.runInternalTests()
 		timerStart("markdown")
 
 		for _, test in ipairs(tests) do
@@ -202,7 +204,7 @@ return function()
 			then
 				-- print("Test#"..test.n)
 
-				local html = (markdown(test.input)
+				local html = (markdown.parse(test.input)
 					-- This is just so we pass tests we really should have passed. Sigh...
 					:gsub("'", "&apos;")
 				)

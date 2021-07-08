@@ -15,7 +15,7 @@
 --============================================================]]
 
 local markdown = {
-	addIdsToHeadings = true, -- @Incomplete: API.  @Doc
+	addIdsToHeadings = true,
 }
 
 !(
@@ -1688,6 +1688,7 @@ end
 
 
 -- html = markdown.parse( markdownString )
+-- html = markdown      ( markdownString )
 function markdown.parse(s)
 	@@PRINT"==================="
 	@@PRINT(showWhitespace(s))
@@ -2637,4 +2638,8 @@ end
 
 
 
-return markdown
+return setmetatable(markdown, {
+	__call = function(_, ...)
+		return markdown.parse(...)
+	end,
+})

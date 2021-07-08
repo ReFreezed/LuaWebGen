@@ -91,8 +91,8 @@ local HTML_END_TAG_PATTERNS_FOR_TAGS_WITH_UNENCODED_CONTENTS = {
 
 
 local xml = {
-	htmlAllowNoAttributeValue  = true, -- @Doc (Maybe this should be an argument for toHtml()?)
-	htmlScrambleEmailAddresses = true, -- @Doc (Maybe this should be an argument for toHtml()?)
+	htmlAllowNoAttributeValue  = true, -- @Cleanup: Maybe this should actually be an argument for toHtml()?
+	htmlScrambleEmailAddresses = true, -- @Cleanup: Maybe this should actually be an argument for toHtml()?
 }
 xml.__index = xml
 
@@ -528,7 +528,7 @@ local function parseElementContents(s, pos, pathForError, el, isHtml, isTop)
 		elseif s:find("^&", pos) then
 			if isTop then  fileError(pathForError, s, posOffsetForError+pos, "Invalid data outside root element.")  end
 
-			pos = _decodeEntities(s, pos, s, 0, pathForError, isHtml, el, true)
+			pos = _decodeEntities(s, pos,s, 0,pathForError, isHtml, el, true)
 
 		-- Text.
 		else
@@ -1304,6 +1304,7 @@ local function nodeToHtml(buffer, node, encodeTextAsEmail)
 
 	local tagName          = el.tag -- (Don't call :lower() because that may make HTML_XML_ENTRY_TAGS[tagName] true and we end up in a weird situation. Only normalize when parsing!)
 	local allowNoAttrValue = xml.htmlAllowNoAttributeValue
+	local scrambleEmails   = xml.htmlScrambleEmailAddresses
 
 	table.insert(buffer, "<")
 	table.insert(buffer, tagName)
@@ -1314,9 +1315,9 @@ local function nodeToHtml(buffer, node, encodeTextAsEmail)
 
 		if not (attrValue == "" and allowNoAttrValue) then
 			table.insert(buffer, '="')
-			if attrName == "href" and el.tag == "a" and attrValue:find"^[Mm][Aa][Ii][Ll][Tt][Oo]:" then
+			if attrName == "href" and el.tag == "a" and scrambleEmails and attrValue:find"^[Mm][Aa][Ii][Ll][Tt][Oo]:" then
 				encodeEmailValue(buffer, attrValue)
-				encodeTextAsEmail = xml.htmlScrambleEmailAddresses
+				encodeTextAsEmail = true
 			else
 				table.insert(buffer, xml.encodeMoreEntities(attrValue))
 			end
@@ -1747,11 +1748,11 @@ function xml.encodeMoreEntities(s)
 	return s
 end
 
--- text = decodeEntities( htmlText [, strict=true ] ) -- @Doc
+-- text = decodeEntities( htmlText [, strict=true ] )
 -- Returns nil and a message on error.
 function xml.decodeEntities(s, strict)
 	-- Note: The pcall() is useless if 'strict' is false because we will never get an error.
-	local ok, textOrMessage = pcall(_decodeEntities, s, 1, stringForError, positionOffsetForError, pathForError, isHtml, nil, strict~=false)
+	local ok, textOrMessage = pcall(_decodeEntities, s,1, s,0, "<html>", true, nil, strict~=false)
 	if not ok then  return nil, textOrMessage  end
 
 	return textOrMessage
