@@ -117,31 +117,32 @@ A blog post, my-first-post.md:
     Lorem ipsum dolor sit amet, consectetur adipiscing elit.
     Duis nec justo mollis, varius nulla sed, commodo nibh.
 
-    Foot is {{foot}}<br>
-    1 + 2 * 3 = {{1+2*3}}<br>
-    Current year is {{os.date"%Y"}}
+    Foot is {{ foot }}<br>
+    1 + 2 * 3 = {{ 1+2*3 }}<br>
+    Current year is {{ os.date"%Y" }}
 
     ## List of Cats
 
-    {{for i, cat in ipairs(data.myCats)}}
-    - Cat {{i}} is named {{cat.name}}.
-    {{end}}
+    {{ for i, cat in ipairs(data.myCats) }}
+    - Cat {{ i }} is named {{ cat.name }}.
+    {{ end }}
 
     ![Cute cat]({{ getCatImageUrl() }})
 
 Page layout template, page.html:
 
-    {{include"header"}}
-    {{include"navigation"}}
+    {{ include"header" }}
+    {{ include"navigation" }}
 
     <main>
-        <h1 id="{{urlize(page.title)}}">{{page.title}}</h1>
-        {{page.content}}
+        <h1 id="{{ urlize(page.title) }}">{{ page.title }}</h1>
+        {{ page.content }}
     </main>
 
-    {{include"footer"}}
+    {{ include"footer" }}
 
-See more examples in the [repository](https://github.com/ReFreezed/LuaWebGen/tree/master/examples).
+See more examples in the repository:
+https://github.com/ReFreezed/LuaWebGen/tree/master/examples
 
 
 

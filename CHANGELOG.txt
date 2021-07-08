@@ -1,6 +1,13 @@
 Changelog
 LuaWebGen
 
+v1.5 (2021-07-08)
+- Added new Markdown parser (for GitHub Flavored Markdown). Markdown can now contain tables and some other new things.
+- Added data parser for plain text files (*.txt). (The string contents are just returned as-is.)
+- Added functions: xml.decodeEntities()
+- Added settings: xml.htmlAllowNoAttributeValue, xml.htmlScrambleEmailAddresses
+- 'toml' and 'json' are now aliases for their .parse() functions.
+
 v1.4 (2021-06-01)
 - Added syntax for heredoc strings.
 - Added functions: percent(), urlRaw().
