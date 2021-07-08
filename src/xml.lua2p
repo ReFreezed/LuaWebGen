@@ -91,7 +91,8 @@ local HTML_END_TAG_PATTERNS_FOR_TAGS_WITH_UNENCODED_CONTENTS = {
 
 
 local xml = {
-	htmlAllowNoAttributeValue = true, -- @Doc (Maybe this should be an argument for toHtml()?)
+	htmlAllowNoAttributeValue  = true, -- @Doc (Maybe this should be an argument for toHtml()?)
+	htmlScrambleEmailAddresses = true, -- @Doc (Maybe this should be an argument for toHtml()?)
 }
 xml.__index = xml
 
@@ -128,7 +129,7 @@ end
 local function insertNode(el, node)
 	if node == "" then
 		-- void
-	elseif !!(IS_TEXT`node`) and !!(IS_TEXT`el[#el]`) then
+	elseif @@IS_TEXT(node) and @@IS_TEXT(el[#el]) then
 		el[#el] = el[#el] .. node -- @Speed
 	else
 		table.insert(el, node)
@@ -697,7 +698,7 @@ xml.set_attribs = xml.updateAttributes -- :PenlightCompatibility
 do
 	local function _getText(buffer, el)
 		for _, childNode in ipairs(el) do
-			if !!(IS_TEXT`childNode`) then
+			if @@IS_TEXT(childNode) then
 				table.insert(buffer, childNode)
 			else
 				_getText(buffer, childNode)
@@ -716,7 +717,7 @@ end
 function xml.getTextOfDirectChildren(el)
 	local buffer = {}
 	for _, childNode in ipairs(el) do
-		if !!(IS_TEXT`childNode`) then  table.insert(buffer, childNode)  end
+		if @@IS_TEXT(childNode) then  table.insert(buffer, childNode)  end
 	end
 	return table.concat(buffer)
 end
@@ -732,7 +733,7 @@ do
 		end
 
 		for _, childNode in ipairs(el) do
-			if !!(IS_TEXT`childNode`) then
+			if @@IS_TEXT(childNode) then
 				table.insert(buffer, childNode)
 			else
 				_getHtmlText(buffer, childNode)
@@ -800,8 +801,8 @@ do
 		if node == nil then  node = ""  end
 
 		-- Attribute string matching is straight equality, except if the pattern is a $ capture, which always succeeds.
-		if !!(IS_TEXT`node`) then
-			if not !!(IS_TEXT`patEl`) then  return false  end
+		if @@IS_TEXT(node) then
+			if not @@IS_TEXT(patEl) then  return false  end
 
 			-- print(node, patEl) -- DEBUG
 
@@ -854,7 +855,7 @@ do
 
 				local function advanceElement()
 					elChildI = elChildI + 1 -- Next child element of data.
-					while el[elChildI] and !!(IS_TEXT`el[elChildI]`) do
+					while el[elChildI] and @@IS_TEXT(el[elChildI]) do
 						elChildI = elChildI + 1
 					end
 					return elChildI <= #el
@@ -917,7 +918,7 @@ do
 
 		xml.walk(patEl, false, function(tagName, currentEl)
 			if
-				!!(IS_TEXT`currentEl[1]`) and xml.isElement(currentEl[2]) and !!(IS_TEXT`currentEl[3]`)
+				@@IS_TEXT(currentEl[1]) and xml.isElement(currentEl[2]) and @@IS_TEXT(currentEl[3])
 				and currentEl[1]:find"%s*{{" and currentEl[3]:find"}}%s*"
 			then
 				table.remove(currentEl, 3)
@@ -1087,7 +1088,7 @@ local function shouldEncodeAsCdata(s)
 end
 
 local function nodeToXml(buffer, node)
-	if !!(IS_TEXT`node`) then
+	if @@IS_TEXT(node) then
 		if shouldEncodeAsCdata(node) then
 			table.insert(buffer, "<![CDATA[")
 			table.insert(buffer, node)
@@ -1140,7 +1141,7 @@ end
 
 -- xmlString = xml.contentsToXml( node )
 function xml.contentsToXml(node)
-	if !!(IS_TEXT`node`) then  return ""  end
+	if @@IS_TEXT(node) then  return ""  end
 
 	local buffer = {}
 	for _, childNode in ipairs(node) do
@@ -1152,7 +1153,7 @@ end
 
 
 local function nodeToXmlPretty(buffer, node, initialIndent,indent,attrIndent, indentTags)
-	if !!(IS_TEXT`node`) then
+	if @@IS_TEXT(node) then
 		if not node:find"%S" then
 			-- void
 		elseif shouldEncodeAsCdata(node) then
@@ -1245,9 +1246,52 @@ xml.__tostring = xml.toPrettyXml -- :PenlightCompatibility
 
 
 
-local function nodeToHtml(buffer, node)
-	if !!(IS_TEXT`node`) then
-		table.insert(buffer, xml.encodeMoreEntities(node))
+local function encodeEmailValue(buffer, s)
+	--
+	-- Encode characters as a mix of decimal and hexadecimal entities to
+	-- increase the chance of fooling address-harvesting bots.
+	--
+	-- We use a deterministic encoding to make unit testing possible.
+	-- We encode roughly 40% hex, 40% dec, 20% plain.
+	--
+	-- This algorithm comes from Markdown.pl by John Gruber and was based on a
+	-- filter that Matthew Wickline wrote on some mailing list in the ancient
+	-- times. Isn't programming fun?
+	--
+	local encoderHex   = {count=1, rate=.40, encode=function(c)  return F("&#x%x;", c:byte())  end}
+	local encoderDec   = {count=0, rate=.40, encode=function(c)  return F("&#%d;",  c:byte())  end}
+	local encoderPlain = {count=0, rate=.20, encode=function(c)  return c                      end}
+	local encoders     = {encoderHex, encoderDec, encoderPlain}
+
+	for pos = 1, #s do
+		for _, encoder in ipairs(encoders) do
+			encoder.count = encoder.count + encoder.rate
+		end
+
+		if encoders[2].count > encoders[1].count then  encoders[1], encoders[2] = encoders[2], encoders[1]  end
+		if encoders[3].count > encoders[2].count then  encoders[2], encoders[3] = encoders[3], encoders[2]  end
+		if encoders[2].count > encoders[1].count then  encoders[1], encoders[2] = encoders[2], encoders[1]  end
+
+		local encoder = encoders[1]
+		local c       = s:sub(pos, pos)
+
+		-- Force encoding of "@" to make the address less visible.
+		if @@CONSTSET{"@","&","<",">",'"',"'"}[c] and encoder == encoderPlain then  encoder = encoders[2]  end
+
+		table.insert(buffer, encoder.encode(c))
+		encoder.count = encoder.count - 1
+	end
+end
+
+local function nodeToHtml(buffer, node, encodeTextAsEmail)
+	if @@IS_TEXT(node) then
+		if encodeTextAsEmail and node:find("@", 1, true) then
+			-- We just assume the text is an e-mail address. It's possible
+			-- it's not. It's also possible the node is just "@".
+			encodeEmailValue(buffer, node)
+		else
+			table.insert(buffer, xml.encodeMoreEntities(node))
+		end
 		return
 	end
 
@@ -1270,7 +1314,12 @@ local function nodeToHtml(buffer, node)
 
 		if not (attrValue == "" and allowNoAttrValue) then
 			table.insert(buffer, '="')
-			table.insert(buffer, xml.encodeMoreEntities(attrValue))
+			if attrName == "href" and el.tag == "a" and attrValue:find"^[Mm][Aa][Ii][Ll][Tt][Oo]:" then
+				encodeEmailValue(buffer, attrValue)
+				encodeTextAsEmail = xml.htmlScrambleEmailAddresses
+			else
+				table.insert(buffer, xml.encodeMoreEntities(attrValue))
+			end
 			table.insert(buffer, '"')
 		end
 	end
@@ -1288,7 +1337,7 @@ local function nodeToHtml(buffer, node)
 				end
 			else
 				for _, childNode in ipairs(el) do
-					nodeToHtml(buffer, childNode)
+					nodeToHtml(buffer, childNode, encodeTextAsEmail)
 				end
 			end
 		end
@@ -1309,17 +1358,17 @@ function xml.toHtml(node, preface)
 	if preface then
 		buffer[1] = (type(preface) == "string") and preface or !(HTML_STANDARD_PREFACE.."\n")
 	end
-	nodeToHtml(buffer, node)
+	nodeToHtml(buffer, node, false)
 	return table.concat(buffer, "")
 end
 
 -- htmlString = xml.contentsToHtml( node )
 function xml.contentsToHtml(node)
-	if !!(IS_TEXT`node`) then  return ""  end
+	if @@IS_TEXT(node) then  return ""  end
 
 	local buffer = {}
 	for _, childNode in ipairs(node) do
-		nodeToHtml(buffer, childNode)
+		nodeToHtml(buffer, childNode, false)
 	end
 	return table.concat(buffer, "")
 end
@@ -1345,7 +1394,7 @@ function xml.parseXml(s, pathForError)
 		end
 
 		for _, node in ipairs(docWrapper) do
-			if not !!(IS_TEXT`node`) then
+			if not @@IS_TEXT(node) then
 				if doc then
 					fileError(pathForError, s, #s+1, "There are multiple root elements.")
 				end
@@ -1384,7 +1433,7 @@ function xml.parseHtml(s, pathForError)
 		end
 
 		for _, node in ipairs(docWrapper) do
-			if not !!(IS_TEXT`node`) then
+			if not @@IS_TEXT(node) then
 				if doc then
 					fileError(pathForError, s, #s, "There are multiple root elements.")
 				end
@@ -1527,7 +1576,7 @@ function xml.element(tagName, prototype)
 	if not prototype then
 		-- void
 
-	elseif !!(IS_TEXT`prototype`) or xml.isElement(prototype) then
+	elseif @@IS_TEXT(prototype) or xml.isElement(prototype) then
 		el[1] = prototype
 
 	else
@@ -1548,7 +1597,7 @@ xml.elem = xml.element -- :PenlightCompatibility
 
 do
 	local function _clone(node, textSubstCallback, parentEl)
-		if !!(IS_TEXT`node`) then
+		if @@IS_TEXT(node) then
 			if textSubstCallback then
 				node = textSubstCallback(node, "*TEXT", parentEl) or errorf("No value returned from text substitution callback for '*TEXT'.")
 			end
@@ -1595,7 +1644,7 @@ end
 -- nodesLookEqual = xml.compare( value1, value2 )
 -- Returns false if any value is not a node.
 function xml.compare(v1, v2)
-	if !!(IS_TEXT`v1`) and !!(IS_TEXT`v2`) then
+	if @@IS_TEXT(v1) and @@IS_TEXT(v2) then
 		return v1 == v2
 	end
 	if not (xml.isElement(v1) and xml.isElement(v2)) then
