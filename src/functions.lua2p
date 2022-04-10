@@ -1476,9 +1476,9 @@ function _G.urlize(text)
 	!ARGS "text:string"
 	text = (
 		text
-		:gsub("[%p%s]+", "-")
-		:gsub("^%-+",    "")
-		:gsub("%-+$",    "")
+		:gsub("%W+",  "-")
+		:gsub("^%-+", "")
+		:gsub("%-+$", "")
 		:lower()
 	)
 	return text == "" and "-" or text

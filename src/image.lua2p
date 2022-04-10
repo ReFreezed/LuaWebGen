@@ -54,7 +54,7 @@ function imageLib.jpegGetDimensions(path)
 
 		local blockStart = assert(file:seek("cur"))
 
-		b1, b2 = read2Bytes(file)
+		b1, b2            = read2Bytes(file)
 		local blockLength = b1*256 + b2
 
 		b1, b2, b3, b4 = read4Bytes(file)

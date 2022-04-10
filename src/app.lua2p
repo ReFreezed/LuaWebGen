@@ -22,10 +22,10 @@ local function setup()
 
 	local i = 1
 
-	local command = programArguments[i]
+	local command = programArguments[i] or "help"
 	i             = i + 1
 
-	if not command then
+	if command:find"^%-?%-?help$" or command == "/?" or command:lower() == "/help" then
 		print("Usage:")
 		print("  cd path/to/siteroot")
 		print("  webgen.exe command [options]")
@@ -1155,25 +1155,25 @@ local function setup()
 			return getContext().page.url.v:find(urlPrefix, 1, true) == 1
 		end,
 
-		subpages = function(pathPrefixOrAllowCurrentPage)
+		subpages = function(pathPrefixOrIncludeCurrentPage)
 			local subpages = {}
-			local pageCurrent, pathPrefix, allowCurrentPage
+			local pageCurrent, pathPrefix, includeCurrentPage
 
-			if type(pathPrefixOrAllowCurrentPage) == "string" then
-				pageCurrent      = nil
-				pathPrefix       = sitePathToPath(pathPrefixOrAllowCurrentPage, 2)
-				allowCurrentPage = false -- Doesn't matter.
+			if type(pathPrefixOrIncludeCurrentPage) == "string" then
+				pageCurrent        = nil
+				pathPrefix         = sitePathToPath(pathPrefixOrIncludeCurrentPage, 2)
+				includeCurrentPage = false -- Doesn't matter.
 			else
 				assertContext("template", "subpages")
-				pageCurrent      = getContext().page
-				pathPrefix       = pageCurrent._path:gsub("[^/]+$", "")
-				allowCurrentPage = pathPrefixOrAllowCurrentPage
+				pageCurrent        = getContext().page
+				pathPrefix         = pageCurrent._path:gsub("[^/]+$", "")
+				includeCurrentPage = pathPrefixOrIncludeCurrentPage
 			end
 
 			generateNonPages() -- Make sure as many non-pages as possible finish generating before any actual page begins.
 
 			for _, page in ipairs(site._pages) do
-				if (page ~= pageCurrent or allowCurrentPage) and (
+				if (page ~= pageCurrent or includeCurrentPage) and (
 					pathPrefix == ""
 					or page._path:find(pathPrefix, 1, true) == 1
 				) then
