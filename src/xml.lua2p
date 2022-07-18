@@ -1581,7 +1581,7 @@ function xml.element(tagName, prototype)
 		el[1] = prototype
 
 	else
-		for k, v in pairsSorted(prototype) do
+		for k, v in pairs(prototype) do
 			if type(k) == "string" then
 				el.attr[k] = v
 			else

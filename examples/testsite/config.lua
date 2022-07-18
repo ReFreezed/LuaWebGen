@@ -55,6 +55,7 @@ end
 
 -- After regular generation.
 config.after = function()
+	outputRaw("/raw-test.html", "So raw!")
 	print("We did it!")
 end
 

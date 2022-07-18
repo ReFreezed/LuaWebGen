@@ -1472,10 +1472,50 @@ do
 	--]]
 end
 
+!(
+local CHARACTER_PATTERN = require"src.utf8".CHARACTER_PATTERN
+local asciifiedChars    = {}
+
+for to, froms in ([[
+	a ÀÁÂÃÄÅ
+	a àáâãäå
+	e ÈÉÊË
+	e èéêë
+	i ÌÍÎÏ
+	i ìíîï
+	o ÒÓÔÕÖØ
+	o òóôõöø
+	u ÙÚÛÜ
+	u ùúûüµ
+	y ÝŸ
+	y ýÿ
+
+	c Çç
+	d Ðð
+	f ƒ
+	n Ññ
+	s Šš
+	z Žž
+
+	ae Ææ
+	fi ﬁ
+	fl ﬂ
+	oe Œœ
+	ss ß
+	th Þþ
+]]):gmatch("(%S+) +(%S+)") do
+	for from in froms:gmatch(CHARACTER_PATTERN) do
+		asciifiedChars[from] = to
+	end
+end
+)
+
+local ASCIIFIED_CHARACTERS = !(asciifiedChars)
+
 function _G.urlize(text)
 	!ARGS "text:string"
-	text = (
-		text
+	text = (text
+		:gsub(!(CHARACTER_PATTERN), ASCIIFIED_CHARACTERS)
 		:gsub("%W+",  "-")
 		:gsub("^%-+", "")
 		:gsub("%-+$", "")
